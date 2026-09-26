@@ -78,6 +78,11 @@ function isAdjacentAllowed(prevShift: string, nextShift: string): boolean {
   return false;
 }
 
+interface CanWorkOptions {
+  ignoreBreak?: boolean;
+  ignoreAdjacency?: boolean;
+}
+
 function canWork(
   emp: ScheduleEmployee,
   dayNum: number,
@@ -86,7 +91,8 @@ function canWork(
   empLastShift: string,
   currentDayIndex: number,
   schedule: string[][],
-  empIdx: number
+  empIdx: number,
+  options: CanWorkOptions = {}
 ): boolean {
   if ((shift === 'Д' || shift === 'Дп') && emp.no_day) return false;
   if ((shift === 'Н' || shift === 'Нп') && emp.no_night) return false;
@@ -96,10 +102,10 @@ function canWork(
 
   if (empLastWorkDay >= 0) {
     const gap = currentDayIndex - empLastWorkDay;
-    if (gap === 1) {
+    if (gap === 1 && !options.ignoreAdjacency) {
       if (!isAdjacentAllowed(empLastShift, shift)) return false;
     }
-    if (gap <= emp.break_days) return false;
+    if (!options.ignoreBreak && gap <= emp.break_days) return false;
   }
 
   return true;
@@ -127,6 +133,26 @@ function countShifts(scheduleRow: string[]): number {
   return scheduleRow.filter(s => s !== '').length;
 }
 
+// Преференс = жёсткое ограничение: сотрудник с непустым списком preferences
+// в этот день может работать ТОЛЬКО в паре с кем-то из своего списка
+// (и только с ним — не с произвольным человеком). Если подходящего партнёра
+// на день нет — сотрудник в этот день не ставится вообще (не подставляется "кто попало").
+function hasPreferences(emp: ScheduleEmployee): boolean {
+  return emp.preferences.length > 0;
+}
+
+// Совместимость двух сотрудников для совместной смены с учётом преференций.
+// Если у сотрудника указаны преференции — партнёр обязан входить в этот список.
+function isCompatiblePair(empA: ScheduleEmployee, empB: ScheduleEmployee): boolean {
+  if (hasPreferences(empA) && !empA.preferences.includes(empB.profile_id)) return false;
+  if (hasPreferences(empB) && !empB.preferences.includes(empA.profile_id)) return false;
+  return true;
+}
+
+const ALL_SHIFTS = ['Д', 'Н', 'Дп', 'Нп'];
+// Пары "одна смена вместе": день (Д+Дп) и ночь (Н+Нп) — как в бизнес-правиле.
+const SAME_SHIFT_PAIRS: Array<[string, string]> = [['Д', 'Дп'], ['Дп', 'Д'], ['Н', 'Нп'], ['Нп', 'Н']];
+
 function generateSchedule(employees: ScheduleEmployee[], totalDays: number): string[][] {
   const active = employees.filter(e => !e.excluded);
   const n = active.length;
@@ -139,13 +165,14 @@ function generateSchedule(employees: ScheduleEmployee[], totalDays: number): str
   const idxMap = new Map<string, number>();
   active.forEach((emp, i) => idxMap.set(emp.profile_id, i));
 
-  // Build preference pairs: order-independent dedup, unidirectional works
+  // Пары преференций: только сотрудники, у которых оба совместимы друг с другом
   const prefPairs: Array<[number, number]> = [];
   const pairSeen = new Set<string>();
   active.forEach((emp, i) => {
     for (const prefId of emp.preferences) {
       const j = idxMap.get(prefId);
       if (j === undefined || j === i) continue;
+      if (!isCompatiblePair(emp, active[j])) continue;
       const key = Math.min(i, j) + ':' + Math.max(i, j);
       if (pairSeen.has(key)) continue;
       pairSeen.add(key);
@@ -153,90 +180,90 @@ function generateSchedule(employees: ScheduleEmployee[], totalDays: number): str
     }
   });
 
-  const ALL_SHIFTS = ['Д', 'Н', 'Дп', 'Нп'];
+  const pickTier = <T extends { emp: ScheduleEmployee; idx: number }>(candidates: T[]): T => {
+    candidates.sort((a, b) => {
+      const pd = a.emp.priority - b.emp.priority;
+      if (pd !== 0) return pd;
+      return countShifts(schedule[a.idx]) - countShifts(schedule[b.idx]);
+    });
+    const bestPriority = candidates[0].emp.priority;
+    const bestCount = countShifts(schedule[candidates[0].idx]);
+    const tier = candidates.filter(
+      c => c.emp.priority === bestPriority && countShifts(schedule[c.idx]) === bestCount
+    );
+    return tier[Math.floor(Math.random() * tier.length)];
+  };
 
   for (let day = 0; day < totalDays; day++) {
     const dayNum = day + 1;
-    const dayShifts: Array<{ empIdx: number; shift: string }> = [];
+    const filledIdx = new Set<number>();
+    const usedShifts = new Set<string>();
 
-    // Phase 1: Place preference pairs
+    const place = (idx: number, shift: string) => {
+      schedule[idx][day] = shift;
+      filledIdx.add(idx);
+      usedShifts.add(shift);
+    };
+
+    // Phase 1: расставляем пары преференций — строго вместе, строго в одну "смену" (день/ночь)
     const shuffledPairs = shuffleArray(prefPairs);
     for (const [i, j] of shuffledPairs) {
-      if (schedule[i][day] || schedule[j][day]) continue;
+      if (filledIdx.has(i) || filledIdx.has(j)) continue;
       const empI = active[i];
       const empJ = active[j];
-      const pairPlacements = shuffleArray([
-        ['Д', 'Н'], ['Д', 'Нп'], ['Н', 'Д'], ['Дп', 'Н'], ['Н', 'Дп'], ['Нп', 'Д'],
-      ] as Array<[string, string]>);
+      const placements = shuffleArray(SAME_SHIFT_PAIRS);
 
-      let placed = false;
-      for (const [si, sj] of pairPlacements) {
-        if (placed) break;
-        if (si === sj) continue;
+      for (const [si, sj] of placements) {
+        if (usedShifts.has(si) || usedShifts.has(sj)) continue;
         if (!getShiftTypes(empI).includes(si) || !getShiftTypes(empJ).includes(sj)) continue;
         if (!isSubTypeAllowed(si, empI) || !isSubTypeAllowed(sj, empJ)) continue;
         if (!canWork(empI, dayNum, si, empLastWorkDay[i], empLastShift[i], day, schedule, i)) continue;
         if (!canWork(empJ, dayNum, sj, empLastWorkDay[j], empLastShift[j], day, schedule, j)) continue;
-        dayShifts.push({ empIdx: i, shift: si });
-        dayShifts.push({ empIdx: j, shift: sj });
-        schedule[i][day] = si;
-        schedule[j][day] = sj;
-        placed = true;
+        place(i, si);
+        place(j, sj);
+        break;
       }
     }
 
-    // Phase 2: Fill remaining empty shift slots
-    const usedShifts = new Set(dayShifts.map(d => d.shift));
-    const emptySlots = ALL_SHIFTS.filter(s => !usedShifts.has(s));
-
-    for (const shift of shuffleArray(emptySlots)) {
-      const candidates = active
-        .map((emp, idx) => ({ emp, idx }))
-        .filter(({ emp, idx }) =>
-          !schedule[idx][day] &&
-          getShiftTypes(emp).includes(shift) &&
-          isSubTypeAllowed(shift, emp) &&
-          canWork(emp, dayNum, shift, empLastWorkDay[idx], empLastShift[idx], day, schedule, idx)
-        );
-      if (candidates.length === 0) continue;
-      candidates.sort((a, b) => {
-        const pd = a.emp.priority - b.emp.priority;
-        if (pd !== 0) return pd;
-        return countShifts(schedule[a.idx]) - countShifts(schedule[b.idx]);
-      });
-      const bestPriority = candidates[0].emp.priority;
-      const bestCount = countShifts(schedule[candidates[0].idx]);
-      const tier = candidates.filter(
-        c => c.emp.priority === bestPriority && countShifts(schedule[c.idx]) === bestCount
-      );
-      const chosen = tier[Math.floor(Math.random() * tier.length)];
-      dayShifts.push({ empIdx: chosen.idx, shift });
-      schedule[chosen.idx][day] = shift;
-    }
-
-    // Phase 3: Force-fill any remaining empty slots
-    const usedAfterPhase2 = new Set(dayShifts.map(d => d.shift));
-    const stillEmpty = ALL_SHIFTS.filter(s => !usedAfterPhase2.has(s));
-    for (const shift of stillEmpty) {
-      const forced = active
-        .map((emp, idx) => ({ emp, idx }))
-        .filter(({ emp, idx }) =>
-          !schedule[idx][day] &&
-          canWork(emp, dayNum, shift, empLastWorkDay[idx], empLastShift[idx], day, schedule, idx)
-        )
-        .sort((a, b) => a.emp.priority - b.emp.priority);
-      if (forced.length > 0) {
-        const bestP = forced[0].emp.priority;
-        const topTier = forced.filter(c => c.emp.priority === bestP);
-        const chosen = topTier[Math.floor(Math.random() * topTier.length)];
-        dayShifts.push({ empIdx: chosen.idx, shift });
-        schedule[chosen.idx][day] = shift;
+    // Phase 2: оставшиеся слоты — только сотрудниками БЕЗ преференций
+    // (сотрудник с преференциями, не нашедший пару, в этот день не ставится вообще)
+    const fillEmptySlots = (opts: CanWorkOptions) => {
+      const emptySlots = ALL_SHIFTS.filter(s => !usedShifts.has(s));
+      for (const shift of shuffleArray(emptySlots)) {
+        const candidates = active
+          .map((emp, idx) => ({ emp, idx }))
+          .filter(({ emp, idx }) =>
+            !filledIdx.has(idx) &&
+            !hasPreferences(emp) &&
+            getShiftTypes(emp).includes(shift) &&
+            isSubTypeAllowed(shift, emp) &&
+            canWork(emp, dayNum, shift, empLastWorkDay[idx], empLastShift[idx], day, schedule, idx, opts)
+          );
+        if (candidates.length === 0) continue;
+        const chosen = pickTier(candidates);
+        place(chosen.idx, shift);
       }
-    }
+    };
 
-    for (const { empIdx, shift } of dayShifts) {
-      empLastWorkDay[empIdx] = day;
-      empLastShift[empIdx] = shift;
+    // Строгий проход
+    fillEmptySlots({});
+    // Если строго ровно 4 в день не набралось — постепенно ослабляем отдых/смежность
+    // (правило "преференция — только с этими людьми" при этом никогда не нарушается)
+    if (usedShifts.size < 4) fillEmptySlots({ ignoreAdjacency: true });
+    if (usedShifts.size < 4) fillEmptySlots({ ignoreAdjacency: true, ignoreBreak: true });
+
+    // Phase 3: если совсем не хватает свободных "безпреференсных" сотрудников —
+    // в крайнем случае берём и сотрудников с преференциями, но ТОЛЬКО если для них
+    // в этот день в принципе нет совместимого партнёра ни при каких раскладах —
+    // такого сотрудника всё равно не ставим одного (жёсткое правило), поэтому здесь
+    // просто пытаемся полностью снятыми мягкими ограничениями добрать оставшихся
+    // безпреференсных кандидатов ещё раз (уже сделано выше) — форс сверх этого не делаем,
+    // чтобы не нарушить правило преференций.
+
+    for (const idx of filledIdx) {
+      const shift = schedule[idx][day];
+      empLastWorkDay[idx] = day;
+      empLastShift[idx] = shift;
     }
   }
 

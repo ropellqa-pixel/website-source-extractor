@@ -524,8 +524,8 @@ export default function EmployeeSettingsModal({
 
               {/* Предпочтение */}
               <div className="bg-card rounded-lg p-3">
-                <label className="block text-sm font-medium text-foreground mb-2">Предпочтение (с кем ставить в смену)</label>
-                <p className="text-xs text-muted-foreground mb-2">Выберите сотрудников, с которыми этот человек работает в паре (Д+Дп или Н+Нп — одна смена)</p>
+                <label className="block text-sm font-medium text-foreground mb-2">Ограничение по напарнику (строго только с этими людьми)</label>
+                <p className="text-xs text-muted-foreground mb-2">Это не предпочтение, а жёсткое условие: в смену этот сотрудник ставится ТОЛЬКО вместе с одним из выбранных (Д+Дп или Н+Нп — одна смена). Если ни один из них не работает в этот день — сотрудник не ставится вовсе.</p>
                 <button
                   type="button"
                   onClick={() => setShowPrefList(!showPrefList)}
@@ -586,7 +586,7 @@ export default function EmployeeSettingsModal({
                 )}
 
                 <p className="text-xs text-muted-foreground mt-2">
-                  Правило: Д + Дп = одна смена, Н + Нп = одна смена. Если А preferring Б — алгоритм ставит их в один день.
+                  Правило: Д + Дп = одна смена, Н + Нп = одна смена. Если у А указан Б — они либо работают в один день вместе, либо не работают вовсе.
                 </p>
               </div>
 
