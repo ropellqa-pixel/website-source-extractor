@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
 import { db } from '@/lib/sdk';
-import { updateVkProfileLink } from '../lib/vkBinding';
+import { createVkBindCode, getVkStatus, unbindVk } from '../lib/vkBinding';
 import RotationSettings from '../components/RotationSettings';
 import {
   Settings as SettingsIcon, User, Building2, Bell, Shield,
   Save, Lock, Mail, Phone, Globe, KeyRound, Eye, EyeOff,
   RefreshCw, Copy, Check, Unlock, Banknote, Calendar,
-  Link, ExternalLink
+  Link
 } from 'lucide-react';
 
 interface PinCode {
@@ -31,24 +31,6 @@ interface Profile {
 
 const SECRET_CODE = '2535';
 const DIRECTOR_PIN = '2152';
-
-function normalizeVkLink(raw: string): string {
-  let v = raw.trim()
-  // Убираем пробелы
-  v = v.replace(/\s+/g, '')
-  // Если просто число — это ID
-  if (/^\d+$/.test(v)) return 'https://vk.com/id' + v
-  // Добавляем https:// если нет протокола
-  if (v && !v.startsWith('http')) v = 'https://' + v
-  return v
-}
-
-function isValidVkLink(raw: string): boolean {
-  if (!raw.trim()) return false
-  const normalized = normalizeVkLink(raw)
-  // vk.com/id12345, vk.com/username, vk.com/id12345?w=...
-  return /^https?:\/\/(www\.)?vk\.com\/.+/i.test(normalized)
-}
 
 async function loadGlobalSalarySettings() {
   const { data, error } = await db.from('salary_settings').select('*').is('month_year', null).limit(1);
@@ -162,11 +144,12 @@ export default function Settings() {
   const [schSaved, setSchSaved] = useState(false);
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
 
-  const [vkLink, setVkLink] = useState('');
   const [vkLinked, setVkLinked] = useState(false);
-  const [vkLinkSaved, setVkLinkSaved] = useState(false);
+  const [vkLink, setVkLink] = useState('');
+  const [vkBindCode, setVkBindCode] = useState<string | null>(null);
   const [vkBindingLoading, setVkBindingLoading] = useState(false);
   const [vkError, setVkError] = useState('');
+  const [vkProfileId, setVkProfileId] = useState<string | null>(null);
 
   const tabs = [
     { id: 'profile', label: 'Профиль', icon: User },
@@ -188,64 +171,38 @@ export default function Settings() {
   const loadProfileVk = async () => {
     if (!user) return;
     try {
-      const { data } = await db.from('profiles').select('vk_link, vk_id').eq('user_id', user.id).limit(1);
+      const { data } = await db.from('profiles').select('id, vk_link, vk_id').eq('user_id', user.id).limit(1);
       if (data && data.length > 0) {
+        setVkProfileId(data[0].id as string);
         setVkLink((data[0].vk_link as string) || '');
         setVkLinked(!!data[0].vk_id);
+        const status = await getVkStatus(data[0].id as string);
+        setVkBindCode(status?.code || null);
       }
     } catch (e) { console.error('Load VK link error:', e); }
   };
 
-  const handleSaveVkLink = async () => {
-    if (!user) return;
-    setVkError('');
-    setVkLinkSaved(false);
-    const normalized = normalizeVkLink(vkLink);
-    if (!isValidVkLink(normalized)) {
-      setVkError('Введите ссылку VK (например: vk.com/id12345)');
-      return;
-    }
-    try {
-      setVkLink(normalized);
-      const { data, error: profileReadError } = await db.from('profiles').select('id').eq('user_id', user.id).limit(1);
-      if (profileReadError) throw profileReadError;
-      if (data && data.length > 0) {
-        await updateVkProfileLink(data[0].id, normalized);
-      } else {
-        const { error: profileWriteError } = await db.from('profiles').insert({ vk_link: normalized, user_id: user.id });
-        if (profileWriteError) throw profileWriteError;
-      }
-      setVkLinkSaved(true);
-      setTimeout(() => setVkLinkSaved(false), 2000);
-    } catch (e) { console.error('Save VK link error:', e); setVkError('Ошибка сохранения ссылки VK'); }
-  };
-
-  const handleBindVk = async () => {
-    if (!user || !vkLink.trim()) return;
+  /** Генерирует 6-значный код для привязки своего аккаунта к боту VK. */
+  const handleGenerateVkCode = async () => {
+    if (!vkProfileId) { setVkError('Профиль не найден. Сохраните ФИО.'); return; }
     setVkError('');
     setVkBindingLoading(true);
     try {
-      const normalized = normalizeVkLink(vkLink);
-      if (!isValidVkLink(normalized)) {
-        setVkError('Введите ссылку VK (например: vk.com/id12345)');
-        setVkBindingLoading(false);
-        return;
-      }
-
-      setVkLink(normalized);
-
-      const { data: profileData } = await db.from('profiles').select('id').eq('user_id', user.id).limit(1);
-      if (!profileData || profileData.length === 0) {
-        setVkError('Профиль не найден. Сохраните ФИО.');
-        setVkBindingLoading(false);
-        return;
-      }
-      await updateVkProfileLink(profileData[0].id, normalized, true);
-
-      setVkLinkSaved(true);
-      setTimeout(() => setVkLinkSaved(false), 3000);
-    } catch (e) { console.error('Bind VK error:', e); setVkError('Ошибка создания заявки'); }
+      const code = await createVkBindCode(vkProfileId);
+      if (!code) { setVkError('Не удалось создать код. Попробуйте ещё раз.'); return; }
+      setVkBindCode(code);
+    } catch (e) { console.error('Generate VK code error:', e); setVkError('Ошибка создания кода'); }
     finally { setVkBindingLoading(false); }
+  };
+
+  const handleUnbindOwnVk = async () => {
+    if (!vkProfileId) return;
+    try {
+      await unbindVk(vkProfileId);
+      setVkLinked(false);
+      setVkLink('');
+      setVkBindCode(null);
+    } catch (e) { console.error('Unbind VK error:', e); setVkError('Ошибка отвязки'); }
   };
 
   const loadQuickLoginData = async () => {
@@ -474,46 +431,44 @@ export default function Settings() {
                     Привязка VK
                   </h2>
                   <p className="text-sm text-muted-foreground mb-4">
-                    Привяжите ваш VK для уведомлений в боте.
+                    Привяжите VK, чтобы получать табель и расчёт зарплаты сообщением от бота.
                   </p>
-                  {vkLinked && (
-                    <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
-                      <p className="text-sm text-emerald-600 font-medium">✅ VK уже привязан</p>
+                  {vkError && (
+                    <div className="mb-3 p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
+                      <p className="text-xs text-red-600">{vkError}</p>
                     </div>
                   )}
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs text-muted-foreground mb-1 font-medium">Ваш VK ID или ссылка</label>
-                      <div className="relative">
-                        <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <input type="text" value={vkLink}
-                          onChange={(e) => { setVkLink(e.target.value); setVkError(''); }}
-                          className="w-full bg-secondary border border-border rounded-lg pl-10 pr-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base"
-                          placeholder="12345 или vk.com/id12345" />
+                  {vkLinked ? (
+                    <div className="space-y-3">
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg flex items-center gap-2">
+                        <Check className="w-5 h-5 text-emerald-600 shrink-0" />
+                        <p className="text-sm text-emerald-600 font-medium">VK привязан{vkLink ? ` (${vkLink})` : ''}</p>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">Можно ввести чистый ID (напр. 12345), ссылку (vk.com/id12345) или полную ссылку (https://vk.com/id12345)</p>
-                    </div>
-                    {vkError && (
-                      <div className="p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
-                        <p className="text-xs text-red-600">{vkError}</p>
-                      </div>
-                    )}
-                    <div className="flex gap-2">
-                      <button onClick={handleSaveVkLink}
-                        className="px-4 py-2 bg-secondary hover:bg-border text-foreground text-sm rounded-lg transition-all flex items-center gap-1">
-                        <Save className="w-3 h-3" />
-                        {vkLinkSaved ? 'Сохранено!' : 'Сохранить ссылку'}
-                      </button>
-                      <button onClick={handleBindVk} disabled={!vkLink.trim() || vkBindingLoading}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-all flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <Link className="w-3 h-3" />
-                        {vkBindingLoading ? 'Отправка...' : 'Привязать VK'}
+                      <button onClick={handleUnbindOwnVk}
+                        className="w-full py-2 border border-red-500/30 rounded-lg text-sm text-red-600 hover:bg-red-500/10 transition-all">
+                        Отвязать VK
                       </button>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      После привязки отправьте боту /начало
-                    </p>
-                  </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {vkBindCode ? (
+                        <div className="p-4 bg-secondary rounded-lg border border-blue-500/30 text-center">
+                          <p className="text-xs text-muted-foreground mb-2">Код привязки</p>
+                          <p className="font-mono text-3xl text-blue-600 tracking-widest font-bold">{vkBindCode}</p>
+                          <p className="text-xs text-muted-foreground mt-2">Отправьте этот код боту АнодБИЗ ВКонтакте</p>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-secondary rounded-lg border border-border text-center">
+                          <p className="text-xs text-muted-foreground">Нажмите «Получить код» — придёт 6-значный код для отправки боту</p>
+                        </div>
+                      )}
+                      <button onClick={handleGenerateVkCode} disabled={vkBindingLoading}
+                        className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+                        <RefreshCw className="w-4 h-4" />
+                        {vkBindingLoading ? 'Создание...' : vkBindCode ? 'Новый код' : 'Получить код'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

@@ -1,0 +1,40 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "GET status without profile_id fails",
+      "method": "GET",
+      "path": "/?action=status",
+      "expectedStatus": 400
+    },
+    {
+      "name": "POST unknown action fails",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "unknown"},
+      "expectedStatus": 400
+    },
+    {
+      "name": "Generate code for test profile",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "generate_code", "profile_id": "test-profile-tests-json"},
+      "expectedStatus": 200,
+      "expectedBody": {"code": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Status returns generated pending code",
+      "method": "GET",
+      "path": "/?action=status&profile_id=test-profile-tests-json",
+      "expectedStatus": 200,
+      "expectedBody": {"code": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

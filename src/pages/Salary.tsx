@@ -6,6 +6,9 @@ import {
   ArrowLeft, Plus, Trash2, Banknote, Calculator,
   Save, Lock, Send, Settings2, Unlock, UserCheck, Loader2, CheckCircle
 } from 'lucide-react';
+import func2url from '../../backend/func2url.json';
+
+const VK_API_URL = func2url['vk-api'];
 
 interface Profile {
   id: string;
@@ -457,13 +460,15 @@ export default function Salary() {
   }
 
   // === BROADCAST SALARY ===
+  // Каждая строка зарплаты (по ФИО = profile_id) отправляется строго тому сотруднику,
+  // которому принадлежит эта строка — никаких сводных рассылок всем.
   async function handleDistributeSalary() {
     setBroadcasting(true);
     setBroadcastResult('');
     try {
       const responsibleName = responsibleId ? getProfileName(responsibleId) : '—';
       const monthName = MONTHS[selectedMonth - 1];
-      let sent = 0;
+      const items: { vk_user_id: string; message: string }[] = [];
       let skipped = 0;
 
       for (const row of calculatedRows) {
@@ -471,78 +476,75 @@ export default function Salary() {
         if (!profile || !profile.vk_id) { skipped++; continue; }
 
         const msg = [
-          'В базу обработки АнодБИЗ поступил расчёт зарплаты!',
+          '💰 Расчёт зарплаты — АнодБИЗ',
           '',
-          'Ответственный: ' + responsibleName,
+          `${monthName} ${selectedYear}`,
+          `Сотрудник: ${profile.full_name}`,
+          `Ответственный: ${responsibleName}`,
           '',
-          'За ' + monthName + ' ' + selectedYear,
+          `Часы: ${row.hours_worked || 0}`,
+          `Час/Руб: ${fmt(row.d)}`,
+          `Отпускные: ${fmt(row.vacation_pay || 0)}`,
+          `Безнал: ${fmt(row.non_cash || 0)}`,
+          `Перебор: ${fmt(row.overtime || 0)}`,
+          `Налог: ${fmt(row.tax || 0)}`,
+          row.underpayment ? `Недоплата: ${fmt(row.underpayment)}` : '',
           '',
-          'ФИ: ' + profile.full_name,
-          'Часы: ' + (row.hours_worked || 0),
-          'Час/Руб: ' + fmt(row.d),
-          'Отпускные: ' + fmt(row.vacation_pay || 0),
-          'Безнал: ' + fmt(row.non_cash || 0),
-          'Перебор: ' + fmt(row.overtime || 0),
-          'Налог: ' + fmt(row.tax || 0),
-          row.underpayment ? 'Недоплата: ' + fmt(row.underpayment) : '',
-          'ИТОГ: ' + fmt(row.i),
+          `ИТОГО: ${fmt(row.i)} ₽`,
         ].filter(Boolean).join('\n');
 
-        await db.from('broadcast_tasks').insert({
-          type: 'salary',
-          period: selectedPeriod,
-          target_vk_id: Number(profile.vk_id),
-          profile_id: profile.id,
-          responsible_name: responsibleName,
-          message_text: msg,
-          status: 'pending',
-        });
-        sent++;
+        items.push({ vk_user_id: profile.vk_id, message: msg });
       }
 
-      // Also broadcast manager rows
+      // Строки менеджеров — тоже строго по ФИО, каждому своя строка
       for (const row of calculatedManagerRows) {
         const profile = getProfileById(row.profile_id);
         if (!profile || !profile.vk_id) { skipped++; continue; }
 
         const msg = [
-          'В базу обработки АнодБИЗ поступил расчёт зарплаты!',
+          '💰 Расчёт зарплаты — АнодБИЗ',
           '',
-          'Ответственный: ' + responsibleName,
+          `${monthName} ${selectedYear}`,
+          `Сотрудник: ${profile.full_name}`,
+          `Ответственный: ${responsibleName}`,
           '',
-          'За ' + monthName + ' ' + selectedYear,
+          `Часы (ОСН): ${row.osn_hours || 0}`,
+          `Часы (ДОП): ${row.dop_hours || 0}`,
+          `Час/Руб: ${fmt(row.hr)}`,
+          `Доплаты: ${fmt(row.doplaty || 0)}`,
+          `Отпускные: ${fmt(row.vacation_pay || 0)}`,
+          `Безнал: ${fmt(row.non_cash || 0)}`,
+          row.underpayment ? `Недоплата: ${fmt(row.underpayment)}` : '',
           '',
-          'ФИ: ' + profile.full_name,
-          'Часы (ОСН): ' + (row.osn_hours || 0),
-          'Часы (ДОП): ' + (row.dop_hours || 0),
-          'Час/Руб: ' + fmt(row.hr),
-          'Доплаты: ' + fmt(row.doplaty || 0),
-          'Отпускные: ' + fmt(row.vacation_pay || 0),
-          'Безнал: ' + fmt(row.non_cash || 0),
-          row.underpayment ? 'Недоплата: ' + fmt(row.underpayment) : '',
-          'ИТОГ: ' + fmt(row.itog),
+          `ИТОГО: ${fmt(row.itog)} ₽`,
         ].filter(Boolean).join('\n');
 
-        await db.from('broadcast_tasks').insert({
-          type: 'salary',
-          period: selectedPeriod,
-          target_vk_id: Number(profile.vk_id),
-          profile_id: profile.id,
-          responsible_name: responsibleName,
-          message_text: msg,
-          status: 'pending',
-        });
-        sent++;
+        items.push({ vk_user_id: profile.vk_id, message: msg });
       }
 
+      if (items.length === 0) {
+        setBroadcastResult('✗ Ни у кого из списка зарплаты не привязан VK — рассылка не отправлена.');
+        setTimeout(() => setBroadcastResult(''), 6000);
+        return;
+      }
+
+      const res = await fetch(VK_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'broadcast', items }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Ошибка отправки');
+
       setBroadcastResult(
-        skipped > 0
-          ? '✓ Создано ' + sent + ' персональных задач (только свои данные). Пропущено без VK: ' + skipped + '.'
-          : '✓ Создано ' + sent + ' персональных задач на отправку. Каждому сотруднику придёт только его расчёт — сводки всем не отправляются.'
+        '✓ Отправлено ' + result.sent + ' из ' + items.length + ' персональных расчётов' +
+        (skipped > 0 ? '. Без VK: ' + skipped + '.' : '.') +
+        (result.failed > 0 ? ' Не доставлено: ' + result.failed + '.' : '') +
+        ' Каждому уходит только его строка.'
       );
-          } catch (e) {
+    } catch (e) {
       console.error('Broadcast error:', e);
-      setBroadcastResult('✗ Ошибка при создании рассылки');
+      setBroadcastResult('✗ Ошибка при отправке рассылки');
       setTimeout(() => setBroadcastResult(''), 5000);
     } finally {
       setBroadcasting(false);
@@ -935,22 +937,22 @@ export default function Salary() {
         </div>
       </main>
 
-      {/* Bottom bar */}
-      {(isDeputy || isResponsiblePerson()) && (
+      {/* Bottom bar — рассылка доступна любому сотруднику с доступом в систему */}
+      {calculatedRows.length > 0 && (
         <div className="sticky bottom-0 bg-card backdrop-blur-sm border-t border-border px-4 py-3">
           <div className="max-w-full mx-auto flex items-center justify-end gap-3">
-            {isDeputy && (
-              <button onClick={handleDistributeSalary} disabled={broadcasting || calculatedRows.length === 0}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                {broadcasting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                {broadcasting ? 'Отправка...' : 'Рассылка'}
+            <button onClick={handleDistributeSalary} disabled={broadcasting || calculatedRows.length === 0}
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+              {broadcasting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              {broadcasting ? 'Отправка...' : 'Рассылка'}
+            </button>
+            {(isDeputy || isResponsiblePerson()) && (
+              <button onClick={saveAll} disabled={saving || (periodLocked && managerLocked)}
+                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50">
+                {periodLocked ? <Lock className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                {saving ? 'Сохранение...' : (periodLocked && managerLocked) ? 'Заблокировано' : 'Сохранить'}
               </button>
             )}
-            <button onClick={saveAll} disabled={saving || (periodLocked && managerLocked)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50">
-              {periodLocked ? <Lock className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-              {saving ? 'Сохранение...' : (periodLocked && managerLocked) ? 'Заблокировано' : 'Сохранить'}
-            </button>
           </div>
           {broadcastResult && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30 px-4">

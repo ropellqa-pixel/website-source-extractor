@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../lib/auth';
 import { db, auth } from '@/lib/sdk';
-import { createVkBindCode, getVkBindCode } from '../lib/vkBinding';
+import { createVkBindCode, getVkStatus, unbindVk } from '../lib/vkBinding';
 import {
   Users, UserPlus, Search, Trash2, Shield, Pencil,
   MoreVertical, Check, X, KeyRound, Plus, Copy, RefreshCw, LogIn,
@@ -130,22 +130,30 @@ export default function Employees() {
     try {
       const { data: profs, error: profErr } = await db.from('profiles').select('*').order('created_at', { ascending: false });
       if (profErr) console.error('[Employees] Profiles error:', profErr);
-      if (profs) setEmployees(profs as EmployeeProfile[]);
+      const profileList = (profs as EmployeeProfile[]) || [];
+      if (profs) setEmployees(profileList);
 
       const { data: pc, error: pcErr } = await db.from('pin_codes').select('*');
       if (pcErr) console.error('[Employees] Pin codes error:', pcErr);
       if (pc) setPins(pc as PinCode[]);
 
-      const { data: vkb, error: vkbErr } = await db.from('vk_bindings').select('*');
-      if (vkbErr) console.error('[Employees] VK bindings error:', vkbErr);
-      if (vkb) setVkBindings(vkb as VkBinding[]);
-
-      const { data: codes, error: codeErr } = await db.from('vk_bind_codes').select('*');
-      if (codeErr) console.error('[Employees] VK bind codes error:', codeErr);
-      if (codes) {
-        const pending = (codes as any[]).find(c => c.status === 'pending');
-        setBindCode(pending?.code || null);
-      }
+      // Статусы привязки VK хранятся на сервере (подтверждает бот), запрашиваем по каждому сотруднику
+      const statuses = await Promise.all(profileList.map(p => getVkStatus(p.id)));
+      const bindings: VkBinding[] = [];
+      profileList.forEach((p, i) => {
+        const s = statuses[i];
+        if (s?.binding) {
+          bindings.push({
+            id: p.id,
+            profile_id: p.id,
+            vk_user_id: s.binding.vk_user_id,
+            vk_link: s.binding.vk_link,
+            status: s.binding.status,
+            message: s.binding.message,
+          });
+        }
+      });
+      setVkBindings(bindings);
     } catch (err) {
       console.error('Load error:', err);
     } finally {
@@ -258,7 +266,7 @@ export default function Employees() {
   const handleDeleteEmployee = async (emp: EmployeeProfile) => {
     try {
       await db.from('pin_codes').delete().eq('email', emp.email);
-      await db.from('vk_bindings').delete().eq('profile_id', emp.id);
+      await unbindVk(emp.id);
       const { error } = await db.from('profiles').delete().eq('id', emp.id);
       if (error) {
         showToast(`Ошибка удаления: ${getErrorMessage(error)}`, 'error');
@@ -285,7 +293,7 @@ export default function Employees() {
       hasSystemAccess: emp.has_system_access,
     });
     setVkLinkInput(emp.vk_link || '');
-    getVkBindCode(emp.id).then(c => setBindCode(c)).catch(() => setBindCode(null));
+    getVkStatus(emp.id).then(s => setBindCode(s?.code || null)).catch(() => setBindCode(null));
     setShowEditModal(true);
     setShowMenu(null);
   };
@@ -314,9 +322,7 @@ export default function Employees() {
   const handleUnbindVk = async () => {
     if (!selectedEmployee) return;
     try {
-      await db.from('vk_bindings').delete().eq('profile_id', selectedEmployee.id);
-      await db.from('vk_bind_codes').delete().eq('profile_id', selectedEmployee.id);
-      await db.from('profiles').update({ vk_link: null, vk_id: null }).eq('id', selectedEmployee.id);
+      await unbindVk(selectedEmployee.id);
       setVkLinkInput('');
       setBindCode(null);
       showToast('VK отвязан');

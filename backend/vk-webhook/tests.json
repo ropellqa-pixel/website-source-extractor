@@ -1,0 +1,19 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unknown event type returns ok",
+      "method": "POST",
+      "path": "/",
+      "body": {"type": "unknown_event"},
+      "expectedStatus": 200,
+      "expectedBody": "ok",
+      "bodyMatcher": "partial"
+    }
+  ]
+}

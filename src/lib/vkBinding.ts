@@ -1,88 +1,72 @@
 import { db } from '@/lib/sdk';
+import func2url from '../../backend/func2url.json';
 
-/** Генерирует 6-значный код привязки. */
-function generateBindCode(): string {
-  let result = '';
-  for (let i = 0; i < 6; i++) result += Math.floor(Math.random() * 10).toString();
-  return result;
+const VK_API_URL = func2url['vk-api'];
+
+interface VkStatusResponse {
+  code: string | null;
+  binding: {
+    vk_user_id: number | null;
+    vk_link: string | null;
+    status: string;
+    message: string | null;
+  } | null;
 }
 
-/** Создаёт новый код привязки для профиля. Возвращает код или null. */
+/** Создаёт новый код привязки для профиля на сервере. Возвращает код или null. */
 export async function createVkBindCode(profileId: string): Promise<string | null> {
-  // Удаляем старые pending коды этого профиля
-  await db.from('vk_bind_codes').delete().eq('profile_id', profileId).eq('status', 'pending');
-
-  // Генерируем уникальный код
-  let code = generateBindCode();
-  let attempts = 0;
-  while (attempts < 50) {
-    const { data } = await db.from('vk_bind_codes').select('id').eq('code', code).limit(1);
-    if (!data || data.length === 0) break;
-    code = generateBindCode();
-    attempts++;
-  }
-
-  const { error } = await db.from('vk_bind_codes').insert({
-    profile_id: profileId,
-    code,
-    status: 'pending',
-  });
-  if (error) {
-    console.error('[VkBind] insert error:', error);
+  try {
+    const res = await fetch(VK_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'generate_code', profile_id: profileId }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.code || null;
+  } catch (e) {
+    console.error('[VkBind] generate_code error:', e);
     return null;
   }
-  return code;
 }
 
-/** Проверяет, есть ли активный код для профиля. */
+/** Проверяет, есть ли активный код для профиля, и статус привязки. */
 export async function getVkBindCode(profileId: string): Promise<string | null> {
-  const { data, error } = await db.from('vk_bind_codes')
-    .select('code, status')
-    .eq('profile_id', profileId)
-    .eq('status', 'pending')
-    .limit(1);
-  if (error || !data?.length) return null;
-  return data[0].code;
+  try {
+    const res = await fetch(`${VK_API_URL}?action=status&profile_id=${encodeURIComponent(profileId)}`);
+    if (!res.ok) return null;
+    const data: VkStatusResponse = await res.json();
+    return data.code || null;
+  } catch (e) {
+    console.error('[VkBind] status error:', e);
+    return null;
+  }
 }
 
-/** Сохраняет ссылку VK и существующую заявку как одну логическую операцию. */
-export async function updateVkProfileLink(profileId: string, vkLink: string, requestBinding = false): Promise<void> {
-  const { data: profiles, error: profileReadError } = await db.from('profiles')
-    .select('id, vk_link, vk_id').eq('id', profileId).limit(1);
-  if (profileReadError) throw profileReadError;
-  if (!profiles?.length) throw new Error('Профиль не найден');
-  const profile = profiles[0];
-
-  const { data: bindings, error: bindingReadError } = await db.from('vk_bindings')
-    .select('id, vk_link, status').eq('profile_id', profileId).limit(1);
-  if (bindingReadError) throw bindingReadError;
-  const binding = bindings?.[0];
-  const bindingLinkChanged = !!binding && binding.vk_link !== vkLink;
-  const waitingMessage = 'Ожидание привязки по коду';
-
-  if (binding) {
-    if (bindingLinkChanged) {
-      const { error } = await db.from('vk_bindings').update({
-        vk_link: vkLink, vk_user_id: null, status: 'pending', message: waitingMessage,
-      }).eq('id', binding.id);
-      if (error) throw error;
-    } else if (requestBinding && !profile.vk_id && binding.status !== 'pending') {
-      const { error } = await db.from('vk_bindings').update({
-        status: 'pending', message: waitingMessage,
-      }).eq('id', binding.id);
-      if (error) throw error;
-    }
-  } else if (requestBinding) {
-    const { error } = await db.from('vk_bindings').insert({
-      profile_id: profileId, vk_link: vkLink, status: 'pending', message: waitingMessage,
-    });
-    if (error) throw error;
+/** Полный статус привязки (код + подтверждённая привязка), для страницы Сотрудники. */
+export async function getVkStatus(profileId: string): Promise<VkStatusResponse | null> {
+  try {
+    const res = await fetch(`${VK_API_URL}?action=status&profile_id=${encodeURIComponent(profileId)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    console.error('[VkBind] status error:', e);
+    return null;
   }
+}
 
-  const profileLinkChanged = profile.vk_link !== vkLink;
-  const { error: profileWriteError } = await db.from('profiles').update({
-    vk_link: vkLink,
-    ...(profileLinkChanged || bindingLinkChanged ? { vk_id: null } : {}),
-  }).eq('id', profileId);
-  if (profileWriteError) throw profileWriteError;
+/** Отвязывает VK на сервере и очищает ссылку в профиле. */
+export async function unbindVk(profileId: string): Promise<void> {
+  await fetch(VK_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'unbind', profile_id: profileId }),
+  });
+  await db.from('profiles').update({ vk_link: null, vk_id: null }).eq('id', profileId);
+}
+
+/** Сохраняет ссылку VK в профиле (сам факт привязки подтверждает бот по коду). */
+export async function updateVkProfileLink(profileId: string, vkLink: string): Promise<void> {
+  const { error } = await db.from('profiles').update({ vk_link: vkLink }).eq('id', profileId);
+  if (error) throw error;
 }

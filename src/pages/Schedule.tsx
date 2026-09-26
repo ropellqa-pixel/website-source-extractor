@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { db, storage } from '@/lib/sdk';
+import { db } from '@/lib/sdk';
 import { useAuth } from '../lib/auth';
 import { LogOut, ArrowLeft, Save, Send, Lock, Unlock, RefreshCw, Pencil, Trash2, Printer, Loader2, CheckCircle, X, Eye, EyeOff } from 'lucide-react';
 import AnodBizLogo from '../components/AnodBizLogo';
 import EmployeeSettingsModal from '../components/EmployeeSettingsModal';
+import func2url from '../../backend/func2url.json';
+
+const VK_API_URL = func2url['vk-api'];
 
 const RUSSIAN_MONTHS = [
   'Январь','Февраль','Март','Апрель','Май','Июнь',
@@ -657,50 +660,45 @@ export default function Schedule() {
     try {
       const responsibleProfile = allProfiles.find(p => p.id === scheduleResponsibleId);
       const responsibleName = responsibleProfile?.full_name || '—';
+      // Картинка табеля одна на всех — рисуем один раз и отправляем всем сотрудникам из списка табеля
       const photoDataUrl = await createScheduleImage(monthYear, rows, getDaysInMonth());
-      // Картинка графика одна на всех: кладём в storage и кладём ВСЕМ ссылку + текст.
-      let photoUrl = '';
-      try {
-        const blob = await (await fetch(photoDataUrl)).blob();
-        const file = new File([blob], 'schedule-' + monthYear.replace('.', '-') + '.png', { type: 'image/png' });
-        const up = await storage.upload('schedule', file);
-        if (up && up.url) photoUrl = up.url;
-      } catch {
-        photoUrl = '';
-      }
+      const rowProfileIds = new Set(rows.map(r => r.profile_id));
+
       const text = [
         'В базу АнодБИЗ поступили данные о расписании!',
         '',
         'Ответственный: ' + responsibleName,
         '',
         'На ' + monthYear,
-        photoUrl ? 'График (фото): ' + photoUrl : '',
-      ].filter(Boolean).join('\n');
-      let sent = 0;
-      let skipped = 0;
-      for (const profile of allProfiles) {
-        if (!profile.vk_id || !profile.full_name) { skipped++; continue; }
-        await db.from('broadcast_tasks').insert({
-          type: 'schedule',
-          period: monthYear,
-          target_vk_id: Number(profile.vk_id),
-          profile_id: profile.id,
-          responsible_name: responsibleName,
-          message_text: text,
-          photo_url: photoUrl,
-          status: 'pending',
-        });
-        sent++;
+      ].join('\n');
+
+      const targets = allProfiles.filter(p => rowProfileIds.has(p.id));
+      const items = targets.filter(p => p.vk_id).map(p => ({ vk_user_id: p.vk_id, message: text }));
+      const skipped = targets.length - items.length;
+
+      if (items.length === 0) {
+        setBroadcastResult('✗ Ни у кого из табеля не привязан VK — рассылка не отправлена.');
+        setTimeout(() => setBroadcastResult(''), 6000);
+        return;
       }
+
+      const res = await fetch(VK_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'broadcast', items, photo_base64: photoDataUrl }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Ошибка отправки');
+
       setBroadcastResult(
-        photoUrl
-          ? '✓ Создано ' + sent + ' задач на отправку. Всем сотрудникам уйдёт текст и ссылка на фото графика.'
-          : '✓ Создано ' + sent + ' задач на отправку, но фото загрузить не удалось — уйдёт только текст. Используйте «Печать» для табеля с картинкой.'
+        '✓ Табель (фото) отправлен в VK: ' + result.sent + ' из ' + items.length +
+        (skipped > 0 ? '. Без VK: ' + skipped + '.' : '.') +
+        (result.failed > 0 ? ' Не доставлено: ' + result.failed + '.' : '')
       );
       setTimeout(() => setBroadcastResult(''), 8000);
     } catch (e) {
       console.error('Schedule broadcast error:', e);
-      setBroadcastResult('✗ Ошибка при создании рассылки');
+      setBroadcastResult('✗ Ошибка при отправке рассылки');
       setTimeout(() => setBroadcastResult(''), 5000);
     } finally {
       setBroadcasting(false);
