@@ -1,21 +1,8 @@
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/sdk';
-
-const SHIFT_OPTIONS = ['Д', 'Н', 'Дп', 'Нп'] as const;
-
-const ASSIGNMENT_OPTIONS = [
-  { value: 'СТ', label: 'СТ (Старший)' },
-  { value: 'МЛ', label: 'МЛ (Младший)' },
-  { value: 'ЛБ', label: 'ЛБ (Любой)' },
-] as const;
-
-const PRIORITY_OPTIONS = [
-  { value: 1, label: '1 — Срочно' },
-  { value: 2, label: '2 — Необходимо' },
-  { value: 3, label: '3 — Размерено' },
-  { value: 4, label: '4 — Меньше' },
-  { value: 5, label: '5 — Редко' },
-] as const;
+import EmployeeVariableSettings from './EmployeeVariableSettings';
+import EmployeePermanentSettings from './EmployeePermanentSettings';
+import EmployeePreferencesAndExclude from './EmployeePreferencesAndExclude';
 
 interface EmployeeConfig {
   id: string;
@@ -258,81 +245,6 @@ export default function EmployeeSettingsModal({
     setConfig({ ...config, preferences: updated.join(',') });
   };
 
-  const preferenceIds = config.preferences ? config.preferences.split(',').filter(Boolean) : [];
-  const otherEmployees = allEmployees.filter(e => e.id !== employee.id);
-
-  const parseDelayDates = (): number[] => {
-    if (!config.delay || !config.delay.trim()) return [];
-    const result: number[] = [];
-    const parts = config.delay.split(/[,;]+/).map(s => s.trim()).filter(Boolean);
-    for (const part of parts) {
-      if (part.includes('-')) {
-        const [a, b] = part.split('-').map(Number);
-        if (!isNaN(a) && !isNaN(b)) {
-          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) result.push(i);
-        }
-      } else {
-        const n = parseInt(part);
-        if (!isNaN(n)) result.push(n);
-      }
-    }
-    return result;
-  };
-
-  const parseUnavailDates = (): number[] => {
-    if (!config.unavailable || !config.unavailable.trim()) return [];
-    const result: number[] = [];
-    const parts = config.unavailable.split(/[,;]+/).map(s => s.trim()).filter(Boolean);
-    for (const part of parts) {
-      if (part.includes('-')) {
-        const [a, b] = part.split('-').map(Number);
-        if (!isNaN(a) && !isNaN(b)) {
-          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) result.push(i);
-        }
-      } else {
-        const n = parseInt(part);
-        if (!isNaN(n)) result.push(n);
-      }
-    }
-    return result;
-  };
-
-  const parsePermDelayDates = (): number[] => {
-    if (!config.perm_delays || !config.perm_delays.trim()) return [];
-    const result: number[] = [];
-    const parts = config.perm_delays.split(/[,;]+/).map(s => s.trim()).filter(Boolean);
-    for (const part of parts) {
-      if (part.includes('-')) {
-        const [a, b] = part.split('-').map(Number);
-        if (!isNaN(a) && !isNaN(b)) {
-          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) result.push(i);
-        }
-      } else {
-        const n = parseInt(part);
-        if (!isNaN(n)) result.push(n);
-      }
-    }
-    return result;
-  };
-
-  const parsePermUnavailDates = (): number[] => {
-    if (!config.perm_unavailable || !config.perm_unavailable.trim()) return [];
-    const result: number[] = [];
-    const parts = config.perm_unavailable.split(/[,;]+/).map(s => s.trim()).filter(Boolean);
-    for (const part of parts) {
-      if (part.includes('-')) {
-        const [a, b] = part.split('-').map(Number);
-        if (!isNaN(a) && !isNaN(b)) {
-          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) result.push(i);
-        }
-      } else {
-        const n = parseInt(part);
-        if (!isNaN(n)) result.push(n);
-      }
-    }
-    return result;
-  };
-
   if (loading) {
     return (
       <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm flex items-center justify-center z-[200]">
@@ -366,282 +278,53 @@ export default function EmployeeSettingsModal({
         </div>
 
         <div className="overflow-y-auto flex-1 px-6 py-4">
-          {/* === ПЕРЕМЕННЫЕ НАСТРОЙКИ === */}
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold text-amber-600 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Переменные настройки
-            </h3>
-            <p className="text-xs text-muted-foreground mb-3">Действуют только в текущем месяце ({monthYear})</p>
+          <EmployeeVariableSettings
+            monthYear={monthYear}
+            delay={config.delay}
+            unavailable={config.unavailable}
+            onChangeDelay={value => setConfig({ ...config, delay: value })}
+            onChangeUnavailable={value => setConfig({ ...config, unavailable: value })}
+          />
 
-            <div className="bg-secondary rounded-xl p-4 space-y-4">
-              <div className="bg-card rounded-lg p-3">
-                <label className="block text-sm font-medium text-foreground mb-2">Отсрочка (на месяц)</label>
-                <input type="text" value={config.delay} onChange={e => setConfig({...config, delay: e.target.value})} placeholder="1-5,7,10-15" className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
-                <p className="text-xs text-muted-foreground mt-1">Дни, когда сотрудник НЕ ставится в этом месяце</p>
-                {config.delay.trim() && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {parseDelayDates().filter(d => d >= 1 && d <= 31).map(d => (
-                      <span key={d} className="px-1.5 py-0.5 bg-red-500/20 text-red-700 text-xs rounded">{d}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-card rounded-lg p-3">
-                <label className="block text-sm font-medium text-foreground mb-2">Недоступен (на месяц)</label>
-                <input type="text" value={config.unavailable} onChange={e => setConfig({...config, unavailable: e.target.value})} placeholder="10-15,28-30" className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
-                <p className="text-xs text-muted-foreground mt-1">Дни, когда сотрудник полностью недоступен в этом месяце</p>
-                {config.unavailable.trim() && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {parseUnavailDates().filter(d => d >= 1 && d <= 31).map(d => (
-                      <span key={d} className="px-1.5 py-0.5 bg-muted text-foreground/80 text-xs rounded">{d}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* === ПОСТОЯННЫЕ НАСТРОЙКИ === */}
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold text-emerald-600 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              Постоянные настройки
-            </h3>
-            <p className="text-xs text-muted-foreground mb-3">Действуют всегда и сохраняются на все месяцы</p>
-
-            <div className="bg-secondary rounded-xl p-4 space-y-4">
-              {/* Запреты */}
-              <div className="grid grid-cols-2 gap-4">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" checked={config.no_day} onChange={e => setConfig({...config, no_day: e.target.checked})} className="w-5 h-5 rounded border-border text-blue-500 focus:ring-ring bg-secondary" />
-                  <div>
-                    <span className="text-sm font-medium text-foreground">Запрет дня</span>
-                    <p className="text-xs text-muted-foreground">Не ставить на дневные смены</p>
-                  </div>
-                </label>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" checked={config.no_night} onChange={e => setConfig({...config, no_night: e.target.checked})} className="w-5 h-5 rounded border-border text-blue-500 focus:ring-ring bg-secondary" />
-                  <div>
-                    <span className="text-sm font-medium text-foreground">Запрет ночи</span>
-                    <p className="text-xs text-muted-foreground">Не ставить на ночные смены</p>
-                  </div>
-                </label>
-              </div>
-
-              {/* Перерыв */}
-              <div className="bg-card rounded-lg p-3">
-                <label className="block text-sm font-medium text-foreground mb-2">Перерыв (дней)</label>
-                <div className="flex items-center gap-3">
-                  <input type="number" min={0} max={7} value={config.break_days} onChange={e => setConfig({...config, break_days: Number(e.target.value)})} className="w-20 bg-secondary border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
-                  <p className="text-xs text-muted-foreground">Минимальный перерыв между сменами (дни отдыха)</p>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">0 = каждый день; 1 = через день; 2 = 2 дня отдыха</p>
-              </div>
-
-              {/* Приоритет */}
-              <div className="bg-card rounded-lg p-3">
-                <label className="block text-sm font-medium text-foreground mb-2">Приоритет</label>
-                <select value={config.priority} onChange={e => setConfig({...config, priority: Number(e.target.value)})} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-ring">
-                  {PRIORITY_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Назначение */}
-              <div className="bg-card rounded-lg p-3">
-                <label className="block text-sm font-medium text-foreground mb-2">Назначение</label>
-                <select value={config.assignment} onChange={e => setConfig({...config, assignment: e.target.value})} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-ring mb-3">
-                  {ASSIGNMENT_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-
-                {config.assignment === 'ЛБ' && (
-                  <div className="bg-background rounded-lg p-3 space-y-3">
-                    <p className="text-xs text-muted-foreground mb-2">Настройки для конкретных типов смен:</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="bg-card rounded-lg p-2">
-                        <p className="text-xs font-medium text-foreground mb-2">СТ (Старший)</p>
-                        <label className="flex items-center gap-2 text-xs text-foreground/80 mb-1">
-                          <input type="checkbox" checked={config.st_no_day} onChange={e => setConfig({...config, st_no_day: e.target.checked})} className="rounded" />
-                          Запрет дня
-                        </label>
-                        <label className="flex items-center gap-2 text-xs text-foreground/80">
-                          <input type="checkbox" checked={config.st_no_night} onChange={e => setConfig({...config, st_no_night: e.target.checked})} className="rounded" />
-                          Запрет ночи
-                        </label>
-                      </div>
-                      <div className="bg-card rounded-lg p-2">
-                        <p className="text-xs font-medium text-foreground mb-2">МЛ (Младший)</p>
-                        <label className="flex items-center gap-2 text-xs text-foreground/80 mb-1">
-                          <input type="checkbox" checked={config.ml_no_day} onChange={e => setConfig({...config, ml_no_day: e.target.checked})} className="rounded" />
-                          Запрет дня
-                        </label>
-                        <label className="flex items-center gap-2 text-xs text-foreground/80">
-                          <input type="checkbox" checked={config.ml_no_night} onChange={e => setConfig({...config, ml_no_night: e.target.checked})} className="rounded" />
-                          Запрет ночи
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Постоянные дни задержки */}
-              <div className="bg-card rounded-lg p-3">
-                <label className="block text-sm font-medium text-foreground mb-2">Задержка (постоянная)</label>
-                <input type="text" value={config.perm_delays} onChange={e => setConfig({...config, perm_delays: e.target.value})} placeholder="1-5,7,10-15" className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
-                <p className="text-xs text-muted-foreground mt-1">Дни, когда сотрудник НЕ ставится — каждый месяц</p>
-                {config.perm_delays.trim() && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {parsePermDelayDates().filter(d => d >= 1 && d <= 31).map(d => (
-                      <span key={d} className="px-1.5 py-0.5 bg-red-500/20 text-red-700 text-xs rounded">{d}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Постоянные недоступные дни */}
-              <div className="bg-card rounded-lg p-3">
-                <label className="block text-sm font-medium text-foreground mb-2">Недоступен (постоянно)</label>
-                <input type="text" value={config.perm_unavailable} onChange={e => setConfig({...config, perm_unavailable: e.target.value})} placeholder="10-15,28-30" className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
-                <p className="text-xs text-muted-foreground mt-1">Дни, когда сотрудник полностью недоступен — каждый месяц</p>
-                {config.perm_unavailable.trim() && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {parsePermUnavailDates().filter(d => d >= 1 && d <= 31).map(d => (
-                      <span key={d} className="px-1.5 py-0.5 bg-muted text-foreground/80 text-xs rounded">{d}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Предпочтение */}
-              <div className="bg-card rounded-lg p-3">
-                <label className="block text-sm font-medium text-foreground mb-2">Ограничение по напарнику (строго только с этими людьми)</label>
-                <p className="text-xs text-muted-foreground mb-2">Это не предпочтение, а жёсткое условие: в смену этот сотрудник ставится ТОЛЬКО вместе с одним из выбранных (Д+Дп или Н+Нп — одна смена). Если ни один из них не работает в этот день — сотрудник не ставится вовсе.</p>
-                <button
-                  type="button"
-                  onClick={() => setShowPrefList(!showPrefList)}
-                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-foreground text-left flex items-center justify-between hover:bg-secondary transition-all"
-                >
-                  <span>
-                    {preferenceIds.length === 0
-                      ? 'Выбрать сотрудников...'
-                      : `${preferenceIds.length} выбр.`
-                    }
-                  </span>
-                  <svg className={`w-4 h-4 text-muted-foreground transition-transform ${showPrefList ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-
-                {preferenceIds.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {preferenceIds.map(pid => {
-                      const emp = allEmployees.find(e => e.id === pid);
-                      return emp ? (
-                        <span key={pid} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-500/20 text-blue-700 text-xs rounded-full">
-                          {emp.full_name}
-                          <button type="button" onClick={() => togglePreference(pid)} className="hover:text-foreground">
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </span>
-                      ) : null;
-                    })}
-                  </div>
-                )}
-
-                {showPrefList && (
-                  <div className="mt-2 bg-background border border-border rounded-lg max-h-48 overflow-y-auto">
-                    {otherEmployees.map(emp => {
-                      const isSelected = preferenceIds.includes(emp.id);
-                      return (
-                        <button
-                          key={emp.id}
-                          type="button"
-                          onClick={() => togglePreference(emp.id)}
-                          className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-secondary transition-all ${isSelected ? 'text-blue-700 bg-blue-500/10' : 'text-foreground/80'}`}
-                        >
-                          <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-border'}`}>
-                            {isSelected && (
-                              <svg className="w-3 h-3 text-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </div>
-                          {emp.full_name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <p className="text-xs text-muted-foreground mt-2">
-                  Правило: Д + Дп = одна смена, Н + Нп = одна смена. Если у А указан Б — они либо работают в один день вместе, либо не работают вовсе.
-                </p>
-              </div>
-
-              {/* Удаление / Восстановление */}
-              <div className={`rounded-lg p-3 border ${config.excluded ? 'bg-red-500/10 border-red-500/30' : 'bg-card border-border'}`}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">
-                      {config.excluded ? 'Сотрудник исключён из табеля' : 'Удаление из табеля'}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {config.excluded
-                        ? 'Не участвует в генерации расписания. Можно вернуть.'
-                        : 'Сотрудник не будет участвовать в расписании'}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => config.excluded ? handleToggleExcluded() : setShowExcludeConfirm(true)}
-                    disabled={saving}
-                    className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                      config.excluded
-                        ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                        : 'bg-red-600 text-white hover:bg-red-700'
-                    } disabled:opacity-50`}
-                  >
-                    {config.excluded ? 'Вернуть в табель' : 'Удалить'}
-                  </button>
-                </div>
-
-                {showExcludeConfirm && (
-                  <div className="mt-3 p-3 bg-red-500/10 rounded-lg border border-red-500/20">
-                    <p className="text-sm text-red-700 mb-3">Вы уверены? Сотрудник исключён не будет из таблицы настроек, но исчезнет из расписания.</p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleToggleExcluded}
-                        disabled={saving}
-                        className="px-4 py-1.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
-                      >
-                        Да, исключить
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowExcludeConfirm(false)}
-                        className="px-4 py-1.5 bg-muted text-foreground rounded-lg text-sm font-medium hover:bg-border"
-                      >
-                        Отмена
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <EmployeePermanentSettings
+            noDay={config.no_day}
+            noNight={config.no_night}
+            breakDays={config.break_days}
+            priority={config.priority}
+            assignment={config.assignment}
+            stNoDay={config.st_no_day}
+            stNoNight={config.st_no_night}
+            mlNoDay={config.ml_no_day}
+            mlNoNight={config.ml_no_night}
+            permDelays={config.perm_delays}
+            permUnavailable={config.perm_unavailable}
+            onChangeNoDay={value => setConfig({ ...config, no_day: value })}
+            onChangeNoNight={value => setConfig({ ...config, no_night: value })}
+            onChangeBreakDays={value => setConfig({ ...config, break_days: value })}
+            onChangePriority={value => setConfig({ ...config, priority: value })}
+            onChangeAssignment={value => setConfig({ ...config, assignment: value })}
+            onChangeStNoDay={value => setConfig({ ...config, st_no_day: value })}
+            onChangeStNoNight={value => setConfig({ ...config, st_no_night: value })}
+            onChangeMlNoDay={value => setConfig({ ...config, ml_no_day: value })}
+            onChangeMlNoNight={value => setConfig({ ...config, ml_no_night: value })}
+            onChangePermDelays={value => setConfig({ ...config, perm_delays: value })}
+            onChangePermUnavailable={value => setConfig({ ...config, perm_unavailable: value })}
+          >
+            <EmployeePreferencesAndExclude
+              employeeId={employee.id}
+              preferences={config.preferences}
+              allEmployees={allEmployees}
+              showPrefList={showPrefList}
+              onToggleShowPrefList={() => setShowPrefList(!showPrefList)}
+              onTogglePreference={togglePreference}
+              excluded={config.excluded}
+              showExcludeConfirm={showExcludeConfirm}
+              saving={saving}
+              onShowExcludeConfirm={() => setShowExcludeConfirm(true)}
+              onCancelExcludeConfirm={() => setShowExcludeConfirm(false)}
+              onToggleExcluded={handleToggleExcluded}
+            />
+          </EmployeePermanentSettings>
         </div>
 
         {/* Footer */}
