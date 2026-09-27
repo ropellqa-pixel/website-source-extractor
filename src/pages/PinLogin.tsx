@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { db } from '@/lib/sdk';
+import { auth } from '@/lib/sdk';
 import { ArrowLeft, Zap, Loader2 } from 'lucide-react';
 
 export default function PinLogin() {
@@ -22,47 +22,22 @@ export default function PinLogin() {
     setSuccess('');
 
     try {
-      const { data: pins, error: pinErr } = await db
-        .from('pin_codes')
-        .select('email')
-        .eq('pin', pin)
-        .limit(1);
+      const result = await auth.pinLookup(pin);
 
-      if (pinErr) {
-        console.error('Pin lookup error:', pinErr);
-        setError('Ошибка при проверке пин-кода');
-        setLoading(false);
-        return;
-      }
-
-      if (!pins || pins.length === 0) {
+      if (!result) {
         setError('Неверный пин-код');
         setLoading(false);
         return;
       }
 
-      const email = pins[0].email;
-
-      if (!email) {
-        setError('Пин-код найден, но email не привязан. Обратитесь к руководителю.');
-        setLoading(false);
-        return;
-      }
-
-      const { data: profiles } = await db
-        .from('profiles')
-        .select('full_name')
-        .eq('email', email)
-        .limit(1);
-
-      const userName = profiles?.[0]?.full_name || 'Сотрудник';
+      const { email, full_name: userName } = result;
 
       localStorage.setItem('biz_pin_match', JSON.stringify({
-        userName,
+        userName: userName || 'Сотрудник',
         profileEmail: email,
       }));
 
-      setSuccess(`Найден: ${userName}. Переход...`);
+      setSuccess(`Найден: ${userName || 'Сотрудник'}. Переход...`);
       await new Promise(resolve => setTimeout(resolve, 500));
 
       navigate('/pin-auth');

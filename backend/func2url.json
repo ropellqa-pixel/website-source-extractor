@@ -1,4 +1,7 @@
 {
+  "auth-api": "https://functions.poehali.dev/0cc75331-123f-465b-a6da-01ba5f142bfa",
+  "data-api": "https://functions.poehali.dev/e40aca0d-1c72-49c0-84a1-cf57b44984ec",
+  "file-upload": "https://functions.poehali.dev/5250ef3b-f3ae-4031-9d3c-2ca46f38a8bc",
   "vk-webhook": "https://functions.poehali.dev/ac301249-d3c3-47ba-bf45-516a862afcb6",
   "vk-api": "https://functions.poehali.dev/8052b0a3-f890-4e4c-a096-d88bf48724e0"
 }

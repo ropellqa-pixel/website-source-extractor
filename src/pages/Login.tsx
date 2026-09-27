@@ -112,7 +112,6 @@ export default function Login() {
         <div className="mt-4 rounded-xl border border-border bg-card/60 p-4 text-left text-[13px] text-muted-foreground">
           <p className="font-medium text-foreground mb-1">Демо-доступ</p>
           <p>Директор: director@anodbiz.ru · пароль anodbiz · PIN 1234</p>
-          <p>Сотрудник: petrova@anodbiz.ru · пароль anodbiz · PIN 2222</p>
         </div>
 
         <div className="mt-6 text-center text-muted-foreground text-sm">

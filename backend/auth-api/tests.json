@@ -1,0 +1,42 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unknown action",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "unknown"},
+      "expectedStatus": 400
+    },
+    {
+      "name": "Signin demo director",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "signin", "email": "director@anodbiz.ru", "password": "anodbiz"},
+      "expectedStatus": 200,
+      "expectedBody": {"user": {"email": "director@anodbiz.ru"}},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Signin wrong password",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "signin", "email": "director@anodbiz.ru", "password": "wrong"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Pin lookup demo director",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "pin_lookup", "pin": "1234"},
+      "expectedStatus": 200,
+      "expectedBody": {"email": "director@anodbiz.ru"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

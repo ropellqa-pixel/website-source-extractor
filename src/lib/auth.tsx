@@ -43,19 +43,31 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+/** Компания хранится в реальной БД (одна запись с id='main' — система для одной компании). */
+async function loadCompany(): Promise<Company | null> {
+  const { data } = await db.from('companies').select('*').eq('id', 'main').maybeSingle();
+  if (!data) return null;
+  return {
+    id: data.id,
+    name: data.name || '',
+    inn: data.inn || '',
+    ogrn: data.ogrn || '',
+    type: (data.type as 'ИП' | 'ООО') || 'ООО',
+    createdAt: data.created_at || '',
+  };
+}
+
 /**
  * Определяем роль пользователя.
- * 1. Если пользователь — admin в Lork Auth → director (это владелец аккаунта платформы)
+ * 1. Если пользователь — admin (первый зарегистрированный) → director
  * 2. Иначе ищем профиль по user_id (надёжнее email) в таблице profiles
  * 3. Fallback: поиск по email (независимо от регистра)
  * 4. Если профиль не найден → employee (безопасный fallback)
  */
 async function resolveUserRole(authEmail: string, authUserId: string): Promise<{ role: UserRole; fullName: string; profileId: string; department: string }> {
-  // Проверяем auth admin роль — владелец платформы всегда director
   try {
     const roles = await auth.getRoles();
     if (roles.includes('admin')) {
-      // Владелец платформы — director. Ищем профиль для fullName и department
       const { data } = await db
         .from('profiles')
         .select('id, full_name, department')
@@ -70,10 +82,8 @@ async function resolveUserRole(authEmail: string, authUserId: string): Promise<{
     console.error('Auth roles check error:', e);
   }
 
-  // Не admin — ищем профиль: сначала по user_id (надёжно), затем по email (fallback)
   let profile = null;
 
-  // 1. Поиск по user_id — самый надёжный способ
   if (authUserId) {
     const { data } = await db
       .from('profiles')
@@ -83,7 +93,6 @@ async function resolveUserRole(authEmail: string, authUserId: string): Promise<{
     if (data && data.length > 0) profile = data[0];
   }
 
-  // 2. Fallback: поиск по email
   if (!profile) {
     const { data, error } = await db
       .from('profiles')
@@ -109,16 +118,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
-  const [savedCredentials, setSavedCredentials] = useState<{ email: string; password: string } | null>(null);
 
-  const buildUser = useCallback(async (authUser: any): Promise<User | null> => {
+  const buildUser = useCallback(async (authUser: any, existingCompany?: Company | null): Promise<User | null> => {
     if (!authUser) return null;
 
     const userId = authUser.id;
     const email = authUser.email || '';
 
-    const savedCompany = localStorage.getItem('biz_company');
-    const parsedCompany = savedCompany ? JSON.parse(savedCompany) : null;
+    const comp = existingCompany !== undefined ? existingCompany : await loadCompany();
     const { role, fullName, profileId, department } = await resolveUserRole(email, userId);
 
     return {
@@ -126,13 +133,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       login: email.split('@')[0] || '',
       role,
-      companyId: parsedCompany?.id || '',
-      companyName: parsedCompany?.name || '',
+      companyId: comp?.id || '',
+      companyName: comp?.name || '',
       fullName,
       profileId,
       department,
-      inn: parsedCompany?.inn || undefined,
-      ogrn: parsedCompany?.ogrn || undefined,
+      inn: comp?.inn || undefined,
+      ogrn: comp?.ogrn || undefined,
     };
   }, []);
 
@@ -141,10 +148,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const session = await auth.getSession();
         if (session?.user) {
-          const u = await buildUser(session.user);
+          const comp = await loadCompany();
+          setCompany(comp);
+          const u = await buildUser(session.user, comp);
           setUser(u);
-          const savedCompany = localStorage.getItem('biz_company');
-          if (savedCompany) setCompany(JSON.parse(savedCompany));
         }
       } catch (e) {
         console.error('Auth init error:', e);
@@ -165,20 +172,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password: data.password,
     });
 
-    const companyId = 'comp_' + Date.now();
-    const c: Company = {
-      id: companyId, name: data.companyName, inn: data.inn,
-      ogrn: data.ogrn, type: data.companyType, createdAt: new Date().toISOString(),
-    };
-    localStorage.setItem('biz_company', JSON.stringify(c));
-
     if (result.needs_email_confirmation) {
       return { needsEmailConfirmation: true };
     }
 
     const userId = result.user?.id;
 
-    // Создаём профиль директора в БД
+    // Компания хранится в БД — одна запись 'main' на всю систему
+    const { data: existingCompany } = await db.from('companies').select('id').eq('id', 'main').maybeSingle();
+    if (existingCompany) {
+      await db.from('companies').update({
+        name: data.companyName, inn: data.inn, ogrn: data.ogrn, type: data.companyType,
+      }).eq('id', 'main');
+    } else {
+      await db.from('companies').insert({
+        id: 'main', name: data.companyName, inn: data.inn, ogrn: data.ogrn, type: data.companyType,
+      });
+    }
+    const c: Company = {
+      id: 'main', name: data.companyName, inn: data.inn,
+      ogrn: data.ogrn, type: data.companyType, createdAt: new Date().toISOString(),
+    };
+
     if (userId) {
       try {
         const { error: profileErr } = await db.from('profiles').insert({
@@ -203,7 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: data.email,
       login: data.email.split('@')[0],
       role: 'director',
-      companyId,
+      companyId: 'main',
       companyName: data.companyName,
       fullName: data.fullName,
       department: 'Руководство',
@@ -212,7 +227,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     setUser(u);
     setCompany(c);
-    setSavedCredentials({ email: data.email, password: data.password });
 
     return {};
   };
@@ -224,25 +238,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error('Не удалось войти. Проверьте email и пароль.');
     }
 
-    const u = await buildUser(result.user);
+    const comp = await loadCompany();
+    setCompany(comp);
+    const u = await buildUser(result.user, comp);
     setUser(u);
-    const savedCompany = localStorage.getItem('biz_company');
-    if (savedCompany) setCompany(JSON.parse(savedCompany));
-    setSavedCredentials({ email, password });
   };
 
   const signOut = async () => {
     await auth.signOut();
-    localStorage.removeItem('biz_pin_match');
     setUser(null);
     setCompany(null);
-    setSavedCredentials(null);
   };
 
   const refreshUser = async () => {
     const session = await auth.getSession();
     if (session?.user) {
-      const u = await buildUser(session.user);
+      const comp = await loadCompany();
+      setCompany(comp);
+      const u = await buildUser(session.user, comp);
       setUser(u);
     }
   };
@@ -265,7 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
-  return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
 }
