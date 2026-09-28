@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '@/lib/sdk';
 import { useAuth } from '../lib/auth';
+import { getAllVkBindings } from '../lib/vkBinding';
 import { LogOut, ArrowLeft, Save, Send, Lock, Unlock, RefreshCw, Pencil, Trash2, Printer, Loader2, CheckCircle, X, Eye, EyeOff } from 'lucide-react';
 import AnodBizLogo from '../components/AnodBizLogo';
 import EmployeeSettingsModal from '../components/EmployeeSettingsModal';
@@ -665,15 +666,19 @@ export default function Schedule() {
       const rowProfileIds = new Set(rows.map(r => r.profile_id));
 
       const text = [
-        'В базу АнодБИЗ поступили данные о расписании!',
+        '📅 РАСПИСАНИЕ ОБНОВЛЕНО',
+        '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬',
+        `🏢 АнодБИЗ · ${monthYear}`,
         '',
-        'Ответственный: ' + responsibleName,
+        `👔 Ответственный: ${responsibleName}`,
         '',
-        'На ' + monthYear,
+        'В базу поступили новые данные о расписании — смотрите приложенный табель.',
       ].join('\n');
 
+      // Привязки VK хранятся отдельно на сервере (подтверждает бот) — берём их одним запросом
+      const vkBindings = await getAllVkBindings();
       const targets = allProfiles.filter(p => rowProfileIds.has(p.id));
-      const items = targets.filter(p => p.vk_id).map(p => ({ vk_user_id: p.vk_id, message: text }));
+      const items = targets.filter(p => vkBindings[p.id]).map(p => ({ vk_user_id: vkBindings[p.id], message: text }));
       const skipped = targets.length - items.length;
 
       if (items.length === 0) {
