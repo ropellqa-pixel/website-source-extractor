@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import SideNav from './SideNav';
+import { useChatNotifications } from '@/hooks/useChatNotifications';
 
 interface Notice {
   text: string;
@@ -15,6 +16,8 @@ export default function AppShell({ children, notice }: { children: ReactNode; no
     text: 'Зарплата за сентябрь рассчитана по табелю.',
     link: { label: 'Проверить ›', to: '/salary' },
   };
+
+  useChatNotifications();
 
   return (
     <div className="app-grid">

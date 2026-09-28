@@ -1,15 +1,23 @@
+import { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import AnodBizLogo from '@/components/AnodBizLogo';
 import { useAuth } from '@/lib/auth';
 import { ROLE_LABELS, initials, shortName, visibleNav } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
+import { getUnreadCount, subscribeUnread } from '@/lib/chatUnread';
 
 export default function SideNav({ onNavigate }: { onNavigate?: () => void }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const items = visibleNav(user?.role);
   const name = user?.fullName || user?.email || '';
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    setUnread(getUnreadCount());
+    return subscribeUnread(setUnread);
+  }, []);
 
   return (
     <div className="flex h-full flex-col px-4 pt-[18px] pb-5">
@@ -37,7 +45,12 @@ export default function SideNav({ onNavigate }: { onNavigate?: () => void }) {
                 }
               >
                 <Icon name={item.icon} size={17} strokeWidth={1.5} className="shrink-0" />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {item.path === '/chat' && unread > 0 && (
+                  <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-semibold text-white">
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                )}
               </NavLink>
             </div>
           );
