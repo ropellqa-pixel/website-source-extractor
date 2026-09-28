@@ -3,6 +3,7 @@ import os
 import re
 import uuid as uuidlib
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 import psycopg2
@@ -28,11 +29,20 @@ CORS_HEADERS = {
 IDENT_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 
 
+def _json_default(value: Any) -> Any:
+    # Decimal (numeric-колонки Postgres) должны стать настоящими числами в JSON,
+    # иначе фронтенд складывает их как строки ("0"+"0"+"5" = "005" вместо 5)
+    if isinstance(value, Decimal):
+        as_float = float(value)
+        return int(as_float) if as_float.is_integer() else as_float
+    return str(value)
+
+
 def _resp(status: int, payload: Any) -> Dict[str, Any]:
     return {
         'statusCode': status,
         'headers': {**CORS_HEADERS, 'Content-Type': 'application/json'},
-        'body': json.dumps(payload, ensure_ascii=False, default=str),
+        'body': json.dumps(payload, ensure_ascii=False, default=_json_default),
     }
 
 

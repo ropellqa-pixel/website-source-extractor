@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../lib/auth';
 import { db, auth } from '@/lib/sdk';
 import { createVkBindCode, getVkStatus, unbindVk } from '../lib/vkBinding';
+import { PIN_ADPODS } from '../lib/pinAdpods';
 import {
   Users, UserPlus, Search, Trash2, Shield, Pencil,
   MoreVertical, Check, X, KeyRound, Plus, Copy, RefreshCw, LogIn,
@@ -27,6 +28,7 @@ interface PinCode {
   pin: string;
   email: string;
   shortcut_code: string;
+  adpod_slug?: string | null;
 }
 
 interface VkBinding {
@@ -78,6 +80,7 @@ export default function Employees() {
   const menuRef = useRef<HTMLDivElement>(null);
   const [vkLinkInput, setVkLinkInput] = useState('');
   const [bindCode, setBindCode] = useState<string | null>(null);
+  const [selectedAdpodSlug, setSelectedAdpodSlug] = useState<string>('');
   const [generatingCode, setGeneratingCode] = useState(false);
   const [newEmployee, setNewEmployee] = useState({
     fullName: '',
@@ -336,10 +339,15 @@ export default function Employees() {
     return vkBindings.find(b => b.profile_id === emp.id);
   };
 
-  const handleGeneratePin = async (employeeProfile: EmployeeProfile) => {
+  const handleGeneratePin = async (employeeProfile: EmployeeProfile, adpodSlug: string) => {
     try {
       if (!employeeProfile.has_system_access) {
         showToast('У сотрудника нет доступа в систему', 'error');
+        return null;
+      }
+
+      if (!adpodSlug) {
+        showToast('Сначала выберите адресный поддомен (АдПод)', 'error');
         return null;
       }
 
@@ -371,6 +379,7 @@ export default function Employees() {
         pin,
         email,
         shortcut_code: 'default',
+        adpod_slug: adpodSlug,
       });
 
       if (error) {
@@ -603,7 +612,7 @@ export default function Employees() {
                                 Редактировать
                               </button>
                               <button
-                                onClick={() => { setSelectedEmployee(employee); setShowPinModal(true); setShowMenu(null); }}
+                                onClick={() => { setSelectedEmployee(employee); setSelectedAdpodSlug(''); setShowPinModal(true); setShowMenu(null); }}
                                 className="w-full px-4 py-2.5 text-left text-sm text-foreground hover:bg-secondary flex items-center gap-2 transition-colors"
                                 disabled={!employee.has_system_access}
                               >
@@ -871,6 +880,7 @@ export default function Employees() {
               {(() => {
                 const empPin = getPinForEmployee(selectedEmployee);
                 if (empPin) {
+                  const boundAdpod = PIN_ADPODS.find(a => a.slug === empPin.adpod_slug);
                   return (
                     <>
                       <p className="text-sm text-muted-foreground mb-3">Текущий пин-код:</p>
@@ -880,10 +890,33 @@ export default function Employees() {
                           {copiedId === `pin-modal-${selectedEmployee.id}` ? <Check className="w-5 h-5 text-emerald-600" /> : <Copy className="w-5 h-5" />}
                         </button>
                       </div>
-                      <button onClick={async () => { await handleGeneratePin(selectedEmployee); }} disabled={!selectedEmployee.has_system_access} className="mt-4 w-full py-2 border border-dashed border-border rounded-lg text-sm text-muted-foreground hover:text-amber-600 hover:border-amber-500 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <RefreshCw className="w-4 h-4" />
-                        Сгенерировать новый пин
-                      </button>
+                      {boundAdpod && (
+                        <p className="text-xs text-muted-foreground mt-3">
+                          Привязан к адресу: <span className="font-medium text-foreground">{boundAdpod.label}</span> ({boundAdpod.path})
+                        </p>
+                      )}
+
+                      <div className="mt-5 pt-4 border-t border-border text-left">
+                        <p className="text-xs text-muted-foreground mb-2">Чтобы сгенерировать новый пин, выберите адресный поддомен (АдПод) — привязку изменить нельзя, только пересоздать пин:</p>
+                        <select
+                          value={selectedAdpodSlug}
+                          onChange={(e) => setSelectedAdpodSlug(e.target.value)}
+                          className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-amber-500 mb-3"
+                        >
+                          <option value="">— Выберите АдПод —</option>
+                          {PIN_ADPODS.map(a => (
+                            <option key={a.slug} value={a.slug}>{a.label} ({a.path})</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={async () => { await handleGeneratePin(selectedEmployee, selectedAdpodSlug); setSelectedAdpodSlug(''); }}
+                          disabled={!selectedEmployee.has_system_access || !selectedAdpodSlug}
+                          className="w-full py-2 border border-dashed border-border rounded-lg text-sm text-muted-foreground hover:text-amber-600 hover:border-amber-500 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                          Сгенерировать новый пин
+                        </button>
+                      </div>
                     </>
                   );
                 } else {
@@ -891,7 +924,24 @@ export default function Employees() {
                     <>
                       <KeyRound className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
                       <p className="text-muted-foreground mb-4">Пин-код ещё не создан</p>
-                      <button onClick={async () => { await handleGeneratePin(selectedEmployee); }} disabled={!selectedEmployee.has_system_access} className="w-full py-3 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                      <div className="text-left">
+                        <p className="text-xs text-muted-foreground mb-2">Выберите адресный поддомен (АдПод), к которому будет привязан пин-код:</p>
+                        <select
+                          value={selectedAdpodSlug}
+                          onChange={(e) => setSelectedAdpodSlug(e.target.value)}
+                          className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-amber-500 mb-3"
+                        >
+                          <option value="">— Выберите АдПод —</option>
+                          {PIN_ADPODS.map(a => (
+                            <option key={a.slug} value={a.slug}>{a.label} ({a.path})</option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        onClick={async () => { await handleGeneratePin(selectedEmployee, selectedAdpodSlug); setSelectedAdpodSlug(''); }}
+                        disabled={!selectedEmployee.has_system_access || !selectedAdpodSlug}
+                        className="w-full py-3 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
                         <Plus className="w-4 h-4" />
                         Создать пин-код
                       </button>
@@ -903,7 +953,7 @@ export default function Employees() {
 
             <div className="mt-4 p-3 bg-secondary rounded-lg border border-border">
               <p className="text-xs text-muted-foreground text-center">
-                Пин-код — ключ быстрого входа. Введите 4 цифры → система покажет имя → введите пароль.
+                Пин-код — ключ быстрого входа. Привязан к одному адресу входа: на нём вводятся только 4 цифры и сразу открывается личный кабинет.
               </p>
             </div>
           </div>

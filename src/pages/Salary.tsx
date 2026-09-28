@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../lib/auth';
 import { db } from '@/lib/sdk';
+import { getAllVkBindings } from '../lib/vkBinding';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Plus, Trash2, Banknote, Calculator,
@@ -462,6 +463,50 @@ export default function Salary() {
   // === BROADCAST SALARY ===
   // Каждая строка зарплаты (по ФИО = profile_id) отправляется строго тому сотруднику,
   // которому принадлежит эта строка — никаких сводных рассылок всем.
+  const DIVIDER = '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬';
+
+  function buildEmployeeMessage(row: any, profile: Profile, monthName: string, responsibleName: string): string {
+    return [
+      '💰 РАСЧЁТ ЗАРПЛАТЫ',
+      DIVIDER,
+      `🏢 АнодБИЗ · ${monthName} ${selectedYear}`,
+      '',
+      `👤 Сотрудник: ${profile.full_name}`,
+      `👔 Ответственный: ${responsibleName}`,
+      '',
+      `⏱ Часы: ${row.hours_worked || 0}`,
+      `💵 Час/Руб: ${fmt(row.d)}`,
+      `🌴 Отпускные: ${fmt(row.vacation_pay || 0)}`,
+      `💳 Безнал: ${fmt(row.non_cash || 0)}`,
+      `📈 Перебор: ${fmt(row.overtime || 0)}`,
+      `📉 Налог: ${fmt(row.tax || 0)}`,
+      row.underpayment ? `⚠️ Недоплата: ${fmt(row.underpayment)}` : '',
+      DIVIDER,
+      `✅ ИТОГО: ${fmt(row.i)} ₽`,
+    ].filter(Boolean).join('\n');
+  }
+
+  function buildManagerMessage(row: any, profile: Profile, monthName: string, responsibleName: string): string {
+    return [
+      '💰 РАСЧЁТ ЗАРПЛАТЫ',
+      DIVIDER,
+      `🏢 АнодБИЗ · ${monthName} ${selectedYear}`,
+      '',
+      `👤 Сотрудник: ${profile.full_name}`,
+      `👔 Ответственный: ${responsibleName}`,
+      '',
+      `⏱ Часы (ОСН): ${row.osn_hours || 0}`,
+      `⏱ Часы (ДОП): ${row.dop_hours || 0}`,
+      `💵 Час/Руб: ${fmt(row.hr)}`,
+      `➕ Доплаты: ${fmt(row.doplaty || 0)}`,
+      `🌴 Отпускные: ${fmt(row.vacation_pay || 0)}`,
+      `💳 Безнал: ${fmt(row.non_cash || 0)}`,
+      row.underpayment ? `⚠️ Недоплата: ${fmt(row.underpayment)}` : '',
+      DIVIDER,
+      `✅ ИТОГО: ${fmt(row.itog)} ₽`,
+    ].filter(Boolean).join('\n');
+  }
+
   async function handleDistributeSalary() {
     setBroadcasting(true);
     setBroadcastResult('');
@@ -471,55 +516,24 @@ export default function Salary() {
       const items: { vk_user_id: string; message: string }[] = [];
       let skipped = 0;
 
+      // Привязки VK хранятся отдельно на сервере (подтверждает бот) — берём их одним запросом
+      const vkBindings = await getAllVkBindings();
+
       for (const row of calculatedRows) {
         const profile = getProfileById(row.profile_id);
-        if (!profile || !profile.vk_id) { skipped++; continue; }
+        const vkUserId = profile ? vkBindings[profile.id] : undefined;
+        if (!profile || !vkUserId) { skipped++; continue; }
 
-        const msg = [
-          '💰 Расчёт зарплаты — АнодБИЗ',
-          '',
-          `${monthName} ${selectedYear}`,
-          `Сотрудник: ${profile.full_name}`,
-          `Ответственный: ${responsibleName}`,
-          '',
-          `Часы: ${row.hours_worked || 0}`,
-          `Час/Руб: ${fmt(row.d)}`,
-          `Отпускные: ${fmt(row.vacation_pay || 0)}`,
-          `Безнал: ${fmt(row.non_cash || 0)}`,
-          `Перебор: ${fmt(row.overtime || 0)}`,
-          `Налог: ${fmt(row.tax || 0)}`,
-          row.underpayment ? `Недоплата: ${fmt(row.underpayment)}` : '',
-          '',
-          `ИТОГО: ${fmt(row.i)} ₽`,
-        ].filter(Boolean).join('\n');
-
-        items.push({ vk_user_id: profile.vk_id, message: msg });
+        items.push({ vk_user_id: vkUserId, message: buildEmployeeMessage(row, profile, monthName, responsibleName) });
       }
 
       // Строки менеджеров — тоже строго по ФИО, каждому своя строка
       for (const row of calculatedManagerRows) {
         const profile = getProfileById(row.profile_id);
-        if (!profile || !profile.vk_id) { skipped++; continue; }
+        const vkUserId = profile ? vkBindings[profile.id] : undefined;
+        if (!profile || !vkUserId) { skipped++; continue; }
 
-        const msg = [
-          '💰 Расчёт зарплаты — АнодБИЗ',
-          '',
-          `${monthName} ${selectedYear}`,
-          `Сотрудник: ${profile.full_name}`,
-          `Ответственный: ${responsibleName}`,
-          '',
-          `Часы (ОСН): ${row.osn_hours || 0}`,
-          `Часы (ДОП): ${row.dop_hours || 0}`,
-          `Час/Руб: ${fmt(row.hr)}`,
-          `Доплаты: ${fmt(row.doplaty || 0)}`,
-          `Отпускные: ${fmt(row.vacation_pay || 0)}`,
-          `Безнал: ${fmt(row.non_cash || 0)}`,
-          row.underpayment ? `Недоплата: ${fmt(row.underpayment)}` : '',
-          '',
-          `ИТОГО: ${fmt(row.itog)} ₽`,
-        ].filter(Boolean).join('\n');
-
-        items.push({ vk_user_id: profile.vk_id, message: msg });
+        items.push({ vk_user_id: vkUserId, message: buildManagerMessage(row, profile, monthName, responsibleName) });
       }
 
       if (items.length === 0) {

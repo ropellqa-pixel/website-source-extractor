@@ -10,6 +10,8 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import PinLogin from "./pages/PinLogin";
 import PinAuth from "./pages/PinAuth";
+import AdpodPinLogin from "./pages/AdpodPinLogin";
+import { PIN_ADPODS } from "./lib/pinAdpods";
 import Dashboard from "./pages/Dashboard";
 import Documents from "./pages/Documents";
 import DocumentBase from "./pages/DocumentBase";
@@ -54,6 +56,9 @@ const App = () => (
             <Route path="/register" element={<Register />} />
             <Route path="/pin-login" element={<PinLogin />} />
             <Route path="/pin-auth" element={<PinAuth />} />
+            {PIN_ADPODS.map(adpod => (
+              <Route key={adpod.slug} path={adpod.path} element={<AdpodPinLogin adpodSlug={adpod.slug} />} />
+            ))}
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/documents" element={<ProtectedRoute><Documents /></ProtectedRoute>} />
             <Route path="/base" element={<ProtectedRoute><DocumentBase /></ProtectedRoute>} />

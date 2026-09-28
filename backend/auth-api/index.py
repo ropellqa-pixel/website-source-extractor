@@ -126,16 +126,44 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
             elif action == 'pin_lookup':
                 pin = (body.get('pin') or '').strip()
+                adpod_slug = (body.get('adpod_slug') or '').strip()
                 if len(pin) != 4 or not pin.isdigit():
                     return _resp(400, {'error': 'Пин-код должен содержать 4 цифры'})
-                cur.execute(f'SELECT email FROM {SCHEMA}.pin_codes WHERE pin = %s LIMIT 1', (pin,))
+                cur.execute(f'SELECT email, adpod_slug FROM {SCHEMA}.pin_codes WHERE pin = %s LIMIT 1', (pin,))
                 row = cur.fetchone()
                 if not row:
                     return _resp(404, {'error': 'Неверный пин-код'})
-                email = row[0]
+                email, pin_adpod_slug = row[0], row[1]
+                # Если запрос пришёл с конкретного АдПода — пин-код должен быть привязан именно к нему
+                if adpod_slug and pin_adpod_slug and adpod_slug != pin_adpod_slug:
+                    return _resp(403, {'error': 'Этот пин-код привязан к другому адресу входа'})
                 cur.execute(f'SELECT full_name FROM {SCHEMA}.profiles WHERE email = %s LIMIT 1', (email,))
                 prof = cur.fetchone()
                 return _resp(200, {'email': email, 'full_name': prof[0] if prof else 'Сотрудник'})
+
+            elif action == 'pin_signin':
+                # Прямой вход только по пин-коду (без пароля) — работает СТРОГО на адресных
+                # поддоменах (АдПод): пин-код должен быть привязан именно к переданному адресу.
+                pin = (body.get('pin') or '').strip()
+                adpod_slug = (body.get('adpod_slug') or '').strip()
+                if len(pin) != 4 or not pin.isdigit():
+                    return _resp(400, {'error': 'Пин-код должен содержать 4 цифры'})
+                if not adpod_slug:
+                    return _resp(400, {'error': 'Не указан адресный поддомен'})
+                cur.execute(f'SELECT email, adpod_slug FROM {SCHEMA}.pin_codes WHERE pin = %s LIMIT 1', (pin,))
+                row = cur.fetchone()
+                if not row:
+                    return _resp(404, {'error': 'Неверный пин-код'})
+                email, pin_adpod_slug = row[0], row[1]
+                if pin_adpod_slug != adpod_slug:
+                    return _resp(403, {'error': 'Этот пин-код привязан к другому адресу входа'})
+                cur.execute(f'SELECT id, is_admin FROM {SCHEMA}.auth_users WHERE email = %s LIMIT 1', (email,))
+                user_row = cur.fetchone()
+                if not user_row:
+                    return _resp(404, {'error': 'У сотрудника нет учётной записи для входа. Обратитесь к руководителю.'})
+                token = create_session(cur, user_row[0])
+                conn.commit()
+                return _resp(200, {'user': {'id': user_row[0], 'email': email}, 'token': token, 'is_admin': user_row[1]})
 
             elif action == 'session':
                 token = body.get('token') or (event.get('headers') or {}).get('X-Authorization', '')

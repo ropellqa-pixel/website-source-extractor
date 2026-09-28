@@ -55,6 +55,23 @@ export async function getVkStatus(profileId: string): Promise<VkStatusResponse |
   }
 }
 
+/** Возвращает все подтверждённые привязки VK разом: { profile_id -> vk_user_id }. Используется для рассылок. */
+export async function getAllVkBindings(): Promise<Record<string, string>> {
+  try {
+    const res = await fetch(`${VK_API_URL}?action=bindings_list`);
+    if (!res.ok) return {};
+    const data = await res.json();
+    const map: Record<string, string> = {};
+    (data.bindings || []).forEach((b: { profile_id: string; vk_user_id: number }) => {
+      map[b.profile_id] = String(b.vk_user_id);
+    });
+    return map;
+  } catch (e) {
+    console.error('[VkBind] bindings_list error:', e);
+    return {};
+  }
+}
+
 /** Отвязывает VK на сервере и очищает ссылку в профиле. */
 export async function unbindVk(profileId: string): Promise<void> {
   await fetch(VK_API_URL, {

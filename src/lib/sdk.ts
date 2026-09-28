@@ -160,13 +160,21 @@ export const auth = {
     }
     clearToken();
   },
-  /** Поиск профиля по PIN-коду (для быстрого входа). Не бросает исключение — возвращает null при ошибке. */
-  async pinLookup(pin: string): Promise<{ email: string; full_name: string } | null> {
+  /** Поиск профиля по PIN-коду (для быстрого входа). Не бросает исключение — возвращает null при ошибке.
+   * adpod_slug — если вход идёт с адресного поддомена, пин-код должен быть привязан именно к нему. */
+  async pinLookup(pin: string, adpodSlug?: string): Promise<{ email: string; full_name: string } | null> {
     try {
-      return await callAuthApi({ action: 'pin_lookup', pin });
+      return await callAuthApi({ action: 'pin_lookup', pin, adpod_slug: adpodSlug || '' });
     } catch {
       return null;
     }
+  },
+  /** Прямой вход по пин-коду без пароля — только для адресных поддоменов (АдПод).
+   * Пин-код должен быть привязан именно к переданному adpodSlug. */
+  async pinSignIn(pin: string, adpodSlug: string) {
+    const json = await callAuthApi({ action: 'pin_signin', pin, adpod_slug: adpodSlug });
+    setToken(json.token);
+    return { user: json.user };
   },
 };
 
