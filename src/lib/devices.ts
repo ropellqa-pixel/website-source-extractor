@@ -1,4 +1,5 @@
 import func2url from '../../backend/func2url.json';
+import { auth } from '@/lib/sdk';
 
 const AUTH_API_URL = func2url['auth-api'];
 const TOKEN_KEY = 'anod_session_token';
@@ -52,4 +53,9 @@ export async function linkDevice(deviceCode: string, profileId: string, password
 /** Отзывает доступ конкретному устройству, не трогая остальные. */
 export async function revokeDevice(deviceCode: string): Promise<void> {
   await callAuthApi({ action: 'revoke_device', device_code: deviceCode });
+}
+
+/** Директор меняет пароль сотрудника, привязанного к устройству (или любого сотрудника). */
+export async function setEmployeePassword(profileId: string, password: string): Promise<void> {
+  await auth.setEmployeePassword(profileId, password);
 }

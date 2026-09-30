@@ -208,6 +208,18 @@ export const auth = {
     setToken(json.token);
     return { user: json.user };
   },
+  /** Обменять одноразовый код автовхода (пришедший по ссылке от десктоп-программы)
+   * на полноценную сессию — страница /device-login вызывает это при загрузке. */
+  async redeemLoginLink(code: string) {
+    const json = await callAuthApi({ action: 'redeem_login_link', code });
+    setToken(json.token);
+    return { user: json.user };
+  },
+  /** Директор меняет пароль сотрудника (например, из карточки привязанного устройства). */
+  async setEmployeePassword(profileId: string, password: string): Promise<void> {
+    const token = getToken();
+    await callAuthApi({ action: 'set_employee_password', token, profile_id: profileId, password });
+  },
 };
 
 /* ---------------- storage ---------------- */

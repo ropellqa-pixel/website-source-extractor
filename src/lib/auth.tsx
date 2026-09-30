@@ -37,6 +37,7 @@ interface AuthContextType {
   }) => Promise<{ needsEmailConfirmation?: boolean }>;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithPin: (pin: string, adpodSlug: string) => Promise<void>;
+  signInWithLoginCode: (code: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
   refreshRoles: () => Promise<boolean>;
@@ -258,6 +259,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   };
 
+  const signInWithLoginCode = async (code: string) => {
+    const result = await auth.redeemLoginLink(code);
+
+    if (!result.user) {
+      throw new Error('Ссылка недействительна или уже использована.');
+    }
+
+    const comp = await loadCompany();
+    setCompany(comp);
+    const u = await buildUser(result.user, comp);
+    setUser(u);
+  };
+
   const signOut = async () => {
     await auth.signOut();
     setUser(null);
@@ -285,7 +299,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, company, loading, signUp, signIn, signInWithPin, signOut, refreshUser, refreshRoles }}>
+    <AuthContext.Provider value={{ user, company, loading, signUp, signIn, signInWithPin, signInWithLoginCode, signOut, refreshUser, refreshRoles }}>
       {children}
     </AuthContext.Provider>
   );

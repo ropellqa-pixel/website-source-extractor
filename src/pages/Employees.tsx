@@ -3,7 +3,7 @@ import { useAuth } from '../lib/auth';
 import { db, auth } from '@/lib/sdk';
 import { createVkBindCode, getVkStatus, unbindVk } from '../lib/vkBinding';
 import { PIN_ADPODS } from '../lib/pinAdpods';
-import { listDevices, linkDevice, revokeDevice, type Device } from '../lib/devices';
+import { listDevices, linkDevice, revokeDevice, setEmployeePassword, type Device } from '../lib/devices';
 import {
   Users, UserPlus, Search, Trash2, Shield, Pencil,
   MoreVertical, Check, X, KeyRound, Plus, Copy, RefreshCw, LogIn,
@@ -92,6 +92,9 @@ export default function Employees() {
   const [linkPassword, setLinkPassword] = useState('');
   const [linkSaving, setLinkSaving] = useState(false);
   const [revealedDeviceToken, setRevealedDeviceToken] = useState<{ token: string; name: string } | null>(null);
+  const [passwordDevice, setPasswordDevice] = useState<Device | null>(null);
+  const [newDevicePassword, setNewDevicePassword] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
   const [newEmployee, setNewEmployee] = useState({
     fullName: '',
     email: '',
@@ -398,6 +401,21 @@ export default function Employees() {
       await loadDevices();
     } catch (err) {
       showToast(`Ошибка отзыва: ${getErrorMessage(err)}`, 'error');
+    }
+  };
+
+  const handleSetDevicePassword = async () => {
+    if (!passwordDevice?.profile_id || newDevicePassword.length < 6) return;
+    setPasswordSaving(true);
+    try {
+      await setEmployeePassword(passwordDevice.profile_id, newDevicePassword);
+      showToast('Пароль обновлён');
+      setPasswordDevice(null);
+      setNewDevicePassword('');
+    } catch (err) {
+      showToast(`Ошибка: ${getErrorMessage(err)}`, 'error');
+    } finally {
+      setPasswordSaving(false);
     }
   };
 
@@ -1089,12 +1107,20 @@ export default function Employees() {
                         </button>
                       )}
                       {device.status === 'linked' && (
-                        <button
-                          onClick={() => handleRevokeDevice(device)}
-                          className="px-3 py-1.5 bg-red-500/10 text-red-600 rounded-lg text-sm font-medium hover:bg-red-500/20 transition-all"
-                        >
-                          Отозвать
-                        </button>
+                        <>
+                          <button
+                            onClick={() => { setPasswordDevice(device); setNewDevicePassword(''); }}
+                            className="px-3 py-1.5 bg-secondary border border-border text-foreground rounded-lg text-sm font-medium hover:bg-border transition-all"
+                          >
+                            Сменить пароль
+                          </button>
+                          <button
+                            onClick={() => handleRevokeDevice(device)}
+                            className="px-3 py-1.5 bg-red-500/10 text-red-600 rounded-lg text-sm font-medium hover:bg-red-500/20 transition-all"
+                          >
+                            Отозвать
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -1182,6 +1208,37 @@ export default function Employees() {
               className="w-full py-2.5 bg-secondary text-foreground rounded-lg font-medium hover:bg-border transition-all"
             >
               Готово
+            </button>
+          </div>
+        </div>
+      )}
+
+      {passwordDevice && (
+        <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm flex items-center justify-center z-[70] p-4" onClick={() => setPasswordDevice(null)}>
+          <div className="bg-card rounded-2xl p-6 w-full max-w-md border border-border" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-foreground">Сменить пароль</h2>
+              <button onClick={() => setPasswordDevice(null)} className="p-2 text-muted-foreground hover:text-foreground rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Новый пароль для входа сотрудника «{passwordDevice.profile_name}» на сайте anod.saou.ru.
+            </p>
+            <input
+              type="password"
+              value={newDevicePassword}
+              onChange={(e) => setNewDevicePassword(e.target.value)}
+              className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground text-base focus:outline-none focus:ring-2 focus:ring-ring mb-4"
+              placeholder="Не менее 6 символов"
+            />
+            <button
+              onClick={handleSetDevicePassword}
+              disabled={newDevicePassword.length < 6 || passwordSaving}
+              className="w-full py-3 bg-primary text-white rounded-lg font-medium hover:bg-primary/85 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {passwordSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              Сохранить пароль
             </button>
           </div>
         </div>

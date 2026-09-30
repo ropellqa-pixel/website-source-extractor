@@ -114,7 +114,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     вход по email+паролю, вход по PIN-коду (двухшаговый), проверка сессии по токену, выход.
     Выдаёт и проверяет постоянные API-токены для внешних приложений (десктоп-клиент):
     get_api_token, revoke_api_token, api_verify. Управляет привязкой ПК по 9-значному коду:
-    register_device, device_status, list_devices, link_device, revoke_device.'''
+    register_device, device_status, list_devices, link_device, revoke_device,
+    set_employee_password. Автовход браузера по одноразовому коду от программы:
+    request_login_link, redeem_login_link.'''
     method = event.get('httpMethod', 'GET')
 
     if method == 'OPTIONS':
@@ -409,6 +411,95 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     (device_code,),
                 )
                 cur.execute(f'UPDATE {SCHEMA}.devices SET status = %s WHERE device_code = %s', ('revoked', device_code))
+                conn.commit()
+                return _resp(200, {'ok': True})
+
+            elif action == 'request_login_link':
+                # Десктоп-программа (уже авторизованная своим device-токеном) запрашивает
+                # одноразовый короткий код, чтобы открыть браузер сразу в личном кабинете —
+                # без ручного ввода логина и пароля. Код живёт 2 минуты и одноразовый.
+                api_token = body.get('api_token') or ''
+                if not api_token:
+                    return _resp(400, {'error': 'api_token обязателен'})
+                cur.execute(
+                    f'SELECT user_id FROM {SCHEMA}.api_tokens WHERE token = %s AND revoked_at IS NULL',
+                    (api_token,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return _resp(401, {'error': 'Недействительный токен устройства'})
+                user_id = row[0]
+                code = secrets.token_urlsafe(24)
+                expires = datetime.now(timezone.utc) + timedelta(minutes=2)
+                cur.execute(
+                    f'INSERT INTO {SCHEMA}.login_links (id, code, user_id, expires_at) VALUES (%s, %s, %s, %s)',
+                    (str(uuidlib.uuid4()), code, user_id, expires),
+                )
+                conn.commit()
+                return _resp(200, {'code': code})
+
+            elif action == 'redeem_login_link':
+                # Браузер (страница /device-login?code=...) обменивает одноразовый код
+                # на полноценную сессию — ровно то же самое, что происходит после ввода
+                # логина и пароля вручную. Код можно использовать только один раз.
+                code = body.get('code') or ''
+                if not code:
+                    return _resp(400, {'error': 'code обязателен'})
+                cur.execute(
+                    f'SELECT id, user_id, expires_at, used_at FROM {SCHEMA}.login_links WHERE code = %s',
+                    (code,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return _resp(404, {'error': 'Ссылка недействительна'})
+                link_id, user_id, expires_at, used_at = row
+                if used_at is not None:
+                    return _resp(410, {'error': 'Эта ссылка уже была использована'})
+                if expires_at < datetime.now(timezone.utc):
+                    return _resp(410, {'error': 'Ссылка истекла, запросите новую в программе'})
+                cur.execute(f'UPDATE {SCHEMA}.login_links SET used_at = now() WHERE id = %s', (link_id,))
+                cur.execute(f'SELECT id, email, is_admin FROM {SCHEMA}.auth_users WHERE id = %s', (user_id,))
+                user_row = cur.fetchone()
+                if not user_row:
+                    return _resp(404, {'error': 'Пользователь не найден'})
+                token = create_session(cur, user_row[0])
+                conn.commit()
+                return _resp(200, {'user': {'id': user_row[0], 'email': user_row[1]}, 'token': token, 'is_admin': user_row[2]})
+
+            elif action == 'set_employee_password':
+                # Директор меняет пароль сотрудника прямо из карточки привязанного устройства
+                # (или из карточки сотрудника) — без участия самого сотрудника.
+                user = require_session_user(cur, event, body)
+                if not user:
+                    return _resp(401, {'error': 'Требуется вход в систему'})
+                profile_id = (body.get('profile_id') or '').strip()
+                new_password = body.get('password') or ''
+                if not profile_id:
+                    return _resp(400, {'error': 'Не указан сотрудник'})
+                if len(new_password) < 6:
+                    return _resp(400, {'error': 'Пароль должен содержать не менее 6 символов'})
+                cur.execute(f'SELECT user_id, email FROM {SCHEMA}.profiles WHERE id = %s', (profile_id,))
+                profile_row = cur.fetchone()
+                if not profile_row:
+                    return _resp(404, {'error': 'Сотрудник не найден'})
+                target_user_id, profile_email = profile_row
+                if not target_user_id:
+                    if not profile_email:
+                        return _resp(400, {'error': 'У сотрудника не указан email'})
+                    target_user_id = str(uuidlib.uuid4())
+                    cur.execute(
+                        f'INSERT INTO {SCHEMA}.auth_users (id, email, password_hash, is_admin) VALUES (%s, %s, %s, %s)',
+                        (target_user_id, profile_email, hash_password(new_password), False),
+                    )
+                    cur.execute(
+                        f'UPDATE {SCHEMA}.profiles SET user_id = %s, has_system_access = true WHERE id = %s',
+                        (target_user_id, profile_id),
+                    )
+                else:
+                    cur.execute(
+                        f'UPDATE {SCHEMA}.auth_users SET password_hash = %s WHERE id = %s',
+                        (hash_password(new_password), target_user_id),
+                    )
                 conn.commit()
                 return _resp(200, {'ok': True})
 
