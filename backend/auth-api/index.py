@@ -70,10 +70,31 @@ def get_user_by_token(cur, token: str) -> Optional[Dict[str, Any]]:
     return {'id': row[0], 'email': row[1], 'is_admin': row[2]}
 
 
+def get_or_create_api_token(cur, user_id: str, label: str = 'Десктоп-приложение') -> str:
+    """Постоянный токен для внешних приложений (например, десктоп-клиент на C#).
+    В отличие от сессии — не истекает. Один активный токен на пользователя: повторный
+    запрос просто возвращает уже выданный, чтобы приложение не теряло доступ при перевходе."""
+    cur.execute(
+        f'SELECT token FROM {SCHEMA}.api_tokens WHERE user_id = %s AND revoked_at IS NULL '
+        f'ORDER BY created_at DESC LIMIT 1',
+        (user_id,),
+    )
+    row = cur.fetchone()
+    if row:
+        return row[0]
+    token = 'anod_' + secrets.token_urlsafe(40)
+    cur.execute(
+        f'INSERT INTO {SCHEMA}.api_tokens (id, user_id, token, label) VALUES (%s, %s, %s, %s)',
+        (str(uuidlib.uuid4()), user_id, token, label),
+    )
+    return token
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Сервер аутентификации компании: регистрация с хешированием пароля (PBKDF2-SHA256),
     вход по email+паролю, вход по PIN-коду (двухшаговый), проверка сессии по токену, выход.
-    Заменяет прежнее хранение паролей открытым текстом в браузере.'''
+    Также выдаёт и проверяет постоянные API-токены для внешних приложений (десктоп-клиент):
+    get_api_token, revoke_api_token, api_verify.'''
     method = event.get('httpMethod', 'GET')
 
     if method == 'OPTIONS':
@@ -121,8 +142,11 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 if not row or not verify_password(password, row[1]):
                     return _resp(401, {'error': 'Неверный email или пароль'})
                 token = create_session(cur, row[0])
+                # При каждом входе по паролю выдаём (или возвращаем уже выданный) постоянный
+                # API-токен — им десктоп-приложение пользователя подключается к серверу напрямую.
+                api_token = get_or_create_api_token(cur, row[0])
                 conn.commit()
-                return _resp(200, {'user': {'id': row[0], 'email': email}, 'token': token, 'is_admin': row[2]})
+                return _resp(200, {'user': {'id': row[0], 'email': email}, 'token': token, 'is_admin': row[2], 'api_token': api_token})
 
             elif action == 'pin_lookup':
                 pin = (body.get('pin') or '').strip()
@@ -187,6 +211,55 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 if not user:
                     return _resp(200, {'roles': []})
                 return _resp(200, {'roles': ['admin'] if user['is_admin'] else []})
+
+            elif action == 'get_api_token':
+                # Показать постоянный токен текущему вошедшему пользователю (для настройки
+                # десктоп-приложения). Требует действующей сессии.
+                token = body.get('token') or (event.get('headers') or {}).get('X-Authorization', '')
+                if token.startswith('Bearer '):
+                    token = token[7:]
+                user = get_user_by_token(cur, token) if token else None
+                if not user:
+                    return _resp(401, {'error': 'Требуется вход в систему'})
+                api_token = get_or_create_api_token(cur, user['id'])
+                conn.commit()
+                return _resp(200, {'api_token': api_token})
+
+            elif action == 'revoke_api_token':
+                # Отозвать текущий постоянный токен и сразу выдать новый — используется,
+                # если старый токен скомпрометирован (утёк, программа украдена и т.п.).
+                token = body.get('token') or (event.get('headers') or {}).get('X-Authorization', '')
+                if token.startswith('Bearer '):
+                    token = token[7:]
+                user = get_user_by_token(cur, token) if token else None
+                if not user:
+                    return _resp(401, {'error': 'Требуется вход в систему'})
+                cur.execute(
+                    f'UPDATE {SCHEMA}.api_tokens SET revoked_at = now() WHERE user_id = %s AND revoked_at IS NULL',
+                    (user['id'],),
+                )
+                new_api_token = get_or_create_api_token(cur, user['id'])
+                conn.commit()
+                return _resp(200, {'api_token': new_api_token})
+
+            elif action == 'api_verify':
+                # Проверка постоянного API-токена — используется другими backend-функциями
+                # (data-api, file-upload) для авторизации запросов от десктоп-приложения.
+                api_token = body.get('api_token') or ''
+                if not api_token:
+                    return _resp(200, {'user': None})
+                cur.execute(
+                    f'SELECT u.id, u.email, u.is_admin FROM {SCHEMA}.api_tokens t '
+                    f'JOIN {SCHEMA}.auth_users u ON u.id = t.user_id '
+                    f'WHERE t.token = %s AND t.revoked_at IS NULL',
+                    (api_token,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return _resp(200, {'user': None})
+                cur.execute(f'UPDATE {SCHEMA}.api_tokens SET last_used_at = now() WHERE token = %s', (api_token,))
+                conn.commit()
+                return _resp(200, {'user': {'id': row[0], 'email': row[1], 'is_admin': row[2]}})
 
             else:
                 return _resp(400, {'error': f'Неизвестное действие: {action}'})

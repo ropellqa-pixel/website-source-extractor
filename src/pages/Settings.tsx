@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
-import { db } from '@/lib/sdk';
+import { db, auth } from '@/lib/sdk';
 import { createVkBindCode, getVkStatus, unbindVk } from '../lib/vkBinding';
 import RotationSettings from '../components/RotationSettings';
 import {
   Settings as SettingsIcon, User, Building2, Bell, Shield,
   Save, Lock, Mail, Phone, Globe, KeyRound, Eye, EyeOff,
   RefreshCw, Copy, Check, Unlock, Banknote, Calendar,
-  Link
+  Link, Monitor, AlertTriangle
 } from 'lucide-react';
 
 interface PinCode {
@@ -151,6 +151,11 @@ export default function Settings() {
   const [vkError, setVkError] = useState('');
   const [vkProfileId, setVkProfileId] = useState<string | null>(null);
 
+  const [apiToken, setApiToken] = useState<string | null>(null);
+  const [apiTokenVisible, setApiTokenVisible] = useState(false);
+  const [apiTokenLoading, setApiTokenLoading] = useState(false);
+  const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
+
   const tabs = [
     { id: 'profile', label: 'Профиль', icon: User },
     { id: 'company', label: 'Компания', icon: Building2 },
@@ -166,7 +171,30 @@ export default function Settings() {
     if (activeTab === 'salary') loadSalaryGlobal();
     if (activeTab === 'schedule') loadScheduleGlobal();
     if (activeTab === 'profile' && user) loadProfileVk();
+    if (activeTab === 'security' && user) loadApiToken();
   }, [activeTab, user]);
+
+  const loadApiToken = async () => {
+    setApiTokenLoading(true);
+    try {
+      const token = await auth.getApiToken();
+      setApiToken(token);
+    } finally {
+      setApiTokenLoading(false);
+    }
+  };
+
+  const handleRevokeApiToken = async () => {
+    setApiTokenLoading(true);
+    setShowRevokeConfirm(false);
+    try {
+      const token = await auth.revokeApiToken();
+      setApiToken(token);
+      setApiTokenVisible(true);
+    } finally {
+      setApiTokenLoading(false);
+    }
+  };
 
   const loadProfileVk = async () => {
     if (!user) return;
@@ -743,6 +771,58 @@ export default function Settings() {
                     <input type="password" className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base" placeholder="Подтвердите" />
                   </div>
                 </div>
+
+                <div className="p-4 bg-secondary rounded-lg mt-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Monitor className="w-5 h-5 text-blue-600" />
+                    <h3 className="font-medium text-foreground">Доступ для десктоп-приложения</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Постоянный личный ключ для подключения твоей программы (C#/WPF) напрямую к серверу —
+                    без входа через браузер. Вставь его в настройки приложения один раз.
+                  </p>
+
+                  {apiTokenLoading ? (
+                    <p className="text-sm text-muted-foreground">Загрузка...</p>
+                  ) : apiToken ? (
+                    <>
+                      <div className="flex items-center gap-2 mb-3">
+                        <input
+                          readOnly
+                          type={apiTokenVisible ? 'text' : 'password'}
+                          value={apiToken}
+                          className="flex-1 bg-card border border-border rounded-lg px-4 py-3 text-foreground font-mono text-sm focus:outline-none"
+                        />
+                        <button
+                          onClick={() => setApiTokenVisible(v => !v)}
+                          className="p-3 bg-card border border-border rounded-lg text-muted-foreground hover:text-foreground transition-all"
+                          title={apiTokenVisible ? 'Скрыть' : 'Показать'}
+                        >
+                          {apiTokenVisible ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                        </button>
+                        <button
+                          onClick={() => copyToClipboard(apiToken, 'api-token')}
+                          className="p-3 bg-card border border-border rounded-lg text-muted-foreground hover:text-foreground transition-all"
+                          title="Скопировать"
+                        >
+                          {copiedId === 'api-token' ? <Check className="w-5 h-5 text-emerald-600" /> : <Copy className="w-5 h-5" />}
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => setShowRevokeConfirm(true)}
+                        className="flex items-center gap-2 text-sm text-red-600 hover:text-red-700 font-medium"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        Отозвать и выпустить новый ключ
+                      </button>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Отзывай ключ, только если он попал не в те руки — старые подключения программы сразу перестанут работать.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Не удалось получить ключ. Обновите страницу.</p>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -768,6 +848,28 @@ export default function Settings() {
               <button onClick={handleLockPercent}
                 className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg transition-all flex items-center justify-center gap-1 text-sm">
                 <Check className="w-4 h-4" /> Подтвердить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRevokeConfirm && (
+        <div className="fixed inset-0 bg-foreground/30 flex items-center justify-center z-[100]" onClick={() => setShowRevokeConfirm(false)}>
+          <div className="bg-card rounded-2xl p-6 w-96 border border-border shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              <h3 className="text-foreground font-semibold">Отозвать ключ доступа?</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-5">
+              Текущий ключ перестанет работать немедленно. Десктоп-приложение потеряет доступ, пока не введёшь новый ключ в его настройках.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowRevokeConfirm(false)}
+                className="flex-1 bg-secondary hover:bg-border text-foreground py-2 rounded-lg transition-all text-sm">Отмена</button>
+              <button onClick={handleRevokeApiToken}
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg transition-all flex items-center justify-center gap-1 text-sm">
+                <RefreshCw className="w-4 h-4" /> Отозвать
               </button>
             </div>
           </div>

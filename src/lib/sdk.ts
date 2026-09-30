@@ -13,16 +13,28 @@ const FILE_UPLOAD_URL = func2url['file-upload'];
 
 const TOKEN_KEY = 'anod_session_token';
 
+function getToken(): string | null {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+
 type Row = Record<string, any>;
 type Result<T = any> = { data: T; error: { message: string; code?: string } | null };
 
 interface Filter { col: string; op: string; value: unknown }
 
+// data-api и file-upload теперь требуют авторизации на каждый запрос — сессионный
+// токен уходит в заголовке X-Authorization (тот же заголовок понимает и постоянный
+// API-токен десктоп-приложения).
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { 'X-Authorization': token } : {};
+}
+
 async function callDataApi(body: Record<string, unknown>): Promise<Result> {
   try {
     const res = await fetch(DATA_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body),
     });
     const json = await res.json();
@@ -98,9 +110,6 @@ export const db = {
 
 /* ---------------- auth ---------------- */
 
-function getToken(): string | null {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-}
 function setToken(token: string) {
   try { localStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ }
 }
@@ -146,7 +155,30 @@ export const auth = {
   async signInWithPassword({ email, password }: { email: string; password: string }) {
     const json = await callAuthApi({ action: 'signin', email, password });
     setToken(json.token);
-    return { user: json.user, session: { token: json.token } };
+    return { user: json.user, session: { token: json.token }, apiToken: json.api_token as string | undefined };
+  },
+  /** Постоянный API-токен для десктоп-приложения (не истекает, в отличие от сессии).
+   * Выдаётся один раз на пользователя — повторный вызов вернёт тот же токен. */
+  async getApiToken(): Promise<string | null> {
+    const token = getToken();
+    if (!token) return null;
+    try {
+      const json = await callAuthApi({ action: 'get_api_token', token });
+      return json.api_token || null;
+    } catch {
+      return null;
+    }
+  },
+  /** Отозвать текущий API-токен (если он скомпрометирован) и получить новый. */
+  async revokeApiToken(): Promise<string | null> {
+    const token = getToken();
+    if (!token) return null;
+    try {
+      const json = await callAuthApi({ action: 'revoke_api_token', token });
+      return json.api_token || null;
+    } catch {
+      return null;
+    }
   },
   async signUpWithPassword({ email, password }: { email: string; password: string }) {
     const json = await callAuthApi({ action: 'signup', email, password });
@@ -192,7 +224,7 @@ export const storage = {
     const contentType = file.type || 'application/octet-stream';
     const res = await fetch(FILE_UPLOAD_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ file_base64: dataUrl, file_name: fileName, content_type: contentType, folder: bucket }),
     });
     const json = await res.json();

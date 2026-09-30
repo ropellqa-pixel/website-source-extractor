@@ -119,11 +119,48 @@ def _row_to_dict(row, colnames):
     return dict(zip(colnames, row))
 
 
+def _extract_token(event: Dict[str, Any], body: Dict[str, Any]) -> str:
+    headers = event.get('headers') or {}
+    # Заголовки у прокси иногда приходят в разном регистре — проверяем оба варианта
+    token = headers.get('X-Authorization') or headers.get('x-authorization') or body.get('token') or ''
+    if token.startswith('Bearer '):
+        token = token[7:]
+    return token.strip()
+
+
+def _authenticate(cur, token: str) -> Optional[Dict[str, Any]]:
+    """Проверяет токен запроса: либо обычная сессия сайта (30 дней), либо постоянный
+    API-токен десктоп-приложения. Возвращает пользователя или None, если токен невалиден."""
+    if not token:
+        return None
+    cur.execute(
+        f'SELECT u.id, u.email, u.is_admin FROM {SCHEMA}.auth_sessions s '
+        f'JOIN {SCHEMA}.auth_users u ON u.id = s.user_id '
+        f'WHERE s.token = %s AND s.expires_at > now()',
+        (token,),
+    )
+    row = cur.fetchone()
+    if row:
+        return {'id': row[0], 'email': row[1], 'is_admin': row[2]}
+
+    cur.execute(
+        f'SELECT u.id, u.email, u.is_admin FROM {SCHEMA}.api_tokens t '
+        f'JOIN {SCHEMA}.auth_users u ON u.id = t.user_id '
+        f'WHERE t.token = %s AND t.revoked_at IS NULL',
+        (token,),
+    )
+    row = cur.fetchone()
+    if row:
+        cur.execute(f'UPDATE {SCHEMA}.api_tokens SET last_used_at = now() WHERE token = %s', (token,))
+        return {'id': row[0], 'email': row[1], 'is_admin': row[2]}
+    return None
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Универсальный REST-бэкенд для CRUD-операций над таблицами компании: сотрудники,
-    табель, зарплата, документы, чат, шаблоны ДТО и т.д. Заменяет прежнее хранение в
-    localStorage — все данные реальной компании теперь в PostgreSQL, с доступом только
-    для авторизованных пользователей (проверка сессии выполняется на фронтенде через auth-api).'''
+    табель, зарплата, документы, чат, шаблоны ДТО и т.д. Доступ только для авторизованных
+    запросов: обычная сессия сайта (X-Authorization: session-токен) либо постоянный
+    API-токен десктоп-приложения (X-Authorization: api-токен, выданный auth-api).'''
     method = event.get('httpMethod', 'GET')
 
     if method == 'OPTIONS':
@@ -148,11 +185,17 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     single_mode = body.get('single_mode')  # 'single' | 'maybe' | None
     payload = body.get('payload')
 
+    token = _extract_token(event, body)
+
     try:
         conn = _conn()
         conn.autocommit = False
         full_table = f'"{SCHEMA}"."{table}"'
         with conn.cursor() as cur:
+            user = _authenticate(cur, token)
+            if not user:
+                conn.commit()
+                return _resp(401, {'data': None, 'error': {'message': 'Не авторизован: нужен действующий токен входа'}})
 
             if op == 'select':
                 where_sql = ''
