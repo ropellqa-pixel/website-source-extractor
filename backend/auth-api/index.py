@@ -90,11 +90,31 @@ def get_or_create_api_token(cur, user_id: str, label: str = 'Десктоп-пр
     return token
 
 
+def create_device_token(cur, user_id: str, device_code: str) -> str:
+    """Отдельный постоянный токен для конкретного устройства (ПК). В отличие от
+    get_or_create_api_token — не переиспользуется: у каждого device_code свой токен,
+    поэтому отозвать доступ можно ровно одному ПК, не трогая остальные."""
+    token = 'anod_' + secrets.token_urlsafe(40)
+    cur.execute(
+        f'INSERT INTO {SCHEMA}.api_tokens (id, user_id, token, label, device_code) VALUES (%s, %s, %s, %s, %s)',
+        (str(uuidlib.uuid4()), user_id, token, f'Устройство {device_code}', device_code),
+    )
+    return token
+
+
+def require_session_user(cur, event: Dict[str, Any], body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    token = body.get('token') or (event.get('headers') or {}).get('X-Authorization', '')
+    if token.startswith('Bearer '):
+        token = token[7:]
+    return get_user_by_token(cur, token) if token else None
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Сервер аутентификации компании: регистрация с хешированием пароля (PBKDF2-SHA256),
     вход по email+паролю, вход по PIN-коду (двухшаговый), проверка сессии по токену, выход.
-    Также выдаёт и проверяет постоянные API-токены для внешних приложений (десктоп-клиент):
-    get_api_token, revoke_api_token, api_verify.'''
+    Выдаёт и проверяет постоянные API-токены для внешних приложений (десктоп-клиент):
+    get_api_token, revoke_api_token, api_verify. Управляет привязкой ПК по 9-значному коду:
+    register_device, device_status, list_devices, link_device, revoke_device.'''
     method = event.get('httpMethod', 'GET')
 
     if method == 'OPTIONS':
@@ -241,6 +261,156 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 new_api_token = get_or_create_api_token(cur, user['id'])
                 conn.commit()
                 return _resp(200, {'api_token': new_api_token})
+
+            elif action == 'register_device':
+                # Десктоп-приложение при первом запуске на новом ПК генерирует свой 9-значный
+                # код и регистрирует его здесь. Код сразу возвращается программе — она должна
+                # один раз показать его пользователю ("в углу экрана"), чтобы директор мог
+                # ввести этот же код в личном кабинете и привязать ПК к сотруднику.
+                # hostname — необязательная подсказка (имя компьютера) для удобства директора.
+                hostname = (body.get('hostname') or '').strip()[:200]
+                device_code = None
+                for _ in range(50):
+                    candidate = f'{secrets.randbelow(1_000_000_000):09d}'
+                    cur.execute(f'SELECT 1 FROM {SCHEMA}.devices WHERE device_code = %s', (candidate,))
+                    if not cur.fetchone():
+                        device_code = candidate
+                        break
+                if not device_code:
+                    return _resp(500, {'error': 'Не удалось сгенерировать код устройства'})
+                device_id = str(uuidlib.uuid4())
+                cur.execute(
+                    f'INSERT INTO {SCHEMA}.devices (id, device_code, hostname, status) VALUES (%s, %s, %s, %s)',
+                    (device_id, device_code, hostname, 'pending'),
+                )
+                conn.commit()
+                return _resp(200, {'device_code': device_code})
+
+            elif action == 'device_status':
+                # Программа периодически опрашивает этим action-ом: пока код не привязан
+                # директором в ЛК — приходит status=pending. После привязки — status=linked
+                # и постоянный api_token для этого конкретного устройства.
+                device_code = (body.get('device_code') or '').strip()
+                if not device_code:
+                    return _resp(400, {'error': 'device_code обязателен'})
+                cur.execute(
+                    f'SELECT status, profile_id FROM {SCHEMA}.devices WHERE device_code = %s',
+                    (device_code,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return _resp(404, {'error': 'Устройство не найдено'})
+                status, profile_id = row
+                if status != 'linked':
+                    return _resp(200, {'status': status})
+                cur.execute(
+                    f'SELECT token FROM {SCHEMA}.api_tokens WHERE device_code = %s AND revoked_at IS NULL '
+                    f'ORDER BY created_at DESC LIMIT 1',
+                    (device_code,),
+                )
+                token_row = cur.fetchone()
+                cur.execute(f'UPDATE {SCHEMA}.devices SET last_seen_at = now() WHERE device_code = %s', (device_code,))
+                conn.commit()
+                return _resp(200, {'status': 'linked', 'api_token': token_row[0] if token_row else None})
+
+            elif action == 'list_devices':
+                # Список всех устройств компании для личного кабинета — привязанные и ожидающие.
+                # Доступно только вошедшему пользователю (директор видит все ПК компании).
+                user = require_session_user(cur, event, body)
+                if not user:
+                    return _resp(401, {'error': 'Требуется вход в систему'})
+                cur.execute(
+                    f'SELECT d.id, d.device_code, d.hostname, d.status, d.created_at, d.linked_at, '
+                    f'd.last_seen_at, d.profile_id, p.full_name '
+                    f'FROM {SCHEMA}.devices d LEFT JOIN {SCHEMA}.profiles p ON p.id = d.profile_id '
+                    f'ORDER BY d.created_at DESC'
+                )
+                rows = cur.fetchall()
+                devices = [{
+                    'id': r[0], 'device_code': r[1], 'hostname': r[2], 'status': r[3],
+                    'created_at': r[4], 'linked_at': r[5], 'last_seen_at': r[6],
+                    'profile_id': r[7], 'profile_name': r[8],
+                } for r in rows]
+                return _resp(200, {'devices': devices})
+
+            elif action == 'link_device':
+                # Директор в личном кабинете вводит 9-значный код с экрана сотрудника,
+                # выбирает, к какому профилю его привязать, и (опционально) сразу задаёт
+                # пароль для входа, если у сотрудника ещё нет учётной записи. После привязки
+                # устройство получает свой собственный постоянный токен.
+                user = require_session_user(cur, event, body)
+                if not user:
+                    return _resp(401, {'error': 'Требуется вход в систему'})
+                device_code = (body.get('device_code') or '').strip()
+                profile_id = (body.get('profile_id') or '').strip()
+                password = body.get('password') or ''
+                if len(device_code) != 9 or not device_code.isdigit():
+                    return _resp(400, {'error': 'Код устройства должен содержать 9 цифр'})
+                if not profile_id:
+                    return _resp(400, {'error': 'Не выбран сотрудник'})
+
+                cur.execute(f'SELECT status FROM {SCHEMA}.devices WHERE device_code = %s', (device_code,))
+                device_row = cur.fetchone()
+                if not device_row:
+                    return _resp(404, {'error': 'Устройство с таким кодом не найдено'})
+
+                cur.execute(f'SELECT user_id, email, full_name FROM {SCHEMA}.profiles WHERE id = %s', (profile_id,))
+                profile_row = cur.fetchone()
+                if not profile_row:
+                    return _resp(404, {'error': 'Сотрудник не найден'})
+                target_user_id, profile_email, full_name = profile_row
+
+                if not target_user_id:
+                    # У сотрудника ещё нет учётной записи для входа — создаём её прямо тут.
+                    if len(password) < 6:
+                        return _resp(400, {'error': 'Укажите пароль (не менее 6 символов) для нового сотрудника'})
+                    if not profile_email:
+                        return _resp(400, {'error': 'У сотрудника не указан email — заполните его в профиле'})
+                    cur.execute(f'SELECT id FROM {SCHEMA}.auth_users WHERE email = %s', (profile_email,))
+                    existing = cur.fetchone()
+                    if existing:
+                        target_user_id = existing[0]
+                    else:
+                        target_user_id = str(uuidlib.uuid4())
+                        cur.execute(
+                            f'INSERT INTO {SCHEMA}.auth_users (id, email, password_hash, is_admin) VALUES (%s, %s, %s, %s)',
+                            (target_user_id, profile_email, hash_password(password), False),
+                        )
+                    cur.execute(
+                        f'UPDATE {SCHEMA}.profiles SET user_id = %s, has_system_access = true WHERE id = %s',
+                        (target_user_id, profile_id),
+                    )
+                elif password:
+                    # Учётная запись уже есть, но директор всё равно передал пароль — обновляем его.
+                    cur.execute(
+                        f'UPDATE {SCHEMA}.auth_users SET password_hash = %s WHERE id = %s',
+                        (hash_password(password), target_user_id),
+                    )
+
+                device_token = create_device_token(cur, target_user_id, device_code)
+                cur.execute(
+                    f'UPDATE {SCHEMA}.devices SET status = %s, profile_id = %s, linked_at = now() '
+                    f'WHERE device_code = %s',
+                    ('linked', profile_id, device_code),
+                )
+                conn.commit()
+                return _resp(200, {'ok': True, 'profile_name': full_name, 'api_token': device_token})
+
+            elif action == 'revoke_device':
+                # Отозвать доступ ровно одному ПК — остальные устройства и токены не трогает.
+                user = require_session_user(cur, event, body)
+                if not user:
+                    return _resp(401, {'error': 'Требуется вход в систему'})
+                device_code = (body.get('device_code') or '').strip()
+                if not device_code:
+                    return _resp(400, {'error': 'device_code обязателен'})
+                cur.execute(
+                    f'UPDATE {SCHEMA}.api_tokens SET revoked_at = now() WHERE device_code = %s AND revoked_at IS NULL',
+                    (device_code,),
+                )
+                cur.execute(f'UPDATE {SCHEMA}.devices SET status = %s WHERE device_code = %s', ('revoked', device_code))
+                conn.commit()
+                return _resp(200, {'ok': True})
 
             elif action == 'api_verify':
                 # Проверка постоянного API-токена — используется другими backend-функциями

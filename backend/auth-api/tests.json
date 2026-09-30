@@ -37,6 +37,36 @@
       "expectedStatus": 200,
       "expectedBody": {"email": "director@anodbiz.ru"},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Register device returns 9-digit code",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "register_device", "hostname": "TEST-PC-CI"},
+      "expectedStatus": 200,
+      "expectedBody": {"device_code": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Device status unknown code",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "device_status", "device_code": "000000000"},
+      "expectedStatus": 404
+    },
+    {
+      "name": "List devices without session rejected",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "list_devices"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Link device without session rejected",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "link_device", "device_code": "123456789", "profile_id": "x"},
+      "expectedStatus": 401
     }
   ]
 }

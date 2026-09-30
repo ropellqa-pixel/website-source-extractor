@@ -3,10 +3,11 @@ import { useAuth } from '../lib/auth';
 import { db, auth } from '@/lib/sdk';
 import { createVkBindCode, getVkStatus, unbindVk } from '../lib/vkBinding';
 import { PIN_ADPODS } from '../lib/pinAdpods';
+import { listDevices, linkDevice, revokeDevice, type Device } from '../lib/devices';
 import {
   Users, UserPlus, Search, Trash2, Shield, Pencil,
   MoreVertical, Check, X, KeyRound, Plus, Copy, RefreshCw, LogIn,
-  AlertTriangle, CheckCircle2, ExternalLink, MessageCircle, Loader2
+  AlertTriangle, CheckCircle2, ExternalLink, MessageCircle, Loader2, Monitor
 } from 'lucide-react';
 
 interface EmployeeProfile {
@@ -82,6 +83,15 @@ export default function Employees() {
   const [bindCode, setBindCode] = useState<string | null>(null);
   const [selectedAdpodSlug, setSelectedAdpodSlug] = useState<string>('');
   const [generatingCode, setGeneratingCode] = useState(false);
+
+  const [showDevicesModal, setShowDevicesModal] = useState(false);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
+  const [linkingDevice, setLinkingDevice] = useState<Device | null>(null);
+  const [linkProfileId, setLinkProfileId] = useState('');
+  const [linkPassword, setLinkPassword] = useState('');
+  const [linkSaving, setLinkSaving] = useState(false);
+  const [revealedDeviceToken, setRevealedDeviceToken] = useState<{ token: string; name: string } | null>(null);
   const [newEmployee, setNewEmployee] = useState({
     fullName: '',
     email: '',
@@ -339,6 +349,58 @@ export default function Employees() {
     return vkBindings.find(b => b.profile_id === emp.id);
   };
 
+  const loadDevices = async () => {
+    setDevicesLoading(true);
+    try {
+      setDevices(await listDevices());
+    } finally {
+      setDevicesLoading(false);
+    }
+  };
+
+  const openDevicesModal = () => {
+    setShowDevicesModal(true);
+    loadDevices();
+  };
+
+  const openLinkDevice = (device: Device) => {
+    setLinkingDevice(device);
+    setLinkProfileId('');
+    setLinkPassword('');
+  };
+
+  const handleLinkDevice = async () => {
+    if (!linkingDevice || !linkProfileId) return;
+    const targetProfile = employees.find(e => e.id === linkProfileId);
+    if (targetProfile && !targetProfile.user_id && linkPassword.length < 6) {
+      showToast('У сотрудника ещё нет учётной записи — укажите пароль (не менее 6 символов)', 'error');
+      return;
+    }
+    setLinkSaving(true);
+    try {
+      const result = await linkDevice(linkingDevice.device_code, linkProfileId, linkPassword);
+      showToast(`Устройство привязано к ${result.profileName}`);
+      setRevealedDeviceToken({ token: result.apiToken, name: result.profileName });
+      setLinkingDevice(null);
+      await loadDevices();
+      await loadData();
+    } catch (err) {
+      showToast(`Ошибка привязки: ${getErrorMessage(err)}`, 'error');
+    } finally {
+      setLinkSaving(false);
+    }
+  };
+
+  const handleRevokeDevice = async (device: Device) => {
+    try {
+      await revokeDevice(device.device_code);
+      showToast('Доступ устройству отозван');
+      await loadDevices();
+    } catch (err) {
+      showToast(`Ошибка отзыва: ${getErrorMessage(err)}`, 'error');
+    }
+  };
+
   const handleGeneratePin = async (employeeProfile: EmployeeProfile, adpodSlug: string) => {
     try {
       if (!employeeProfile.has_system_access) {
@@ -429,13 +491,22 @@ export default function Employees() {
               </a>
               <h1 className="text-xl font-bold text-foreground">Сотрудники</h1>
             </div>
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="bg-primary text-white px-4 py-2 rounded-lg font-medium hover:bg-primary/85 transition-all flex items-center gap-2"
-            >
-              <UserPlus className="w-5 h-5" />
-              Добавить
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={openDevicesModal}
+                className="bg-secondary text-foreground px-4 py-2 rounded-lg font-medium hover:bg-border transition-all flex items-center gap-2"
+              >
+                <Monitor className="w-5 h-5" />
+                Устройства
+              </button>
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="bg-primary text-white px-4 py-2 rounded-lg font-medium hover:bg-primary/85 transition-all flex items-center gap-2"
+              >
+                <UserPlus className="w-5 h-5" />
+                Добавить
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -956,6 +1027,162 @@ export default function Employees() {
                 Пин-код — ключ быстрого входа. Привязан к одному адресу входа: на нём вводятся только 4 цифры и сразу открывается личный кабинет.
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showDevicesModal && (
+        <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowDevicesModal(false)}>
+          <div className="bg-card rounded-2xl p-6 w-full max-w-2xl border border-border max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+                  <Monitor className="w-5 h-5" />
+                  Устройства
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Компьютеры с установленной программой. Каждый показывает свой 9-значный код — привяжи его к сотруднику.
+                </p>
+              </div>
+              <button onClick={() => setShowDevicesModal(false)} className="p-2 text-muted-foreground hover:text-foreground rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {devicesLoading ? (
+              <div className="py-10 text-center text-muted-foreground flex items-center justify-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin" /> Загрузка...
+              </div>
+            ) : devices.length === 0 ? (
+              <div className="py-10 text-center text-muted-foreground text-sm">
+                Пока ни одно устройство не подключалось. Как только программа запустится на новом ПК, он появится здесь.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {devices.map(device => (
+                  <div key={device.id} className="flex items-center justify-between gap-3 p-3 bg-secondary rounded-lg">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm font-semibold text-foreground tracking-wider">{device.device_code}</span>
+                        {device.status === 'linked' && (
+                          <span className="text-xs px-2 py-0.5 bg-emerald-500/15 text-emerald-600 rounded-full font-medium">Привязано</span>
+                        )}
+                        {device.status === 'pending' && (
+                          <span className="text-xs px-2 py-0.5 bg-amber-500/15 text-amber-600 rounded-full font-medium">Ожидает</span>
+                        )}
+                        {device.status === 'revoked' && (
+                          <span className="text-xs px-2 py-0.5 bg-red-500/15 text-red-600 rounded-full font-medium">Отозвано</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                        {device.hostname || 'Без имени'}
+                        {device.profile_name ? ` · ${device.profile_name}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {device.status === 'pending' && (
+                        <button
+                          onClick={() => openLinkDevice(device)}
+                          className="px-3 py-1.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/85 transition-all"
+                        >
+                          Привязать
+                        </button>
+                      )}
+                      {device.status === 'linked' && (
+                        <button
+                          onClick={() => handleRevokeDevice(device)}
+                          className="px-3 py-1.5 bg-red-500/10 text-red-600 rounded-lg text-sm font-medium hover:bg-red-500/20 transition-all"
+                        >
+                          Отозвать
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {linkingDevice && (
+        <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm flex items-center justify-center z-[60] p-4" onClick={() => setLinkingDevice(null)}>
+          <div className="bg-card rounded-2xl p-6 w-full max-w-md border border-border" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-foreground">Привязать устройство</h2>
+              <button onClick={() => setLinkingDevice(null)} className="p-2 text-muted-foreground hover:text-foreground rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Код устройства: <span className="font-mono font-semibold text-foreground">{linkingDevice.device_code}</span>
+            </p>
+            <label className="block text-sm font-medium text-foreground/80 mb-2">Сотрудник</label>
+            <select
+              value={linkProfileId}
+              onChange={(e) => setLinkProfileId(e.target.value)}
+              className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground text-base focus:outline-none focus:ring-2 focus:ring-ring mb-4"
+            >
+              <option value="">— Выберите сотрудника —</option>
+              {employees.map(e => (
+                <option key={e.id} value={e.id}>{e.full_name} {e.user_id ? '' : '(нет входа)'}</option>
+              ))}
+            </select>
+
+            {linkProfileId && !employees.find(e => e.id === linkProfileId)?.user_id && (
+              <>
+                <label className="block text-sm font-medium text-foreground/80 mb-2">Пароль для входа (у сотрудника ещё нет учётной записи)</label>
+                <input
+                  type="password"
+                  value={linkPassword}
+                  onChange={(e) => setLinkPassword(e.target.value)}
+                  className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground text-base focus:outline-none focus:ring-2 focus:ring-ring mb-4"
+                  placeholder="Не менее 6 символов"
+                />
+              </>
+            )}
+
+            <button
+              onClick={handleLinkDevice}
+              disabled={!linkProfileId || linkSaving}
+              className="w-full py-3 bg-primary text-white rounded-lg font-medium hover:bg-primary/85 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {linkSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              Привязать
+            </button>
+          </div>
+        </div>
+      )}
+
+      {revealedDeviceToken && (
+        <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm flex items-center justify-center z-[70] p-4" onClick={() => setRevealedDeviceToken(null)}>
+          <div className="bg-card rounded-2xl p-6 w-full max-w-md border border-border" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+              <h2 className="text-lg font-bold text-foreground">Устройство привязано</h2>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Ключ для программы на ПК сотрудника «{revealedDeviceToken.name}». Введите его в настройках приложения — это единственный раз, когда он показан полностью.
+            </p>
+            <div className="flex items-center gap-2 mb-4">
+              <input
+                readOnly
+                value={revealedDeviceToken.token}
+                className="flex-1 bg-secondary border border-border rounded-lg px-4 py-3 text-foreground font-mono text-sm focus:outline-none"
+              />
+              <button
+                onClick={() => { navigator.clipboard.writeText(revealedDeviceToken.token); showToast('Скопировано'); }}
+                className="p-3 bg-secondary border border-border rounded-lg text-muted-foreground hover:text-foreground transition-all"
+              >
+                <Copy className="w-5 h-5" />
+              </button>
+            </div>
+            <button
+              onClick={() => setRevealedDeviceToken(null)}
+              className="w-full py-2.5 bg-secondary text-foreground rounded-lg font-medium hover:bg-border transition-all"
+            >
+              Готово
+            </button>
           </div>
         </div>
       )}

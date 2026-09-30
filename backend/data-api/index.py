@@ -16,7 +16,7 @@ ALLOWED_TABLES = {
     'companies', 'profiles', 'pin_codes', 'schedule_config', 'employee_schedule_settings',
     'schedule_data', 'schedule_settings', 'salary_data', 'salary_settings', 'manager_data',
     'manager_settings', 'employee_rotation', 'collection_data', 'documents', 'folders',
-    'base_files', 'dto_categories', 'dto_templates', 'chat_rooms', 'chat_messages',
+    'base_files', 'dto_categories', 'dto_templates', 'chat_rooms', 'chat_messages', 'devices',
 }
 
 CORS_HEADERS = {
