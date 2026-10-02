@@ -1,28 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Установщик WiX Toolset v4 для АБИЗ. Собирается отдельно от AbizShell.csproj командой:
-    dotnet build installer -c Release
-  (требует установленного расширения "WiX Toolset" в Visual Studio 2026 или wix.exe из NuGet).
-
-  Что делает инсталлятор:
-  1. Копирует собранные файлы AbizShell (из bin\Release\net8.0-windows\win-x64\publish)
-     в Program Files\AnodBiz\AbizShell.
-  2. Прописывает автозапуск в HKEY_LOCAL_MACHINE (а не HKCU) — такой ключ реестра
-     нельзя удалить без прав администратора, в отличие от резервного HKCU-автозапуска,
-     который программа также ставит сама при каждом старте (см. App.xaml.cs).
-  3. Создаёт ярлык в автозагрузке всех пользователей.
+  MSI-пакет АБИЗ. Собирается командой: dotnet build installer\AbizInstaller.wixproj -c Release
+  Элемент <Files Include="..."> автоматически забирает ВСЕ файлы из папки publish —
+  не нужно перечислять .dll вручную (это возможность WiX v5+).
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="1.0.0.0"
            UpgradeCode="8a2e1c6a-5b3e-4d2a-9c7a-1f6e3b2d4a10"
            InstallerVersion="500" Compressed="yes" Scope="perMachine">
 
+    <!-- Запрещаем установку поверх более новой версии и чисто обновляем старую. -->
     <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия АБИЗ." />
     <MediaTemplate EmbedCab="yes" />
+
+    <!-- Иконка в «Программы и компоненты» -->
+    <Property Id="ARPPRODUCTICON" Value="AbizIcon" />
+    <Property Id="ARPNOMODIFY" Value="1" />
 
     <Feature Id="MainFeature" Title="АБИЗ Shell" Level="1">
       <ComponentGroupRef Id="AppFiles" />
       <ComponentRef Id="AutoStartRegistryEntry" />
+      <ComponentRef Id="StartMenuShortcut" />
     </Feature>
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -31,17 +30,20 @@
       </Directory>
     </StandardDirectory>
 
-    <!-- Файлы программы: подставляются при сборке из опубликованной папки. -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuFolder" Name="АБИЗ" />
+    </StandardDirectory>
+
+    <!-- Все файлы программы из папки publish. PublishDir передаётся из .wixproj. -->
     <ComponentGroup Id="AppFiles" Directory="APPDIR">
-      <Component Id="MainExe" Guid="3b1d9f4a-7c2e-4a1b-9d6f-2e8a4c5b6d71">
-        <File Id="AbizShellExe" Source="..\AbizShell\bin\Release\net8.0-windows\win-x64\publish\AbizShell.exe" KeyPath="yes" />
-      </Component>
-      <!-- Остальные .dll/.json из publish добавляются автоматически через Heat (harvest)
-           либо перечисляются вручную при финальной сборке — см. README.md в этой папке. -->
+      <Files Include="$(PublishDir)\**" />
     </ComponentGroup>
 
-    <!-- Автозапуск от имени системы (HKLM) — переживает смену пользователя и обычный
-         пользователь не может его отключить без прав администратора. -->
+    <!--
+      Автозапуск от имени системы (HKLM, а не HKCU) — обычный пользователь не может
+      удалить этот ключ без прав администратора. Программа дополнительно прописывает
+      себя и в HKCU при каждом старте (App.xaml.cs) — это резервный путь.
+    -->
     <Component Id="AutoStartRegistryEntry" Directory="APPDIR" Guid="6e2a7d1c-4f8b-4a9e-8c3d-1a9f6e2b7c44">
       <RegistryValue Root="HKLM"
                      Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
@@ -49,6 +51,22 @@
                      Value="&quot;[APPDIR]AbizShell.exe&quot;"
                      Type="string" KeyPath="yes" />
     </Component>
+
+    <Component Id="StartMenuShortcut" Directory="AppMenuFolder" Guid="9c4f2b8e-1d6a-4e3f-b7c2-5a8d3e1f9b62">
+      <Shortcut Id="AbizStartMenuShortcut"
+                Name="АБИЗ"
+                Description="Рабочая оболочка АБИЗ"
+                Target="[APPDIR]AbizShell.exe"
+                WorkingDirectory="APPDIR" />
+      <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\AnodBiz\AbizShell" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Icon Id="AbizIcon" SourceFile="$(PublishDir)\AbizShell.exe" />
+
+    <!-- Готовый интерфейс установщика: приветствие, выбор папки, прогресс, финал. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="APPDIR" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
   </Package>
 </Wix>

@@ -1,0 +1,18 @@
+В эту папку нужно скачать два файла (см. раздел 1.3 в СБОРКА-ИНСТАЛЛЯТОРА.md).
+Без них итоговый .exe не соберётся.
+
+1) MicrosoftEdgeWebview2Setup.exe
+   Откуда: https://developer.microsoft.com/microsoft-edge/webview2/
+   Что скачать: "Evergreen Bootstrapper"
+   Переименовать ровно в: MicrosoftEdgeWebview2Setup.exe
+   Зачем: движок встроенного браузера. Без него окно сайта будет пустым.
+
+2) windowsdesktop-runtime-8.0-win-x64.exe
+   Откуда: https://dotnet.microsoft.com/download/dotnet/8.0
+   Что скачать: ".NET Desktop Runtime 8.x" для архитектуры x64
+   Переименовать ровно в: windowsdesktop-runtime-8.0-win-x64.exe
+   Зачем: среда выполнения программы. Без неё АБИЗ не запустится.
+
+ВАЖНО: имена файлов должны совпадать буква в букву — они прописаны в Bundle.wxs.
+
+После того как положишь оба файла, эту заметку можно удалить.

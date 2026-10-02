@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Бандл — это и есть итоговый ОДИН ФАЙЛ AbizSetup.exe, который раздаётся сотрудникам.
+  Внутрь него упакованы:
+    1. Microsoft Edge WebView2 Runtime — движок встроенного браузера программы.
+       Без него АБИЗ запустится, но окно браузера будет пустым. Бандл сам проверит,
+       установлен ли он, и поставит при необходимости (на Windows 11 он уже есть).
+    2. Наш MSI-пакет с самой программой (AbizSetup.msi).
+  Собирается командой: dotnet build installer\AbizBundle.wixproj -c Release
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx">
+
+  <Bundle Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="1.0.0.0"
+          UpgradeCode="c1f4e2a7-9b3d-4c8e-a6f1-7d2b5e8c3a94"
+          IconSourceFile="$(PublishDir)\AbizShell.exe">
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          LicenseFile="License.rtf"
+          Theme="hyperlinkLicense"
+          SuppressOptionsUI="yes" />
+    </BootstrapperApplication>
+
+    <Chain>
+      <!-- Среда .NET 8 Desktop Runtime: нужна, т.к. программа собрана как
+           --self-contained false (небольшой размер). Ставится, только если её нет. -->
+      <ExePackage Id="DotNetDesktopRuntime"
+                  DisplayName="Microsoft .NET 8 Desktop Runtime"
+                  SourceFile="redist\windowsdesktop-runtime-8.0-win-x64.exe"
+                  InstallArguments="/install /quiet /norestart"
+                  DetectCondition="DotNetDesktopRuntimeInstalled"
+                  Permanent="yes"
+                  Vital="yes" />
+
+      <!-- Движок браузера для WebView2. -->
+      <ExePackage Id="WebView2Runtime"
+                  DisplayName="Microsoft Edge WebView2 Runtime"
+                  SourceFile="redist\MicrosoftEdgeWebview2Setup.exe"
+                  InstallArguments="/silent /install"
+                  DetectCondition="WebView2Installed"
+                  Permanent="yes"
+                  Vital="yes" />
+
+      <!-- Сама программа АБИЗ. -->
+      <MsiPackage Id="AbizShellMsi"
+                  SourceFile="$(MsiPath)"
+                  DisplayInternalUI="no"
+                  Vital="yes" />
+    </Chain>
+  </Bundle>
+
+  <Fragment>
+    <!-- Проверка, установлен ли WebView2 (ключ реестра появляется после его установки). -->
+    <util:RegistrySearch xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+                         Id="WebView2Search"
+                         Root="HKLM"
+                         Key="SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+                         Value="pv"
+                         Result="exists"
+                         Variable="WebView2Installed" />
+
+    <!-- Проверка наличия .NET 8 Desktop Runtime. -->
+    <util:RegistrySearch xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+                         Id="DotNetSearch"
+                         Root="HKLM"
+                         Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App"
+                         Value="8.0.0"
+                         Result="exists"
+                         Variable="DotNetDesktopRuntimeInstalled" />
+  </Fragment>
+</Wix>
