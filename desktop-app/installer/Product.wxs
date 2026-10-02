@@ -36,7 +36,7 @@
 
     <!-- Все файлы программы из папки publish. PublishDir передаётся из .wixproj. -->
     <ComponentGroup Id="AppFiles" Directory="APPDIR">
-      <Files Include="$(PublishDir)\**" />
+      <Files Include="$(var.PublishDir)\**" />
     </ComponentGroup>
 
     <!--
@@ -62,7 +62,7 @@
       <RegistryValue Root="HKCU" Key="Software\AnodBiz\AbizShell" Name="installed" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
-    <Icon Id="AbizIcon" SourceFile="$(PublishDir)\AbizShell.exe" />
+    <Icon Id="AbizIcon" SourceFile="$(var.PublishDir)\AbizShell.exe" />
 
     <!-- Готовый интерфейс установщика: приветствие, выбор папки, прогресс, финал. -->
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="APPDIR" />

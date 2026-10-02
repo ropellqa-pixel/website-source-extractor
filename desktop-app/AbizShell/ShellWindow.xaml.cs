@@ -87,7 +87,7 @@ namespace AbizShell
 
         // Администратор может закрыть окно (например, через системное меню) — обычный
         // пользователь не может, окно без этого было бы неубиваемым даже для директора.
-        private void ShellWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        private void ShellWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
             if (!IsAdmin) { e.Cancel = true; return; }
             _keyboardHook?.Dispose();
@@ -140,7 +140,6 @@ namespace AbizShell
             {
                 await MainBrowser.EnsureCoreWebView2Async(null);
                 ConfigureBrowserSettings();
-                MainBrowser.CoreWebView2.KeyboardAccelerators.Clear();
                 await LoadButtonsAsync();
                 await AutoLoginAndNavigateAsync();
             }
@@ -164,6 +163,7 @@ namespace AbizShell
             settings.AreDevToolsEnabled = IsAdmin;
             settings.IsZoomControlEnabled = true;
             settings.IsStatusBarEnabled = false;
+            settings.AreBrowserAcceleratorKeysEnabled = IsAdmin;
         }
 
         // --- Загрузка/сохранение кнопок киоска ---

@@ -120,7 +120,11 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="28">
+                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="28"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="scale" ScaleX="1" ScaleY="1"/>
+                            </Border.RenderTransform>
                             <Border.Effect>
                                 <DropShadowEffect BlurRadius="16" ShadowDepth="4" Opacity="0.35" Color="Black"/>
                             </Border.Effect>
@@ -146,14 +150,7 @@
                                 </Trigger.ExitActions>
                             </Trigger>
                         </ControlTemplate.Triggers>
-                        <ControlTemplate.Resources/>
                     </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
-            <Setter Property="RenderTransform">
-                <Setter.Value>
-                    <ScaleTransform x:Name="scale" ScaleX="1" ScaleY="1"/>
                 </Setter.Value>
             </Setter>
         </Style>
