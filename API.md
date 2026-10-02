@@ -179,6 +179,53 @@ var result = await client.QueryAsync(new {
 
 ### `devices` — устройства (ПК с программой) — см. раздел 7
 
+### `kiosk_buttons` — кнопки киоска программы (порядок, цвет, действие)
+| Поле | Тип | Описание |
+|---|---|---|
+| id | text | уникальный ID кнопки (GUID); если не передать — сервер создаст сам |
+| text | text | надпись на кнопке, например `Word` |
+| color | text | цвет в HEX, например `#125499` |
+| action | text | `web` (открыть ссылку) или `app` (запустить .exe) |
+| target | text | ссылка или имя/путь .exe файла |
+| order_index | integer | порядковый номер для сортировки (0, 1, 2...) |
+| created_at, updated_at | timestamptz | служебные |
+
+**Загрузить кнопки при запуске программы (уже по порядку):**
+```json
+{"table":"kiosk_buttons","op":"select","order":{"col":"order_index","ascending":true}}
+```
+
+**Нажатие «Сохранить» у администратора** — два запроса подряд: стереть старый список
+и записать новый целиком (insert принимает массив):
+```json
+{"table":"kiosk_buttons","op":"delete","filters":[{"col":"order_index","op":"gte","value":0}]}
+```
+```json
+{"table":"kiosk_buttons","op":"insert","payload":[
+  {"id":"b1","text":"Word","color":"#125499","action":"app","target":"WINWORD.EXE","order_index":0},
+  {"id":"b2","text":"Почта","color":"#2E7D32","action":"web","target":"https://mail.ru","order_index":1}
+]}
+```
+
+```csharp
+public async Task SaveKioskButtonsAsync(List<KioskButton> buttons)
+{
+    await QueryAsync(new {
+        table = "kiosk_buttons", op = "delete",
+        filters = new[] { new { col = "order_index", op = "gte", value = 0 } }
+    });
+    var payload = buttons.Select((b, i) => new {
+        id = b.Id ?? Guid.NewGuid().ToString(),
+        text = b.Text, color = b.Color, action = b.Action,
+        target = b.Target, order_index = i
+    }).ToList();
+    await QueryAsync(new { table = "kiosk_buttons", op = "insert", payload });
+}
+```
+Порядок `order_index` берётся из позиции кнопки в списке (`i`), поэтому после
+перетаскивания достаточно просто вызвать сохранение. Менять кнопки должен только
+администратор — на стороне программы показывай кнопку «Сохранить» только ему.
+
 ### `schedule_data` — табель, смены по месяцам
 | Поле | Тип | Описание |
 |---|---|---|
