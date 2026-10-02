@@ -13,7 +13,6 @@
 
     <!-- Иконка в «Программы и компоненты» -->
     <Property Id="ARPPRODUCTICON" Value="AbizIcon" />
-    <Property Id="ARPNOMODIFY" Value="1" />
 
     <Feature Id="MainFeature" Title="АБИЗ Shell" Level="1">
       <ComponentGroupRef Id="AppFiles" />
@@ -56,7 +55,7 @@
                 Target="[APPDIR]AbizShell.exe"
                 WorkingDirectory="APPDIR" />
       <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
-      <RegistryValue Root="HKLM" Key="SOFTWARE\AnodBiz\AbizShell" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      <RegistryValue Root="HKCU" Key="Software\AnodBiz\AbizShell" Name="installed" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
     <Icon Id="AbizIcon" SourceFile="$(var.PublishDir)\AbizShell.exe" />
