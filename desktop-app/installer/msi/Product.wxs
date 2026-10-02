@@ -17,7 +17,6 @@
     <Feature Id="MainFeature" Title="АБИЗ Shell" Level="1">
       <ComponentGroupRef Id="AppFiles" />
       <ComponentRef Id="AutoStartRegistryEntry" />
-      <ComponentRef Id="StartMenuShortcut" />
     </Feature>
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -26,9 +25,6 @@
       </Directory>
     </StandardDirectory>
 
-    <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="AppMenuFolder" Name="АБИЗ" />
-    </StandardDirectory>
 
     <!-- Все файлы программы из папки publish. PublishDir передаётся из .wixproj. -->
     <ComponentGroup Id="AppFiles" Directory="APPDIR">
@@ -48,15 +44,6 @@
                      Type="string" KeyPath="yes" />
     </Component>
 
-    <Component Id="StartMenuShortcut" Directory="AppMenuFolder" Guid="9c4f2b8e-1d6a-4e3f-b7c2-5a8d3e1f9b62">
-      <Shortcut Id="AbizStartMenuShortcut"
-                Name="АБИЗ"
-                Description="Рабочая оболочка АБИЗ"
-                Target="[APPDIR]AbizShell.exe"
-                WorkingDirectory="APPDIR" />
-      <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
-      <RegistryValue Root="HKCU" Key="Software\AnodBiz\AbizShell" Name="installed" Type="integer" Value="1" KeyPath="yes" />
-    </Component>
 
     <Icon Id="AbizIcon" SourceFile="$(var.PublishDir)\AbizShell.exe" />
 

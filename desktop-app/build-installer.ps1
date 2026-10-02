@@ -11,24 +11,20 @@ function Write-Step($number, $text) {
 }
 
 try {
-    # Проверяем, что инструмент wix установлен.
-    $wixOk = $false
-    try { wix --version | Out-Null; $wixOk = $true } catch { }
-    if (-not $wixOk) {
-        Write-Host "Не найден инструмент WiX. Установи его командой:" -ForegroundColor Red
-        Write-Host "  dotnet tool install --global wix --version 5.0.2" -ForegroundColor Yellow
-        exit 1
-    }
-
-    # Проверяем, что скачаны файлы для бандла.
+    # Скачиваем с официальных серверов Microsoft файлы для бандла, если их ещё нет.
     $redist = Join-Path $root "installer\redist"
-    $needed = @("MicrosoftEdgeWebview2Setup.exe", "windowsdesktop-runtime-8.0-win-x64.exe")
-    foreach ($f in $needed) {
-        $path = Join-Path $redist $f
+    New-Item -ItemType Directory -Force -Path $redist | Out-Null
+    $downloads = [ordered]@{
+        "MicrosoftEdgeWebview2Setup.exe"         = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+        "windowsdesktop-runtime-8.0-win-x64.exe" = "https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe"
+    }
+    foreach ($name in $downloads.Keys) {
+        $path = Join-Path $redist $name
         if (-not (Test-Path $path)) {
-            Write-Host "Не найден файл: $path" -ForegroundColor Red
-            Write-Host "Скачай его — см. раздел 1.3 в СБОРКА-ИНСТАЛЛЯТОРА.md" -ForegroundColor Yellow
-            exit 1
+            Write-Host "Скачиваю $name ..." -ForegroundColor Cyan
+            $ProgressPreference = "SilentlyContinue"
+            Invoke-WebRequest -Uri $downloads[$name] -OutFile $path -UseBasicParsing
+            $ProgressPreference = "Continue"
         }
     }
 
