@@ -72,23 +72,27 @@ namespace AbizShell
             if (!string.IsNullOrEmpty(existingCode))
                 return existingCode;
 
-            string hostname = Environment.MachineName;
+            // Код выдаёт только сервер. Если связи нет — возвращаем пустую строку и
+            // НЕ сохраняем выдуманный код (раньше сохранялся случайный код, которого
+            // сервер не знал, и привязать такой ПК в личном кабинете было невозможно).
             try
             {
-                string code = await AnodBizClient.RegisterDeviceAsync(hostname);
+                string code = await AnodBizClient.RegisterDeviceAsync(Environment.MachineName);
                 SaveDeviceCode(code);
                 return code;
             }
             catch
             {
-                string tempCode = GenerateTempCode();
-                SaveDeviceCode(tempCode);
-                return tempCode;
+                return "";
             }
         }
 
-        /// <summary>Возвращает true, если за время опроса устройство оказалось привязано и токен сохранён.</summary>
-        public static async Task<bool> PollDeviceStatusAsync(string deviceCode)
+        /// <summary>
+        /// Результат опроса: "linked" — привязано, токен сохранён; "pending" — ждём;
+        /// "reset" — код на сервере не найден или отозван, нужно получить новый код;
+        /// "error" — нет связи.
+        /// </summary>
+        public static async Task<string> PollDeviceStatusAsync(string deviceCode)
         {
             try
             {
@@ -96,17 +100,24 @@ namespace AbizShell
                 if (status == "linked" && !string.IsNullOrEmpty(token))
                 {
                     SaveApiToken(token);
-                    return true;
+                    return "linked";
                 }
+                if (status == "notfound" || status == "revoked")
+                    return "reset";
+                return "pending";
             }
-            catch { }
-            return false;
+            catch
+            {
+                return "error";
+            }
         }
 
-        private static string GenerateTempCode()
+        /// <summary>Удаляет сохранённые код и токен и регистрирует устройство заново.</summary>
+        public static async Task<string> ResetDeviceAsync()
         {
-            var rnd = new Random();
-            return rnd.Next(100000000, 999999999).ToString();
+            ClearApiToken();
+            SaveDeviceCode("");
+            return await InitializeDeviceAsync();
         }
 
         public static string FormatCode(string code)

@@ -90,6 +90,29 @@
       "expectedStatus": 404
     },
     {
+      "name": "Ping without auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "ping"},
+      "expectedStatus": 200,
+      "expectedBody": {"ok": true},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Device signin with bad token rejected",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "device_signin", "api_token": "not_a_real_token", "password": "123456"},
+      "expectedStatus": 403
+    },
+    {
+      "name": "Device signin without password rejected",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "device_signin", "api_token": "x"},
+      "expectedStatus": 400
+    },
+    {
       "name": "Set employee password without session rejected",
       "method": "POST",
       "path": "/",

@@ -91,7 +91,7 @@
                     <TextBlock Text="Первый запуск — привязка устройства" FontSize="24" FontWeight="Bold"
                                Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,12"
                                TextWrapping="Wrap" TextAlignment="Center"/>
-                    <TextBlock Text="Ключ для программы на ПК сотрудника. Введите его в настройках приложения на сайте — это единственный раз, когда он показан полностью."
+                    <TextBlock Text="Этот компьютер ещё не привязан к сотруднику. Передайте код ниже директору."
                                FontSize="14" Foreground="#88FFFFFF" HorizontalAlignment="Center"
                                Margin="0,0,0,16" TextWrapping="Wrap" TextAlignment="Center"/>
                     <Border Background="#0D0D14" CornerRadius="16" Padding="24,16" Margin="0,8,0,16">
@@ -115,6 +115,43 @@
                     </StackPanel>
                     <TextBlock x:Name="BindingPcName" Text="" FontSize="12" Foreground="#44FFFFFF"
                                HorizontalAlignment="Center" Margin="0,12,0,0"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,0">
+                        <Button Content="Проверить привязку" FontSize="15" FontWeight="Bold" Foreground="White"
+                                Padding="22,12" Margin="0,0,10,0" Cursor="Hand" Click="CheckBindingNow_Click">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="b" Background="#4A90D9" CornerRadius="12" Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="b" Property="Background" Value="#5AA0E9"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                        <Button Content="Новый код" FontSize="15" Foreground="White"
+                                Padding="22,12" Cursor="Hand" Click="NewCode_Click">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="b" Background="#333344" CornerRadius="12" Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="b" Property="Background" Value="#444458"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </StackPanel>
+                    <TextBlock Text="Пароль администратора открывает программу и без привязки"
+                               FontSize="12" Foreground="#44FFFFFF" HorizontalAlignment="Center" Margin="0,14,0,0"/>
+                    <PasswordBox x:Name="BindingAdminPassword" Width="260" FontSize="16" Padding="8" Margin="0,6,0,0"
+                                 Background="#0D0D14" Foreground="White" BorderBrush="#33FFFFFF"
+                                 HorizontalContentAlignment="Center" KeyDown="BindingAdminPassword_KeyDown"/>
                 </StackPanel>
             </Border>
         </Grid>

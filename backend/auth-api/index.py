@@ -129,6 +129,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     action = body.get('action') or (event.get('queryStringParameters') or {}).get('action')
 
+    if action == 'ping':
+        # Проверка связи для десктоп-программы: без БД и без авторизации.
+        return _resp(200, {'ok': True})
+
     conn = _conn()
     try:
         with conn.cursor() as cur:
@@ -502,6 +506,32 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     )
                 conn.commit()
                 return _resp(200, {'ok': True})
+
+            elif action == 'device_signin':
+                # Вход сотрудника в десктоп-программе: токен устройства + пароль сотрудника,
+                # к которому привязан ПК. Пароль проверяется на сервере каждый раз, поэтому
+                # смена пароля директором в ЛК действует сразу.
+                api_token = body.get('api_token') or ''
+                password = body.get('password') or ''
+                if not api_token or not password:
+                    return _resp(400, {'error': 'api_token и password обязательны'})
+                cur.execute(
+                    f'SELECT t.user_id, t.revoked_at FROM {SCHEMA}.api_tokens t WHERE t.token = %s',
+                    (api_token,),
+                )
+                token_row = cur.fetchone()
+                if not token_row or token_row[1] is not None:
+                    return _resp(403, {'error': 'Устройство отвязано', 'revoked': True})
+                user_id = token_row[0]
+                cur.execute(f'SELECT password_hash FROM {SCHEMA}.auth_users WHERE id = %s', (user_id,))
+                user_row = cur.fetchone()
+                if not user_row or not verify_password(password, user_row[0]):
+                    return _resp(401, {'error': 'Неверный пароль'})
+                cur.execute(f'SELECT full_name FROM {SCHEMA}.profiles WHERE user_id = %s LIMIT 1', (user_id,))
+                prof = cur.fetchone()
+                cur.execute(f'UPDATE {SCHEMA}.api_tokens SET last_used_at = now() WHERE token = %s', (api_token,))
+                conn.commit()
+                return _resp(200, {'ok': True, 'full_name': prof[0] if prof else ''})
 
             elif action == 'api_verify':
                 # Проверка постоянного API-токена — используется другими backend-функциями

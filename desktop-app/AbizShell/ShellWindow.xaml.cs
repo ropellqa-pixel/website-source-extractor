@@ -136,20 +136,53 @@ namespace AbizShell
                 return false;
             };
 
-            try
-            {
-                await MainBrowser.EnsureCoreWebView2Async(null);
-                ConfigureBrowserSettings();
-                await LoadButtonsAsync();
-                await AutoLoginAndNavigateAsync();
-            }
-            catch
-            {
-                try { MainBrowser.Source = new Uri(HomePage); } catch { }
-            }
+            await InitBrowserAsync();
 
             _ = CheckNotificationsAsync();
             _ = CheckNetworkAsync();
+        }
+
+        /// <summary>
+        /// Запуск встроенного браузера. Папка данных браузера — в LocalAppData: программа
+        /// установлена в Program Files, куда писать нельзя, и без явной папки движок
+        /// браузера не запускался — окно оставалось пустым.
+        /// </summary>
+        private async Task InitBrowserAsync()
+        {
+            try
+            {
+                string dataDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "AbizShell", "WebView2");
+                Directory.CreateDirectory(dataDir);
+
+                var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(null, dataDir);
+                await MainBrowser.EnsureCoreWebView2Async(env);
+            }
+            catch (Microsoft.Web.WebView2.Core.WebView2RuntimeNotFoundException)
+            {
+                MessageBox.Show(
+                    "На компьютере не установлен компонент Microsoft Edge WebView2 — без него браузер не работает.\n\n" +
+                    "Установите его с сайта Microsoft (поиск: «WebView2 Runtime») или переустановите АБИЗ из полного установщика.",
+                    "АБИЗ — браузер", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Не удалось запустить встроенный браузер:\n" + ex.Message,
+                    "АБИЗ — браузер", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            ConfigureBrowserSettings();
+            try { await LoadButtonsAsync(); } catch { BuildTilesFromDefaults(); }
+            await AutoLoginAndNavigateAsync();
+        }
+
+        private void BuildTilesFromDefaults()
+        {
+            _buttons = KioskButtonsService.DefaultButtons();
+            BuildTiles();
         }
 
         /// <summary>
@@ -323,12 +356,16 @@ namespace AbizShell
             DateLabel.Text = DateTime.Now.ToString("d MMM", new CultureInfo("ru-RU"));
         }
 
+        private int _networkFailures;
+
         private async Task CheckNetworkAsync()
         {
             bool online = await AnodBizClient.CheckNetworkAsync();
+            _networkFailures = online ? 0 : _networkFailures + 1;
+            bool showOffline = _networkFailures >= 2;
             Dispatcher.Invoke(() =>
             {
-                ShellNetworkOverlay.Visibility = online ? Visibility.Collapsed : Visibility.Visible;
+                ShellNetworkOverlay.Visibility = showOffline ? Visibility.Visible : Visibility.Collapsed;
                 StatusDot.Fill = new SolidColorBrush(online
                     ? Color.FromRgb(0x28, 0xC8, 0x40)
                     : Color.FromRgb(0xFF, 0x6B, 0x6B));

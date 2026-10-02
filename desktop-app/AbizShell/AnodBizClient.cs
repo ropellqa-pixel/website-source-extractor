@@ -31,16 +31,58 @@ namespace AbizShell
                 _http.DefaultRequestHeaders.Add("X-Authorization", apiToken);
         }
 
-        /// <summary>Проверка сети — не требует токена, используется и до, и после привязки.</summary>
+        private static readonly HttpClient PingHttp = new() { Timeout = TimeSpan.FromSeconds(8) };
+
+        /// <summary>
+        /// Проверка связи с сервером. Раньше проверка шла к data-api без токена — сервер
+        /// всегда отвечал "не авторизован", и программа считала, что интернета нет.
+        /// Теперь используется отдельное действие ping, которое не требует входа.
+        /// Любой ответ сервера = связь есть; нет связи только при ошибке сети/таймауте.
+        /// </summary>
         public static async Task<bool> CheckNetworkAsync()
+        {
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    var content = new StringContent("{\"action\":\"ping\"}", Encoding.UTF8, "application/json");
+                    using var response = await PingHttp.PostAsync(AuthApiUrl, content);
+                    return true;
+                }
+                catch
+                {
+                    await Task.Delay(1000);
+                }
+            }
+            return false;
+        }
+
+        public enum SignInResult { Ok, WrongPassword, DeviceRevoked, NoNetwork }
+
+        /// <summary>
+        /// Вход сотрудника: пароль проверяется на сервере (тот, что директор задал в ЛК).
+        /// Поэтому смена пароля в личном кабинете действует сразу, без ожидания.
+        /// </summary>
+        public static async Task<(SignInResult result, string fullName)> DeviceSignInAsync(string apiToken, string password)
         {
             try
             {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-                var response = await http.PostAsJsonAsync(DataApiUrl, new { table = "companies", op = "select", limit = 1 });
-                return response.IsSuccessStatusCode;
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                string json = JsonSerializer.Serialize(new { action = "device_signin", api_token = apiToken, password });
+                using var resp = await http.PostAsync(AuthApiUrl, new StringContent(json, Encoding.UTF8, "application/json"));
+                var root = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
+                if ((int)resp.StatusCode == 200)
+                {
+                    string name = root.TryGetProperty("full_name", out var n) ? n.GetString() ?? "" : "";
+                    return (SignInResult.Ok, name);
+                }
+                if ((int)resp.StatusCode == 403) return (SignInResult.DeviceRevoked, "");
+                return (SignInResult.WrongPassword, "");
             }
-            catch { return false; }
+            catch
+            {
+                return (SignInResult.NoNetwork, "");
+            }
         }
 
         /// <summary>Универсальный запрос к data-api (CRUD по любой разрешённой таблице).</summary>
@@ -86,6 +128,8 @@ namespace AbizShell
         public static async Task<(string status, string? token)> CheckDeviceStatusAsync(string deviceCode)
         {
             var root = await PostAuthAsync(new { action = "device_status", device_code = deviceCode });
+            if (root.TryGetProperty("error", out _) && !root.TryGetProperty("status", out _))
+                return ("notfound", null);
             string status = root.TryGetProperty("status", out var stProp) ? stProp.GetString() ?? "pending" : "pending";
             string? token = root.TryGetProperty("api_token", out var tkProp) ? tkProp.GetString() : null;
             return (status, token);
