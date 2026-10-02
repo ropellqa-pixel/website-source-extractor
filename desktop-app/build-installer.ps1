@@ -1,4 +1,4 @@
-# Сборка инсталлятора АБИЗ "в один клик".
+﻿# Сборка инсталлятора АБИЗ "в один клик".
 # Запуск:  powershell -ExecutionPolicy Bypass -File build-installer.ps1
 # Выполняет три шага по порядку: публикация программы -> MSI -> итоговый .exe
 
@@ -37,14 +37,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Публикация не удалась" }
 
     Write-Step 2 "сборка MSI-пакета"
-    dotnet build (Join-Path $root "installer\AbizInstaller.wixproj") -c Release
+    dotnet build (Join-Path $root "installer\msi\AbizInstaller.wixproj") -c Release
     if ($LASTEXITCODE -ne 0) { throw "Сборка MSI не удалась" }
 
     Write-Step 3 "сборка итогового .exe"
-    dotnet build (Join-Path $root "installer\AbizBundle.wixproj") -c Release
+    dotnet build (Join-Path $root "installer\bundle\AbizBundle.wixproj") -c Release
     if ($LASTEXITCODE -ne 0) { throw "Сборка бандла не удалась" }
 
-    $result = Join-Path $root "installer\bin\Release\AbizSetup.exe"
+    $result = Join-Path $root "installer\out\AbizSetup.exe"
     Write-Host ""
     Write-Host "ГОТОВО. Инсталлятор собран:" -ForegroundColor Green
     Write-Host "  $result" -ForegroundColor Green

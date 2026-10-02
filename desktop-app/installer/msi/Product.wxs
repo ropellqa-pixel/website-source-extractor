@@ -1,14 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  MSI-пакет АБИЗ. Собирается командой: dotnet build installer\AbizInstaller.wixproj -c Release
-  Элемент <Files Include="..."> автоматически забирает ВСЕ файлы из папки publish —
-  не нужно перечислять .dll вручную (это возможность WiX v5+).
--->
+<!-- MSI-пакет АБИЗ. Сборка: dotnet build installer\msi\AbizInstaller.wixproj -c Release -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="1.0.0.0"
            UpgradeCode="8a2e1c6a-5b3e-4d2a-9c7a-1f6e3b2d4a10"
-           InstallerVersion="500" Compressed="yes" Scope="perMachine">
+           InstallerVersion="500" Compressed="yes" Scope="perMachine"
+           Language="1049" Codepage="1251">
 
     <!-- Запрещаем установку поверх более новой версии и чисто обновляем старую. -->
     <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия АБИЗ." />
@@ -59,7 +56,7 @@
                 Target="[APPDIR]AbizShell.exe"
                 WorkingDirectory="APPDIR" />
       <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
-      <RegistryValue Root="HKCU" Key="Software\AnodBiz\AbizShell" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\AnodBiz\AbizShell" Name="installed" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
     <Icon Id="AbizIcon" SourceFile="$(var.PublishDir)\AbizShell.exe" />

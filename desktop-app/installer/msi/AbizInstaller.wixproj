@@ -1,0 +1,14 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputName>AbizSetup</OutputName>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <Cultures>ru-RU</Cultures>
+    <OutputPath>$(MSBuildThisFileDirectory)..\out\</OutputPath>
+    <PublishDir>$(MSBuildThisFileDirectory)..\..\AbizShell\bin\Release\net8.0-windows\win-x64\publish</PublishDir>
+    <DefineConstants>PublishDir=$(PublishDir)</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>

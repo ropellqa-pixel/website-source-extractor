@@ -28,10 +28,10 @@
 | `KioskButton.cs`, `KioskButtonsService.cs` | Кнопки киоска: модель + синхронизация с таблицей `kiosk_buttons` на сервере |
 | `PrintService.cs` | Печать текущей страницы браузера (диалог Windows) |
 | `InputDialog.cs` | Простое окно ввода текста (поиск сотрудника, смена ключа) |
-| `installer/Product.wxs` | MSI-пакет: автозапуск через HKLM, файлы в Program Files, ярлык в меню «Пуск» |
-| `installer/Bundle.wxs` | Итоговый `.exe`: внутрь упакованы MSI + .NET 8 + WebView2 |
-| `installer/AbizInstaller.wixproj` | Проект сборки MSI (собирать вторым) |
-| `installer/AbizBundle.wixproj` | Проект сборки `.exe` (собирать третьим) |
+| `installer/msi/Product.wxs` | MSI-пакет: автозапуск через HKLM, файлы в Program Files, ярлык в меню «Пуск» |
+| `installer/bundle/Bundle.wxs` | Итоговый `.exe`: внутрь упакованы MSI + .NET 8 + WebView2 |
+| `installer/msi/AbizInstaller.wixproj` | Проект сборки MSI (собирать вторым) |
+| `installer/bundle/AbizBundle.wixproj` | Проект сборки `.exe` (собирать третьим) |
 | `build-installer.ps1` | Скрипт: выполняет все три шага сборки подряд |
 | `AbizShell.sln` | Файл решения — открывается двойным кликом в Visual Studio |
 | `НАЧАЛО-РАБОТЫ-VS2026.md` | **Первый запуск: распаковка, пакеты, сборка, отладка** |
@@ -89,7 +89,7 @@
 powershell -ExecutionPolicy Bypass -File build-installer.ps1
 ```
 
-Результат — `installer\bin\Release\AbizSetup.exe`, один файл для раздачи сотрудникам.
+Результат — `installer\out\AbizSetup.exe`, один файл для раздачи сотрудникам.
 Первый запуск на ПК покажет 9-значный код устройства, который директор вводит на сайте:
 **Сотрудники → Устройства → Привязать**.
 
