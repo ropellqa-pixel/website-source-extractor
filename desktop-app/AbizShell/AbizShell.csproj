@@ -7,6 +7,7 @@
 		<PlatformTarget>x64</PlatformTarget>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
 		<StartupObject>AbizShell.App</StartupObject>
+		<ApplicationIcon>abiz.ico</ApplicationIcon>
 		<EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
 		<AssemblyName>AbizShell</AssemblyName>
 		<AssemblyTitle>ABIZ</AssemblyTitle>

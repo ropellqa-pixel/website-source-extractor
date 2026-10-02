@@ -45,7 +45,7 @@
     </Component>
 
 
-    <Icon Id="AbizIcon" SourceFile="$(var.PublishDir)\AbizShell.exe" />
+    <Icon Id="AbizIcon" SourceFile="..\bundle\abiz.ico" />
 
     <!-- Готовый интерфейс установщика: приветствие, выбор папки, прогресс, финал. -->
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="APPDIR" />
