@@ -6,35 +6,32 @@ using Microsoft.Win32;
 
 namespace AbizShell
 {
-    public partial class App : Application
+    /// <summary>
+    /// Точка входа программы. Файл App.xaml НЕ используется — приложение запускается
+    /// из метода Main. Если в папке проекта остался старый App.xaml — удали его.
+    /// </summary>
+    public class App : Application
     {
-        // Mutex не даёт запустить вторую копию программы — иначе пользователь мог бы
-        // открыть ещё один экземпляр и запутать систему блокировки экрана.
         private static Mutex? _singleInstanceMutex;
+
+        [STAThread]
+        public static void Main()
+        {
+            _singleInstanceMutex = new Mutex(true, "AbizShell_SingleInstance_8F2A1C", out bool isNew);
+            if (!isNew) return;
+
+            var app = new App { ShutdownMode = ShutdownMode.OnLastWindowClose };
+            app.Run();
+        }
 
         protected override void OnStartup(StartupEventArgs e)
         {
-            _singleInstanceMutex = new Mutex(true, "AbizShell_SingleInstance_8F2A1C", out bool isNew);
-            if (!isNew)
-            {
-                Shutdown();
-                return;
-            }
-
-            RegisterAutoStart();
             base.OnStartup(e);
-
-            var login = new MainWindow();
-            login.Show();
+            RegisterAutoStart();
+            new MainWindow().Show();
         }
 
-        /// <summary>
-        /// Автозапуск через реестр HKCU\...\Run — срабатывает при каждом входе в Windows.
-        /// Это резервный способ на случай переустановки/сброса; основной автозапуск
-        /// прописывается инсталлятором (см. installer/Product.wxs — создаёт тот же
-        /// ключ реестра от имени системы, HKLM, что нельзя удалить без прав администратора).
-        /// </summary>
-        private void RegisterAutoStart()
+        private static void RegisterAutoStart()
         {
             try
             {

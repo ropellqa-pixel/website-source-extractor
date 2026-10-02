@@ -6,17 +6,19 @@
 		<Nullable>enable</Nullable>
 		<PlatformTarget>x64</PlatformTarget>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<StartupObject>AbizShell.App</StartupObject>
+		<EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
 		<AssemblyName>AbizShell</AssemblyName>
-		<AssemblyTitle>АБИЗ</AssemblyTitle>
-		<Product>АБИЗ</Product>
-		<Company>ООО «Рассвет»</Company>
+		<AssemblyTitle>ABIZ</AssemblyTitle>
+		<Product>ABIZ</Product>
+		<Company>Rassvet</Company>
 	</PropertyGroup>
 	<ItemGroup>
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+		<ApplicationDefinition Remove="App.xaml" />
+		<Page Remove="App.xaml" />
+		<None Remove="App.xaml" />
+	</ItemGroup>
+	<ItemGroup>
 		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-		<PackageReference Include="Serilog" Version="4.4.0" />
-		<PackageReference Include="System.Management" Version="10.0.12" />
-		<PackageReference Include="System.Text.Json" Version="10.0.12" />
 	</ItemGroup>
 </Project>
