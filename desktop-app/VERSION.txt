@@ -1,0 +1,2 @@
+ABIZ project version 6
+If installer\msi and installer\bundle folders exist - archive is fresh.
