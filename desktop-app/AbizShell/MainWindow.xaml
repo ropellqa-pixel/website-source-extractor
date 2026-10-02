@@ -1,0 +1,169 @@
+<Window x:Class="AbizShell.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="АБИЗ"
+        WindowStyle="None" Topmost="True"
+        WindowState="Maximized"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterScreen" Background="#0D0D14">
+
+    <Grid>
+        <Rectangle>
+            <Rectangle.Fill>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#0D0D14" Offset="0"/>
+                    <GradientStop Color="#1A1A2E" Offset="0.5"/>
+                    <GradientStop Color="#16213E" Offset="1"/>
+                </LinearGradientBrush>
+            </Rectangle.Fill>
+        </Rectangle>
+
+        <Ellipse Width="400" Height="400" Fill="#11FFFFFF" Margin="-100,-100,0,0"
+                 HorizontalAlignment="Left" VerticalAlignment="Top"/>
+        <Ellipse Width="300" Height="300" Fill="#11FFFFFF" Margin="0,0,-80,-80"
+                 HorizontalAlignment="Right" VerticalAlignment="Bottom"/>
+
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="400">
+            <TextBlock Text="АБИЗ" FontSize="56" FontWeight="Black" Foreground="#FFFFFF"
+                       HorizontalAlignment="Center" Margin="0,0,0,4"/>
+            <TextBlock Text="Автономный БИЗнес" FontSize="16" Foreground="#66FFFFFF"
+                       HorizontalAlignment="Center" Margin="0,0,0,8"/>
+            <TextBlock Text="ООО «Рассвет»" FontSize="14" Foreground="#44FFFFFF"
+                       HorizontalAlignment="Center" Margin="0,0,0,40"/>
+
+            <PasswordBox x:Name="PasswordBox" FontSize="20" Padding="14"
+                         BorderBrush="#33FFFFFF" BorderThickness="1"
+                         Background="#1A1A2E" Foreground="White"
+                         MinHeight="56" Margin="0,0,0,12"
+                         HorizontalContentAlignment="Center"
+                         KeyDown="PasswordBox_KeyDown">
+                <PasswordBox.Resources>
+                    <Style TargetType="PasswordBox">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="PasswordBox">
+                                    <Border Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="14">
+                                        <ScrollViewer x:Name="PART_ContentHost"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </PasswordBox.Resources>
+            </PasswordBox>
+
+            <TextBlock x:Name="StatusLabel" Foreground="#4A90D9" FontSize="14"
+                       HorizontalAlignment="Center" Margin="0,8,0,0" Height="20"
+                       Text="Ожидание ввода..."/>
+
+            <TextBlock x:Name="DeviceCodeLabel" Foreground="#33FFFFFF" FontSize="12"
+                       HorizontalAlignment="Center" Margin="0,24,0,0"
+                       Text="Код устройства: ---"
+                       MouseLeftButtonDown="DeviceCode_MouseLeftButtonDown"
+                       Cursor="Hand"
+                       ToolTip="Три быстрых клика — получить новый код устройства"/>
+        </StackPanel>
+
+        <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,20,16">
+            <TextBlock x:Name="EmployeeInfoLabel" Foreground="#33FFFFFF" FontSize="11"
+                       Text="Ожидание привязки устройства..."/>
+        </StackPanel>
+
+        <TextBlock VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="20,0,0,16"
+                   Foreground="#22FFFFFF" FontSize="11"
+                   Text="АБИЗ Shell v3.0"/>
+
+        <!-- Экран привязки устройства: показывает 9-значный код, который директор вводит
+             на сайте в Сотрудники → Устройства → Привязать. Пока не привязано — опрос раз в 5с. -->
+        <Grid x:Name="BindingOverlay" Visibility="Collapsed">
+            <Rectangle Fill="#F20D0D14"/>
+            <Border HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Width="540" Background="#1A1A2E" CornerRadius="24">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="30" ShadowDepth="0" Opacity="0.6" Color="Black"/>
+                </Border.Effect>
+                <StackPanel HorizontalAlignment="Center" Margin="40">
+                    <TextBlock Text="&#x1F511;" FontSize="56" HorizontalAlignment="Center" Margin="0,0,0,20"/>
+                    <TextBlock Text="Первый запуск — привязка устройства" FontSize="24" FontWeight="Bold"
+                               Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,12"
+                               TextWrapping="Wrap" TextAlignment="Center"/>
+                    <TextBlock Text="Ключ для программы на ПК сотрудника. Введите его в настройках приложения на сайте — это единственный раз, когда он показан полностью."
+                               FontSize="14" Foreground="#88FFFFFF" HorizontalAlignment="Center"
+                               Margin="0,0,0,16" TextWrapping="Wrap" TextAlignment="Center"/>
+                    <Border Background="#0D0D14" CornerRadius="16" Padding="24,16" Margin="0,8,0,16">
+                        <TextBlock x:Name="BindingCodeLabel" Text="---"
+                                   FontSize="42" FontWeight="Black" Foreground="#4A90D9"
+                                   HorizontalAlignment="Center" FontFamily="Consolas"
+                                   MouseLeftButtonDown="DeviceCode_MouseLeftButtonDown"
+                                   Cursor="Hand"/>
+                    </Border>
+                    <TextBlock Text="Директор вводит этот код на сайте anod.saou.ru: Сотрудники → Устройства → Привязать"
+                               FontSize="14" Foreground="#66FFFFFF" TextWrapping="Wrap"
+                               TextAlignment="Center" Margin="0,0,0,16"/>
+                    <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Margin="0,0,0,8">
+                        <Ellipse Width="10" Height="10" Fill="#4A90D9" Margin="0,0,8,0">
+                            <Ellipse.RenderTransform>
+                                <RotateTransform x:Name="SpinnerRot" CenterX="5" CenterY="5"/>
+                            </Ellipse.RenderTransform>
+                        </Ellipse>
+                        <TextBlock x:Name="BindingStatusLabel" Text="Ожидание привязки..."
+                                   FontSize="14" Foreground="#4A90D9" FontWeight="Medium"/>
+                    </StackPanel>
+                    <TextBlock x:Name="BindingPcName" Text="" FontSize="12" Foreground="#44FFFFFF"
+                               HorizontalAlignment="Center" Margin="0,12,0,0"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Grid x:Name="NetworkOverlay" Visibility="Collapsed">
+            <Rectangle Fill="#EE0A0A14"/>
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="480">
+                <TextBlock Text="&#x26A0;" FontSize="48" Foreground="#FF6B6B"
+                           HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                <TextBlock Text="Сеть недоступна!" FontSize="28" FontWeight="Bold" Foreground="#FF6B6B"
+                           HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                <TextBlock Text="Интернет-соединение пропало. Ожидаем восстановление сети."
+                           FontSize="15" Foreground="#88FFFFFF" TextWrapping="Wrap"
+                           TextAlignment="Center" Margin="0,0,0,8"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <Button Content="Обновить" FontSize="16" FontWeight="Bold" Foreground="White"
+                            Background="#4A6FA5" BorderThickness="0" Padding="24,12"
+                            Margin="0,0,12,0" Cursor="Hand" Click="RetryNetwork_Click">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="b" Background="#4A6FA5" CornerRadius="14">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="b" Property="Background" Value="#5A7FB5"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <Button Content="Ввести пароль администратора" FontSize="14" FontWeight="Bold" Foreground="White"
+                            Background="#D32F2F" BorderThickness="0" Padding="20,12"
+                            Cursor="Hand" Click="CallAdmin_Click">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="b" Background="#D32F2F" CornerRadius="14">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="b" Property="Background" Value="#E53F3F"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

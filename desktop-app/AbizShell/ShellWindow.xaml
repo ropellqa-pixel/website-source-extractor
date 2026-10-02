@@ -1,0 +1,346 @@
+<Window x:Class="AbizShell.ShellWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="АБИЗ Shell" WindowStyle="None" WindowState="Maximized"
+        Topmost="True" Background="#1E1E2E" ShowInTaskbar="False" ResizeMode="NoResize">
+
+    <Window.Resources>
+        <!-- Кнопка "Завершить работу" — молния + красный полупрозрачный фон (стиль macOS). -->
+        <Style x:Key="ShutdownBtnStyle" TargetType="Button">
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Margin" Value="6,0,0,0"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ToolTipService.InitialShowDelay" Value="300"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="#33D32F2F" CornerRadius="10">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <TextBlock Text="&#x26A1;" FontSize="16" Foreground="#FF6B6B" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Завершить" FontSize="14" FontWeight="SemiBold" Foreground="#FFAAAA" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#66D32F2F"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Круглая иконка верхней панели (проводник, язык, блокировка, печать и т.д.) -->
+        <Style x:Key="TopIcon" TargetType="Button">
+            <Setter Property="Width" Value="44"/>
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Margin" Value="4,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ToolTipService.InitialShowDelay" Value="300"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="#22FFFFFF" CornerRadius="10">
+                            <TextBlock Text="{TemplateBinding Content}" FontSize="18"
+                                       Foreground="#DDFFFFFF"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#44FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Кнопка быстрого действия в боковой панели (Табель/Зарплата/Касса...) -->
+        <Style x:Key="QA" TargetType="Button">
+            <Setter Property="Margin" Value="3"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ToolTipService.InitialShowDelay" Value="300"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="#22FFFFFF" CornerRadius="8">
+                            <TextBlock Text="{TemplateBinding Content}" FontSize="12"
+                                       Foreground="#CCFFFFFF" Padding="8,5"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#44FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Кнопка в оверлеях предупреждений (Обновить / Вызов) -->
+        <Style x:Key="OvlBtn" TargetType="Button">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="24,12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="14">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=Tag}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Закруглённый квадрат-плитка киоска (Word/СБИС/...), стиль macOS Launchpad.
+             Раньше StaticResource AppTile не существовал — ссылка падала с XamlParseException.
+             Цвет каждой плитки задаётся отдельно через Background на самой кнопке. -->
+        <Style x:Key="AppTile" TargetType="Button">
+            <Setter Property="Width" Value="140"/>
+            <Setter Property="Height" Value="140"/>
+            <Setter Property="Margin" Value="10"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ToolTipService.InitialShowDelay" Value="300"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="28">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="16" ShadowDepth="4" Opacity="0.35" Color="Black"/>
+                            </Border.Effect>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="scale" Storyboard.TargetProperty="ScaleX" To="1.08" Duration="0:0:0.12"/>
+                                            <DoubleAnimation Storyboard.TargetName="scale" Storyboard.TargetProperty="ScaleY" To="1.08" Duration="0:0:0.12"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="scale" Storyboard.TargetProperty="ScaleX" To="1.0" Duration="0:0:0.12"/>
+                                            <DoubleAnimation Storyboard.TargetName="scale" Storyboard.TargetProperty="ScaleY" To="1.0" Duration="0:0:0.12"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                        <ControlTemplate.Resources/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value>
+                    <ScaleTransform x:Name="scale" ScaleX="1" ScaleY="1"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <!-- Основной браузер: главная страница — всегда anod.saou.ru. Margin снизу оставляет
+             место под нижнюю панель, чтобы она никогда не перекрывалась и не "мигала". -->
+        <wv2:WebView2 x:Name="MainBrowser" Margin="0,66,0,86"/>
+
+        <!-- Верхняя панель: всегда видна, не прячется и не мигает при переключениях. -->
+        <Border Height="54" VerticalAlignment="Top" Margin="6,6,6,0"
+                Background="#DD1A1A2E" CornerRadius="16" Panel.ZIndex="50">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="10" ShadowDepth="0" Opacity="0.3" Color="Black"/>
+            </Border.Effect>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0">
+                    <Border x:Name="StatusDotBorder" ToolTip="Статус сети: подключено" Padding="0">
+                        <Ellipse x:Name="StatusDot" Width="9" Height="9" Fill="#28C840" Margin="0,0,10,0"/>
+                    </Border>
+                    <TextBlock Text="АБИЗ" FontSize="18" FontWeight="Bold" Foreground="White" Margin="0,0,8,0"/>
+                    <TextBlock Text="ООО «Рассвет»" FontSize="11" Foreground="#66FFFFFF" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock x:Name="ClockLabel" Text="00:00" FontSize="28" FontWeight="Bold"
+                               Foreground="White" HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="DateLabel" Text="1 янв" FontSize="13"
+                               Foreground="#88FFFFFF" HorizontalAlignment="Center" Margin="0,1,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                            VerticalAlignment="Center" Margin="0,0,14,0">
+                    <Button Style="{StaticResource TopIcon}" Content="&#x1F3E0;" Click="Home_Click" ToolTip="Главная страница (2x Enter)"/>
+                    <Button x:Name="CalendarBtn" Style="{StaticResource TopIcon}" Content="&#x1F4C5;" Click="ToggleSidePanel_Click" ToolTip="Календарь и заметки"/>
+                    <Button Style="{StaticResource TopIcon}" Content="&#x1F5A8;" Click="Print_Click" ToolTip="Печать текущей страницы"/>
+                    <Button x:Name="AdminBtn" Style="{StaticResource TopIcon}" Content="&#x2699;" Click="AdminBtn_Click" Visibility="Collapsed" ToolTip="Меню администратора"/>
+                    <Button x:Name="LangBtn" Style="{StaticResource TopIcon}" Content="RU" Click="Lang_Click" ToolTip="Сменить язык раскладки" FontSize="13"/>
+                    <Button Style="{StaticResource TopIcon}" Content="&#x1F4C1;" Click="Explorer_Click" ToolTip="Открыть проводник Windows (только админ)"/>
+                    <Button x:Name="LockBtn" Style="{StaticResource TopIcon}" Content="&#x1F512;" Click="Lock_Click" ToolTip="Заблокировать экран"/>
+                    <Button Style="{StaticResource ShutdownBtnStyle}" Click="ShutdownBtn_Click" ToolTip="Выключить компьютер"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Нижняя панель-дек в стиле macOS: быстрая блокировка, завершение работы,
+             переключение языка, проводник. Всегда видна поверх браузера и оверлея кнопок. -->
+        <Border Height="72" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,8"
+                Background="#DD1A1A2E" CornerRadius="24" Panel.ZIndex="50" Padding="14,0">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="18" ShadowDepth="0" Opacity="0.4" Color="Black"/>
+            </Border.Effect>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Style="{StaticResource TopIcon}" Width="52" Height="52" Content="&#x1F512;" Click="Lock_Click" ToolTip="Быстрая блокировка"/>
+                <Button Style="{StaticResource TopIcon}" Width="52" Height="52" Content="&#x23FB;" Click="ShutdownBtn_Click" ToolTip="Завершение работы"/>
+                <Button Style="{StaticResource TopIcon}" Width="52" Height="52" Content="RU" FontSize="15" Click="Lang_Click" ToolTip="Переключить язык (RU/EN)"/>
+                <Button Style="{StaticResource TopIcon}" Width="52" Height="52" Content="&#x1F4C1;" Click="Explorer_Click" ToolTip="Проводник"/>
+            </StackPanel>
+        </Border>
+
+        <Border x:Name="SidePanel" Width="280"
+                HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                Margin="0,66,6,92" Background="#DD1A1A2E" CornerRadius="16" Visibility="Collapsed" Panel.ZIndex="40">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="14" ShadowDepth="0" Opacity="0.3" Color="Black"/>
+            </Border.Effect>
+            <Grid Margin="14">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="Календарь и заметки" FontSize="15" FontWeight="Bold" Foreground="White" Margin="0,0,0,10"/>
+                <Calendar Grid.Row="1" x:Name="SideCalendar" FirstDayOfWeek="Monday" SelectionMode="SingleDate"
+                          SelectedDatesChanged="Calendar_SelectedDatesChanged" Margin="0,0,0,6"
+                          Background="#1A1A2E" Foreground="White" BorderBrush="#33FFFFFF" BorderThickness="1"/>
+                <TextBlock Grid.Row="2" x:Name="SelectedDateLabel" Text="Сегодня" FontSize="12" Foreground="#88FFFFFF" Margin="0,0,0,6"/>
+                <Border Grid.Row="3" Background="#0D0D14" CornerRadius="8" BorderBrush="#33FFFFFF" BorderThickness="1">
+                    <TextBox x:Name="NotesBox" AcceptsReturn="True" TextWrapping="Wrap"
+                             Background="Transparent" Foreground="White" BorderThickness="0" Padding="8"
+                             FontSize="13" MinHeight="60" TextChanged="NotesBox_TextChanged"
+                             VerticalScrollBarVisibility="Auto" ToolTip="Заметки сохраняются автоматически"/>
+                </Border>
+                <WrapPanel Grid.Row="4" HorizontalAlignment="Center" Margin="0,10,0,0">
+                    <Button Style="{StaticResource QA}" Content="Табель" Click="QuickAction_Click" Tag="schedule" ToolTip="Открыть табель"/>
+                    <Button Style="{StaticResource QA}" Content="Зарплата" Click="QuickAction_Click" Tag="salary" ToolTip="Расчёт зарплаты"/>
+                    <Button Style="{StaticResource QA}" Content="Касса" Click="QuickAction_Click" Tag="collection" ToolTip="Инкассация"/>
+                    <Button Style="{StaticResource QA}" Content="Документы" Click="QuickAction_Click" Tag="documents" ToolTip="База документов"/>
+                    <Button Style="{StaticResource QA}" Content="Чат" Click="QuickAction_Click" Tag="chat" ToolTip="Рабочий чат"/>
+                </WrapPanel>
+            </Grid>
+        </Border>
+
+        <!-- Полупрозрачное меню кнопок (как macOS Launchpad). Открывается по 2×Space или 1×Tab,
+             закрывается автоматически после выбора кнопки. Генерируется кодом из KioskButtonsService,
+             чтобы отражать актуальный порядок/набор кнопок, заданный админом. -->
+        <Grid x:Name="OverlayGrid" Visibility="Collapsed" Panel.ZIndex="60">
+            <Rectangle Fill="#AA0A0A14"/>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalAlignment="Center" VerticalAlignment="Center"
+                          Margin="40,80,40,100">
+                <WrapPanel x:Name="TilesPanel" HorizontalAlignment="Center" MaxWidth="1100"/>
+            </ScrollViewer>
+            <TextBlock Text="Esc — закрыть, Tab или 2× Пробел — открыть снова" Foreground="#77FFFFFF"
+                       FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,110"/>
+        </Grid>
+
+        <!-- Редактор кнопок киоска (только админ): перетаскивание порядка, добавление/удаление,
+             выбор ссылки или .exe-файла. Сохранение пишет весь список в data-api/kiosk_buttons. -->
+        <Grid x:Name="EditorOverlay" Visibility="Collapsed" Panel.ZIndex="70">
+            <Rectangle Fill="#EE0A0A14"/>
+            <Border Width="720" MaxHeight="620" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="#1A1A2E" CornerRadius="20" Padding="24">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="24" ShadowDepth="0" Opacity="0.5" Color="Black"/>
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <DockPanel Grid.Row="0" Margin="0,0,0,12">
+                        <TextBlock Text="Редактирование кнопок киоска" FontSize="18" FontWeight="Bold" Foreground="White"/>
+                        <Button DockPanel.Dock="Right" Content="&#x2715;" Width="28" Height="28" Background="Transparent"
+                                Foreground="#AAFFFFFF" BorderThickness="0" Click="CloseEditor_Click" ToolTip="Закрыть"/>
+                    </DockPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="EditorItemsControl"/>
+                    </ScrollViewer>
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                        <Button Content="Добавить кнопку" FontSize="13" Padding="12,8" Margin="0,0,8,0"
+                                Background="#333344" Foreground="White" BorderThickness="0" Cursor="Hand" Click="AddButton_Click"/>
+                        <Button Content="Сохранить порядок" FontSize="13" Padding="12,8"
+                                Background="#4A90D9" Foreground="White" BorderThickness="0" Cursor="Hand" Click="SaveButtons_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Уведомление: компактное, поверх браузера. -->
+        <Border x:Name="NotificationPanel" Width="280" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Margin="0,0,14,100" Background="#EE1A1A2E" CornerRadius="10" Visibility="Collapsed" Padding="12" Panel.ZIndex="55">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="12" ShadowDepth="0" Opacity="0.4" Color="Black"/>
+            </Border.Effect>
+            <StackPanel>
+                <DockPanel Margin="0,0,0,6">
+                    <TextBlock x:Name="NotificationIcon" Text="&#x1F4AC;" FontSize="18" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="NotificationTitle" Text="Уведомление" FontSize="13" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                    <Button HorizontalAlignment="Right" Content="&#x2715;" FontSize="11" Foreground="#88FFFFFF"
+                            Background="Transparent" BorderThickness="0" Cursor="Hand"
+                            Click="CloseNotification_Click" Width="22" Height="22" ToolTip="Закрыть"/>
+                </DockPanel>
+                <TextBlock x:Name="NotificationMessage" Text="" FontSize="12" Foreground="#BBFFFFFF" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
+        <TextBlock x:Name="DeviceCodeDisplay" Foreground="#33FFFFFF" FontSize="11"
+                   Text="Код ПК: ---" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,16,92"
+                   MouseLeftButtonDown="DeviceCode_MouseLeftButtonDown"
+                   Cursor="Hand" ToolTip="Три быстрых клика — перегенерировать код" Panel.ZIndex="50"/>
+
+        <Grid x:Name="ShellNetworkOverlay" Visibility="Collapsed" Panel.ZIndex="80">
+            <Rectangle Fill="#EE0A0A14"/>
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="460">
+                <TextBlock Text="&#x26A0;" FontSize="48" Foreground="#FF6B6B" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                <TextBlock Text="Сеть недоступна!" FontSize="28" FontWeight="Bold" Foreground="#FF6B6B" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                <TextBlock Text="Интернет-соединение пропало. Ожидаем восстановление сети."
+                           FontSize="15" Foreground="#88FFFFFF" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,8"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <Button Content="Обновить" FontSize="16" FontWeight="Bold" Foreground="White"
+                            Background="#4A6FA5" BorderThickness="0" Padding="24,12" Margin="0,0,12,0"
+                            Cursor="Hand" Click="ShellRetryNetwork_Click" Style="{StaticResource OvlBtn}" Tag="#5A7FB5" ToolTip="Проверить снова"/>
+                    <Button Content="Заблокировать" FontSize="16" FontWeight="Bold" Foreground="White"
+                            Background="#D32F2F" BorderThickness="0" Padding="24,12"
+                            Cursor="Hand" Click="ShellCallAdmin_Click" Style="{StaticResource OvlBtn}" Tag="#E53F3F" ToolTip="Заблокировать экран"/>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
