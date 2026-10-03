@@ -236,7 +236,18 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 user = get_user_by_token(cur, token) if token else None
                 if not user:
                     return _resp(200, {'roles': []})
-                return _resp(200, {'roles': ['admin'] if user['is_admin'] else []})
+                roles = ['admin'] if user['is_admin'] else []
+                # Роль из профиля (deputy_director / senior_employee / ...). Зам директора —
+                # высшая роль для сотрудника; возвращаем её, чтобы сайт выдавал ему все права.
+                cur.execute(
+                    f"SELECT role FROM {SCHEMA}.profiles WHERE user_id = %s OR lower(email) = lower(%s) "
+                    f"ORDER BY (user_id = %s) DESC LIMIT 1",
+                    (user['id'], user['email'] or '', user['id']),
+                )
+                prof = cur.fetchone()
+                if prof and prof[0]:
+                    roles.append(prof[0])
+                return _resp(200, {'roles': roles})
 
             elif action == 'get_api_token':
                 # Показать постоянный токен текущему вошедшему пользователю (для настройки

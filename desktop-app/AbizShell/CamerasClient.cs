@@ -19,6 +19,37 @@ namespace AbizShell
 
         public record Result(string? Url, string? Error, string Name = "");
 
+        public record CameraInfo(string Id, string Name, bool IsDefault, int OrderIndex);
+
+        /// <summary>Список всех камер компании (id, название, порядок) — для раздела «Камеры».</summary>
+        public static async Task<(System.Collections.Generic.List<CameraInfo> cameras, string? error)> ListAsync(string? apiToken)
+        {
+            var list = new System.Collections.Generic.List<CameraInfo>();
+            if (string.IsNullOrEmpty(apiToken))
+                return (list, "Компьютер не привязан к системе — камеры недоступны.");
+            try
+            {
+                var (status, body) = await PostAsync(apiToken, new { action = "list" });
+                if (status == 401) return (list, "Компьютер отвязан от системы — камеры недоступны.");
+                if (!body.TryGetProperty("cameras", out var cams) || cams.ValueKind != JsonValueKind.Array)
+                    return (list, Str(body, "error") ?? "Камеры ещё не добавлены в системе.");
+                foreach (var c in cams.EnumerateArray())
+                {
+                    list.Add(new CameraInfo(
+                        Str(c, "id") ?? "",
+                        Str(c, "name") ?? "Камера",
+                        c.TryGetProperty("is_default", out var d) && d.ValueKind == JsonValueKind.True,
+                        c.TryGetProperty("order_index", out var o) && o.ValueKind == JsonValueKind.Number ? o.GetInt32() : 0));
+                }
+                if (list.Count == 0) return (list, "Камеры ещё не добавлены в системе.");
+                return (list, null);
+            }
+            catch
+            {
+                return (list, "Нет связи с сервером. Попробуйте позже.");
+            }
+        }
+
         private static async Task<(int status, JsonElement body)> PostAsync(string apiToken, object body)
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, CamerasApiUrl)

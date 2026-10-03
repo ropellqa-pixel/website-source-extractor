@@ -1,0 +1,6 @@
+{"tests": [
+  {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+  {"name": "GET not allowed", "method": "GET", "path": "/", "expectedStatus": 405},
+  {"name": "Heartbeat without token rejected", "method": "POST", "path": "/", "body": {"action": "heartbeat"}, "expectedStatus": 401},
+  {"name": "Site action without login rejected", "method": "POST", "path": "/", "body": {"action": "devices_status"}, "expectedStatus": 401}
+]}

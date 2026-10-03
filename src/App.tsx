@@ -14,6 +14,7 @@ import DeviceLogin from "./pages/DeviceLogin";
 import AdpodPinLogin from "./pages/AdpodPinLogin";
 import { PIN_ADPODS } from "./lib/pinAdpods";
 import Dashboard from "./pages/Dashboard";
+import Devices from "./pages/Devices";
 import Documents from "./pages/Documents";
 import DocumentBase from "./pages/DocumentBase";
 import Dto from "./pages/Dto";
@@ -35,11 +36,14 @@ function Loader() {
   );
 }
 
-function ProtectedRoute({ children, directorOnly = false }: { children: ReactNode; directorOnly?: boolean }) {
+function ProtectedRoute({ children, directorOnly = false, deputyOnly = false }: { children: ReactNode; directorOnly?: boolean; deputyOnly?: boolean }) {
   const { user, loading } = useAuth();
   if (loading) return <Loader />;
   if (!user) return <Navigate to="/login" replace />;
   if (directorOnly && user.role !== "director" && user.role !== "deputy_director") {
+    return <Navigate to="/dashboard" replace />;
+  }
+  if (deputyOnly && user.role !== "deputy_director") {
     return <Navigate to="/dashboard" replace />;
   }
   return <AppShell>{children}</AppShell>;
@@ -72,6 +76,7 @@ const App = () => (
             <Route path="/schedule" element={<ProtectedRoute><Schedule /></ProtectedRoute>} />
             <Route path="/collection" element={<ProtectedRoute><Collection /></ProtectedRoute>} />
             <Route path="/employees" element={<ProtectedRoute directorOnly><Employees /></ProtectedRoute>} />
+            <Route path="/devices" element={<ProtectedRoute deputyOnly><Devices /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

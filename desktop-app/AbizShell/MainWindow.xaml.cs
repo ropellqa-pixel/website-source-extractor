@@ -71,6 +71,7 @@ namespace AbizShell
             _devicePollTimer?.Stop();
             _networkTimer?.Stop();
             _spinnerTimer?.Stop();
+            StopRemoteAgent();
             try
             {
                 var cam = new CameraWindow(_apiToken);
@@ -123,6 +124,42 @@ namespace AbizShell
 
             await CheckNetworkAsync();
             if (!_isLinked) await PollDeviceAsync();
+
+            StartRemoteAgent();
+        }
+
+        private RemoteAgent? _remoteAgent;
+
+        /// <summary>На экране входа агент сообщает серверу статус "login" (ПК включён, но вход не выполнен)
+        /// и принимает удалённые команды зам. директора (блокировка, сообщение, обновление).</summary>
+        private void StartRemoteAgent()
+        {
+            if (_remoteAgent != null || string.IsNullOrEmpty(_apiToken)) return;
+            _remoteAgent = new RemoteAgent(_apiToken)
+            {
+                Presence = "login",
+                UserName = "",
+                OnReload = () => Dispatcher.Invoke(() => { _apiToken = DeviceManager.GetApiToken(); }),
+                OnRevoked = () => Dispatcher.Invoke(async () =>
+                {
+                    DeviceManager.ClearApiToken();
+                    _apiToken = null;
+                    _isLinked = false;
+                    _remoteAgent?.Stop();
+                    _remoteAgent = null;
+                    _deviceCode = await DeviceManager.ResetDeviceAsync();
+                    await EnsureDeviceCodeAsync();
+                    UpdateLinkUi();
+                    _devicePollTimer?.Start();
+                }),
+            };
+            _remoteAgent.Start();
+        }
+
+        private void StopRemoteAgent()
+        {
+            _remoteAgent?.Stop();
+            _remoteAgent = null;
         }
 
         private async Task EnsureDeviceCodeAsync()
@@ -335,6 +372,7 @@ namespace AbizShell
             _devicePollTimer?.Stop();
             _networkTimer?.Stop();
             _spinnerTimer?.Stop();
+            StopRemoteAgent();
 
             try
             {
@@ -343,6 +381,7 @@ namespace AbizShell
                     IsAdmin = isAdmin,
                     ApiToken = _apiToken ?? "",
                     DeviceCode = _deviceCode,
+                    EmployeeName = fullName ?? "",
                 };
                 if (!string.IsNullOrEmpty(fullName))
                     shell.Title = Edition.Name + " — " + fullName;
@@ -382,6 +421,7 @@ namespace AbizShell
             _devicePollTimer?.Stop();
             _networkTimer?.Stop();
             _spinnerTimer?.Stop();
+            StopRemoteAgent();
             _openingNext = true;
             TaskbarManager.Restore();
             foreach (Window w in Application.Current.Windows)

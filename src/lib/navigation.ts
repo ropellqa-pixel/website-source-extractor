@@ -19,6 +19,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Зарплата', path: '/salary', icon: 'Banknote', group: 2 },
   { label: 'Инкассация', path: '/collection', icon: 'Coins', group: 2 },
   { label: 'Сотрудники', path: '/employees', icon: 'Users', group: 3, roles: ['director', 'deputy_director'] },
+  { label: 'Управление ПК', path: '/devices', icon: 'MonitorSmartphone', group: 3, roles: ['deputy_director'] },
   { label: 'Настройки', path: '/settings', icon: 'Settings', group: 3 },
 ];
 

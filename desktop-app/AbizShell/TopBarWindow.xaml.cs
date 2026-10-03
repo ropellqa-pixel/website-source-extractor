@@ -167,6 +167,7 @@ namespace AbizShell
         private void Print_Click(object sender, RoutedEventArgs e) => _shell.PrintPage();
         private void Explorer_Click(object sender, RoutedEventArgs e) => _shell.OpenExplorer();
         private void Calendar_Click(object sender, RoutedEventArgs e) => _shell.ToggleCalendar();
+        private void Cameras_Click(object sender, RoutedEventArgs e) => _shell.OpenCamerasSection();
         private void Admin_Click(object sender, RoutedEventArgs e) => _shell.ShowAdminMenu(AdminBtn);
         private void Lock_Click(object sender, RoutedEventArgs e) => _shell.LockScreen();
         private void Shutdown_Click(object sender, RoutedEventArgs e) => _shell.ShutdownPc();

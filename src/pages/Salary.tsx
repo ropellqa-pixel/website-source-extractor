@@ -447,6 +447,15 @@ export default function Salary() {
     } finally { setSaving(false); }
   }
 
+  // Зам. директора разблокирует таблицу сотрудников, чтобы внести изменения.
+  async function handleUnlockPeriod() {
+    if (!isDeputy) return;
+    setPeriodLocked(false);
+    if (periodSettingsId) {
+      await db.from('salary_settings').update({ is_locked: false }).eq('id', periodSettingsId);
+    }
+  }
+
   function handleUnlockManager() {
     if (unlockCode === '2535') {
       setManagerLocked(false);
@@ -610,9 +619,17 @@ export default function Salary() {
             </div>
             <div className="flex items-center gap-3">
               {periodLocked && (
-                <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-500/10 px-2 py-1 rounded-lg">
-                  <Lock className="w-3 h-3" /> Заблокировано
-                </span>
+                isDeputy ? (
+                  <button onClick={handleUnlockPeriod}
+                    className="flex items-center gap-1 text-xs text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1 rounded-lg transition-all"
+                    title="Разблокировать таблицу сотрудников для правок">
+                    <Unlock className="w-3 h-3" /> Разблокировать
+                  </button>
+                ) : (
+                  <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-500/10 px-2 py-1 rounded-lg">
+                    <Lock className="w-3 h-3" /> Заблокировано
+                  </span>
+                )
               )}
               {isDirector && (
                 <button onClick={() => setShowFullTable(!showFullTable)}

@@ -26,6 +26,9 @@ namespace AbizShell
         public bool IsAdmin { get; set; }
         public string ApiToken { get; set; } = "";
         public string DeviceCode { get; set; } = "";
+        public string EmployeeName { get; set; } = "";
+
+        private RemoteAgent? _remoteAgent;
 
         public const string HomePage = "https://anod.saou.ru/";
         private const string RuDesktopAcceptId = "2364029";
@@ -105,8 +108,15 @@ namespace AbizShell
         private void StopEverything()
         {
             _networkTimer?.Stop(); _remoteDesktopTimer?.Stop(); _notificationTimer?.Stop();
+            if (_remoteAgent != null)
+            {
+                _ = RemoteControlClient.LogAsync(ApiToken, "signout", "Выход из системы");
+                _remoteAgent.Stop();
+                _remoteAgent = null;
+            }
             _keyboardHook?.Dispose();
             _keyboardHook = null;
+            if (_cameras != null) { try { _cameras.Close(); } catch { } _cameras = null; }
             if (_explorer != null) { _explorer.ForceClose(); _explorer = null; }
             if (_topBar != null) { _topBar.ForceClose(); _topBar = null; }
         }
@@ -183,6 +193,26 @@ namespace AbizShell
 
             _ = CheckNotificationsAsync();
             _ = CheckNetworkAsync();
+
+            StartRemoteAgent();
+        }
+
+        /// <summary>В рабочем столе агент сообщает статус "working" (сотрудник в системе) и выполняет
+        /// удалённые команды зам. директора. Команда «Выход» возвращает на экран входа.</summary>
+        private void StartRemoteAgent()
+        {
+            if (_remoteAgent != null || string.IsNullOrEmpty(ApiToken)) return;
+            _ = RemoteControlClient.LogAsync(ApiToken, "signin",
+                $"Вход в систему: {(string.IsNullOrEmpty(EmployeeName) ? (IsAdmin ? "администратор" : "сотрудник") : EmployeeName)}");
+            _remoteAgent = new RemoteAgent(ApiToken)
+            {
+                Presence = "working",
+                UserName = string.IsNullOrEmpty(EmployeeName) ? (IsAdmin ? "Администратор" : "") : EmployeeName,
+                OnReload = () => Dispatcher.Invoke(() => { try { Browser?.Reload(); } catch { } }),
+                OnLogout = () => Dispatcher.Invoke(LockScreen),
+                OnRevoked = () => Dispatcher.Invoke(LockScreen),
+            };
+            _remoteAgent.Start();
         }
 
         /// <summary>АБИЗ-Админ: ставит верхнюю панель поверх верхней части окна (над браузером).</summary>
@@ -395,6 +425,24 @@ namespace AbizShell
             try { Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true }); } catch { }
         }
 
+        private CamerasWindow? _cameras;
+
+        /// <summary>Открыть раздел «Камеры» — живое видео всех камер через встроенный VLC.</summary>
+        public void OpenCamerasSection()
+        {
+            if (_cameras != null && _cameras.IsLoaded)
+            {
+                if (_cameras.WindowState == WindowState.Minimized) _cameras.WindowState = WindowState.Normal;
+                _cameras.Show();
+                _cameras.Activate();
+                return;
+            }
+            _cameras = new CamerasWindow(ApiToken) { Owner = this };
+            _cameras.Closed += (s, e) => _cameras = null;
+            _cameras.Show();
+            _cameras.Activate();
+        }
+
         // --- Удалённый доступ RuDesktop ---
 
         private void AutoAcceptRemoteDesktop()
@@ -539,24 +587,46 @@ namespace AbizShell
 
         // --- Уведомления ---
 
+        // Чтобы одно и то же сообщение не всплывало каждые 2 минуты — помним, о чём уже сказали.
+        private string _lastChatNotified = "";
+        private bool _collectionNotified;
+
         private async Task CheckNotificationsAsync()
         {
             if (_client == null) return;
             try
             {
+                // Непрочитанные сообщения чата — показываем автора и текст последнего.
                 var chatResult = await _client.QueryAsync(new
                 {
                     table = "chat_messages",
                     op = "select",
                     filters = new[] { new { col = "read", op = "eq", value = "false" } },
+                    order = new { col = "created_at", ascending = false },
                     limit = 1,
                 });
-                if (HasRows(chatResult))
+                var latest = FirstRow(chatResult);
+                if (latest.HasValue)
                 {
-                    ShowNotification("\U0001F4AC", "Новые сообщения", "У вас есть непрочитанные сообщения в рабочем чате");
-                    return;
+                    string id = GetStr(latest.Value, "id");
+                    if (id != _lastChatNotified)
+                    {
+                        _lastChatNotified = id;
+                        string sender = GetStr(latest.Value, "sender_name");
+                        string text = GetStr(latest.Value, "content");
+                        if (text.Length > 120) text = text.Substring(0, 120) + "…";
+                        ShowNotification("\U0001F4AC",
+                            string.IsNullOrEmpty(sender) ? "Новое сообщение" : "Сообщение от " + sender,
+                            string.IsNullOrEmpty(text) ? "Откройте рабочий чат" : text);
+                        return;
+                    }
+                }
+                else
+                {
+                    _lastChatNotified = "";
                 }
 
+                // Незакрытая инкассация — напоминаем один раз, пока не закроют.
                 var collResult = await _client.QueryAsync(new
                 {
                     table = "collection_data",
@@ -565,7 +635,17 @@ namespace AbizShell
                     limit = 1,
                 });
                 if (HasRows(collResult))
-                    ShowNotification("\U0001F4B0", "Инкассация", "Есть незакрытые смены инкассации");
+                {
+                    if (!_collectionNotified)
+                    {
+                        _collectionNotified = true;
+                        ShowNotification("\U0001F4B0", "Инкассация", "Есть незакрытые смены инкассации");
+                    }
+                }
+                else
+                {
+                    _collectionNotified = false;
+                }
             }
             catch { }
         }
@@ -573,6 +653,18 @@ namespace AbizShell
         private static bool HasRows(JsonElement result) =>
             result.ValueKind == JsonValueKind.Object &&
             result.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array && data.GetArrayLength() > 0;
+
+        private static JsonElement? FirstRow(JsonElement result)
+        {
+            if (result.ValueKind == JsonValueKind.Object && result.TryGetProperty("data", out var data)
+                && data.ValueKind == JsonValueKind.Array && data.GetArrayLength() > 0)
+                return data[0];
+            return null;
+        }
+
+        private static string GetStr(JsonElement row, string name) =>
+            row.ValueKind == JsonValueKind.Object && row.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String
+                ? p.GetString() ?? "" : "";
 
         private void ShowNotification(string icon, string title, string message)
         {

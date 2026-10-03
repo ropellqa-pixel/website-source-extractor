@@ -115,6 +115,7 @@
             <Button Style="{StaticResource BarBtn}" Content="&#x1F4C1;" Click="Explorer_Click" ToolTip="Проводник — файлы, флешки, печать файлов"/>
             <Button Style="{StaticResource BarBtn}" Content="&#x1F5A8;" Click="Print_Click" ToolTip="Печать текущей страницы"/>
             <Button x:Name="ExtensionsBtn" Style="{StaticResource BarBtn}" Content="&#x1F9E9;" Click="Extensions_Click" ToolTip="Расширения браузера (ЭЦП, Рутокен, СБИС)"/>
+            <Button Style="{StaticResource BarBtn}" Content="&#x1F4F9;" Click="Cameras_Click" ToolTip="Камеры — живое видео"/>
             <Button Style="{StaticResource BarBtn}" Content="&#x1F4C5;" Click="Calendar_Click" ToolTip="Календарь и заметки"/>
             <Button x:Name="NetworkBtn" Style="{StaticResource BarBtn}" Click="Network_Click" ToolTip="Настройки сети: Wi‑Fi и подключение">
                 <TextBlock x:Name="NetworkBtnIcon" Text="&#x1F4F6;" FontSize="17"/>

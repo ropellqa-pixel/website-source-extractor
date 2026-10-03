@@ -1,2 +1,2 @@
-ABIZ project version 14
-AbizShell (kiosk) + AbizAdmin (normal window). Video decoder VLC built in (H.265 without paid codecs).
+ABIZ project version 15
+Remote control by deputy (lock/unlock/message/RuDesktop/reload), native Cameras on VLC, real notifications, activity log. Admin edition included.

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '@/lib/sdk';
 import { useAuth } from '../lib/auth';
@@ -80,6 +80,102 @@ function isAdjacentAllowed(prevShift: string, nextShift: string): boolean {
   if (prevShift === 'Дп' && nextShift === 'Н') return true;
   if (prevShift === 'Д' && nextShift === 'Нп') return true;
   return false;
+}
+
+export interface ShiftIssue {
+  days: Set<number>;       // индексы дней (0-based) с нарушением — подсветить
+  messages: string[];      // понятные пояснения для сотрудника/зама
+}
+
+// Проверка расписания одного сотрудника по бизнес-правилам компании.
+// СТ (старший): пары «Д, затем на следующий день Н» (Д и Н всегда рядом), затем перерыв
+//   минимум 1 день (между концом пары и началом следующей — хотя бы 1 пустой день).
+// МЛ (младший) с перерывом 0: подряд Дп (от 3 до 6 раз), серия обязана завершиться Нп,
+//   после серии — минимум 2 дня отдыха. (У МЛ с ненулевым перерывом применяется обычный break_days.)
+export function validateEmployeeShifts(shifts: string[], status: string, breakDays: number): ShiftIssue {
+  const issue: ShiftIssue = { days: new Set<number>(), messages: [] };
+  const msgs = new Set<string>();
+  const work = shifts.map(s => s || '');
+
+  if (status === 'СТ') {
+    let i = 0;
+    while (i < work.length) {
+      if (!work[i]) { i++; continue; }
+      // Старший работает парой Д+Н. День Д должен открывать пару.
+      if (work[i] === 'Д') {
+        const next = work[i + 1] || '';
+        if (next !== 'Н') {
+          issue.days.add(i);
+          msgs.add('Старший: после «Д» на следующий день должна идти «Н» (смены Д и Н всегда рядом).');
+          i++;
+          continue;
+        }
+        // Пара Д(i) + Н(i+1). Дальше минимум 1 день отдыха.
+        const after = work[i + 2] || '';
+        if (after) {
+          issue.days.add(i + 2);
+          msgs.add('Старший: после пары «Д+Н» нужен перерыв минимум 1 день.');
+        }
+        i += 2;
+        continue;
+      }
+      if (work[i] === 'Н') {
+        // Ночь без предшествующего дня Д — нарушение пары.
+        if ((work[i - 1] || '') !== 'Д') {
+          issue.days.add(i);
+          msgs.add('Старший: «Н» должна идти сразу после «Д» (пара Д+Н).');
+        }
+        i++;
+        continue;
+      }
+      // Старшему проставили смену младшего (Дп/Нп) — не его тип.
+      issue.days.add(i);
+      msgs.add('Старший работает только сменами «Д» и «Н».');
+      i++;
+    }
+  } else if (status === 'МЛ' && (!breakDays || breakDays === 0)) {
+    let i = 0;
+    while (i < work.length) {
+      if (!work[i]) { i++; continue; }
+      // Серия младшего: несколько Дп подряд, затем обязательно Нп.
+      if (work[i] === 'Дп' || work[i] === 'Нп') {
+        let j = i;
+        let dpCount = 0;
+        while (j < work.length && work[j] === 'Дп') { dpCount++; j++; }
+        const endsWithNp = work[j] === 'Нп';
+        const serieEnd = endsWithNp ? j : j - 1;
+
+        if (dpCount > 6) {
+          for (let k = i + 6; k < i + dpCount; k++) issue.days.add(k);
+          msgs.add('Младший: подряд не больше 6 смен «Дп».');
+        }
+        if (dpCount >= 1 && !endsWithNp) {
+          issue.days.add(serieEnd);
+          msgs.add('Младший: серия «Дп» обязана заканчиваться сменой «Нп».');
+        }
+        if (dpCount > 0 && dpCount < 3 && endsWithNp) {
+          for (let k = i; k < i + dpCount; k++) issue.days.add(k);
+          msgs.add('Младший: «Дп» идут подряд от 3 до 6 раз, затем «Нп».');
+        }
+        // После завершённой серии (…Нп) — минимум 2 дня отдыха.
+        if (endsWithNp) {
+          const r1 = work[serieEnd + 1] || '';
+          const r2 = work[serieEnd + 2] || '';
+          if (r1) { issue.days.add(serieEnd + 1); msgs.add('Младший: после «Нп» нужно минимум 2 дня отдыха.'); }
+          else if (r2) { issue.days.add(serieEnd + 2); msgs.add('Младший: после «Нп» нужно минимум 2 дня отдыха.'); }
+        }
+        i = serieEnd + 1;
+        continue;
+      }
+      // Младшему проставили смену старшего.
+      issue.days.add(i);
+      msgs.add('Младший работает только сменами «Дп» и «Нп».');
+      i++;
+    }
+  }
+
+  issue.messages = Array.from(msgs);
+  return issue;
 }
 
 interface CanWorkOptions {
@@ -572,6 +668,23 @@ export default function Schedule() {
   const canLock = isDeputy;
   const canUnlock = isDeputy;
 
+  // Проверка каждой строки табеля по правилам СТ/МЛ. Нарушения подсвечиваем и показываем список.
+  const rowIssues = useMemo(() => {
+    const map = new Map<string, ShiftIssue>();
+    for (const row of rows) {
+      const emp = employees.find(e => e.profile_id === row.profile_id);
+      if (!emp) continue;
+      map.set(row.profile_id, validateEmployeeShifts(row.shifts, emp.status, emp.break_days));
+    }
+    return map;
+  }, [rows, employees]);
+
+  const allIssueMessages = useMemo(() => {
+    const set = new Set<string>();
+    rowIssues.forEach(i => i.messages.forEach(m => set.add(m)));
+    return Array.from(set);
+  }, [rowIssues]);
+
   const handleGenerate = () => {
     const schedule = generateSchedule(employees, getDaysInMonth());
     const activeEmps = employees.filter(e => !e.excluded);
@@ -829,6 +942,16 @@ export default function Schedule() {
           </div>
         ) : (
           <div className="overflow-x-auto">
+            {allIssueMessages.length > 0 && (
+              <div className="mb-3 rounded-lg border border-red-500/40 bg-red-500/5 p-3 text-sm">
+                <div className="mb-1 flex items-center gap-2 font-semibold text-red-600">
+                  <span>⚠</span> Нарушения правил расписания ({rowIssues.size > 0 ? Array.from(rowIssues.values()).filter(i => i.days.size > 0).length : 0} сотр.)
+                </div>
+                <ul className="list-inside list-disc space-y-0.5 text-red-700/90">
+                  {allIssueMessages.map((m, i) => <li key={i}>{m}</li>)}
+                </ul>
+              </div>
+            )}
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="bg-card">
@@ -847,12 +970,18 @@ export default function Schedule() {
                 {rows.map((row, rowIdx) => {
                   const counts = shiftCountsLocal(row.shifts);
                   const empTotal = counts['Д'] + counts['Н'] + counts['Дп'] + counts['Нп'];
+                  const issue = rowIssues.get(row.profile_id);
                   return (
                     <tr key={row.profile_id} className="hover:bg-secondary cursor-pointer select-none"
                       onContextMenu={(e) => handleRowContextMenu(e, row.profile_id)}>
-                      <td className="px-3 py-1.5 text-foreground font-medium border border-border sticky left-0 bg-background z-10 whitespace-nowrap">{row.full_name}</td>
-                      {Array.from({ length: days }, (_, dayIdx) => (
-                        <td key={dayIdx} className={`px-0.5 py-0.5 border border-border text-center ${SHIFT_COLORS[row.shifts[dayIdx]] || ''}`}>
+                      <td className="px-3 py-1.5 text-foreground font-medium border border-border sticky left-0 bg-background z-10 whitespace-nowrap">
+                        {issue && issue.days.size > 0 && <span title="В расписании есть нарушения правил" className="mr-1 text-red-500">⚠</span>}
+                        {row.full_name}
+                      </td>
+                      {Array.from({ length: days }, (_, dayIdx) => {
+                        const bad = issue?.days.has(dayIdx);
+                        return (
+                        <td key={dayIdx} className={`px-0.5 py-0.5 border text-center ${bad ? 'border-2 border-red-500 bg-red-500/10' : 'border-border ' + (SHIFT_COLORS[row.shifts[dayIdx]] || '')}`}>
                           {canEdit ? (
                             <select value={row.shifts[dayIdx] || ''} onChange={e => handleShiftChange(rowIdx, dayIdx, e.target.value)}
                               className="w-full bg-transparent border-0 text-center text-xs focus:outline-none cursor-pointer appearance-none">
@@ -860,7 +989,8 @@ export default function Schedule() {
                             </select>
                           ) : <span className="text-xs">{row.shifts[dayIdx] || '—'}</span>}
                         </td>
-                      ))}
+                        );
+                      })}
                       <td className="px-2 py-1.5 text-center text-foreground font-bold border border-border">{empTotal}</td>
                       <td className="px-2 py-1.5 text-center text-green-600 font-medium border border-border">{counts['Д']}</td>
                       <td className="px-2 py-1.5 text-center text-blue-600 font-medium border border-border">{counts['Н']}</td>
