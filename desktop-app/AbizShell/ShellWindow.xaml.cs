@@ -77,6 +77,12 @@ namespace AbizShell
             StopEverything();
         }
 
+        public void ForceCloseForExit()
+        {
+            _allowClose = true;
+            Close();
+        }
+
         private void StopEverything()
         {
             _networkTimer?.Stop(); _remoteDesktopTimer?.Stop(); _notificationTimer?.Stop();

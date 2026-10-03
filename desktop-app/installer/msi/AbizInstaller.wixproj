@@ -5,7 +5,7 @@
     <InstallerPlatform>x64</InstallerPlatform>
     <Cultures>ru-RU</Cultures>
     <OutputPath>$(MSBuildThisFileDirectory)..\out\</OutputPath>
-    <PublishDir>$(MSBuildThisFileDirectory)..\..\AbizShell\bin\Release\net8.0-windows\win-x64\publish</PublishDir>
+    <PublishDir>$(MSBuildThisFileDirectory)..\..\AbizShell\bin\publish</PublishDir>
     <DefineConstants>PublishDir=$(PublishDir)</DefineConstants>
     <!-- Проверки ярлыков для установки "для всех пользователей" дают ложные ошибки. -->
     <SuppressIces>ICE38;ICE43;ICE57;ICE64;ICE91</SuppressIces>

@@ -29,8 +29,13 @@ try {
     }
 
     Write-Step 1 "публикация программы"
-    dotnet publish (Join-Path $root "AbizShell\AbizShell.csproj") -c Release -r win-x64 --self-contained false
+    $publishDir = Join-Path $root "AbizShell\bin\publish"
+    if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
+    dotnet publish (Join-Path $root "AbizShell\AbizShell.csproj") -c Release -r win-x64 --self-contained false -o $publishDir
     if ($LASTEXITCODE -ne 0) { throw "Публикация не удалась" }
+    if (-not (Test-Path (Join-Path $publishDir "Microsoft.Windows.SDK.NET.dll"))) {
+        throw "В сборке нет Microsoft.Windows.SDK.NET.dll — программа не запустится. Проверь TargetFramework в AbizShell.csproj"
+    }
 
     Write-Step 2 "сборка MSI-пакета"
     dotnet build (Join-Path $root "installer\msi\AbizInstaller.wixproj") -c Release

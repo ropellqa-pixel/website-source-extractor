@@ -227,6 +227,13 @@ namespace AbizShell
                 return;
             }
 
+            // Аварийный выход в Windows прямо с экрана входа: "exit:" + пароль администратора.
+            if (pwd == "exit:" + AdminPassword)
+            {
+                ExitToWindows();
+                return;
+            }
+
             if (!_isLinked || string.IsNullOrEmpty(_apiToken))
             {
                 SetStatus("Устройство не привязано — обратитесь к директору", Color.FromRgb(0xFF, 0x6B, 0x6B));
@@ -272,16 +279,43 @@ namespace AbizShell
             _networkTimer?.Stop();
             _spinnerTimer?.Stop();
 
-            var shell = new ShellWindow
+            try
             {
-                IsAdmin = isAdmin,
-                ApiToken = _apiToken ?? "",
-                DeviceCode = _deviceCode,
-            };
-            if (!string.IsNullOrEmpty(fullName))
-                shell.Title = "АБИЗ — " + fullName;
-            shell.Show();
-            Close();
+                var shell = new ShellWindow
+                {
+                    IsAdmin = isAdmin,
+                    ApiToken = _apiToken ?? "",
+                    DeviceCode = _deviceCode,
+                };
+                if (!string.IsNullOrEmpty(fullName))
+                    shell.Title = "АБИЗ — " + fullName;
+                shell.Show();
+                Close();
+            }
+            catch (Exception ex)
+            {
+                // Рабочий стол не открылся — остаёмся на экране входа, а не в пустом окне.
+                TaskbarManager.Restore();
+                _networkTimer?.Start();
+                SetStatus("Ошибка запуска рабочего стола", Color.FromRgb(0xFF, 0x6B, 0x6B));
+                MessageBox.Show(this,
+                    "Не удалось открыть рабочий стол АБИЗ:\n" + ex.Message +
+                    "\n\nЧтобы выйти в Windows, введите exit: и пароль администратора без пробела.",
+                    "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Error);
+                PasswordBox.Clear();
+                PasswordBox.Focus();
+            }
+        }
+
+        private void ExitToWindows()
+        {
+            _devicePollTimer?.Stop();
+            _networkTimer?.Stop();
+            _spinnerTimer?.Stop();
+            TaskbarManager.Restore();
+            foreach (Window w in Application.Current.Windows)
+                if (w is ShellWindow sw) sw.ForceCloseForExit();
+            Application.Current.Shutdown();
         }
 
         private void DeviceCode_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

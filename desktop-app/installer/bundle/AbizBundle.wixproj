@@ -4,7 +4,7 @@
     <OutputType>Bundle</OutputType>
     <InstallerPlatform>x64</InstallerPlatform>
     <OutputPath>$(MSBuildThisFileDirectory)..\out\</OutputPath>
-    <PublishDir>$(MSBuildThisFileDirectory)..\..\AbizShell\bin\Release\net8.0-windows\win-x64\publish</PublishDir>
+    <PublishDir>$(MSBuildThisFileDirectory)..\..\AbizShell\bin\publish</PublishDir>
     <MsiPath>$(MSBuildThisFileDirectory)..\out\AbizSetup.msi</MsiPath>
     <RedistDir>$(MSBuildThisFileDirectory)..\redist</RedistDir>
     <DefineConstants>PublishDir=$(PublishDir);MsiPath=$(MsiPath);RedistDir=$(RedistDir)</DefineConstants>
