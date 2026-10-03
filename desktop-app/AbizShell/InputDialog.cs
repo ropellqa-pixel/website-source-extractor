@@ -9,7 +9,7 @@ namespace AbizShell
     /// <summary>Простое модальное окно "введите текст" в тёмном стиле программы.</summary>
     public static class InputDialog
     {
-        public static string? Show(string title, string prompt, string okLabel = "Готово", string initial = "")
+        public static string? Show(string title, string prompt, string okLabel = "Готово", string initial = "", bool isPassword = false)
         {
             var win = new Window
             {
@@ -35,7 +35,17 @@ namespace AbizShell
                 Margin = new Thickness(0, 0, 0, 12),
             };
 
-            var input = new TextBox
+            // Для пароля — скрытый ввод (точки вместо символов).
+            Control input = isPassword ? new PasswordBox
+            {
+                FontSize = 16,
+                Padding = new Thickness(8),
+                Background = new SolidColorBrush(Color.FromRgb(50, 52, 70)),
+                Foreground = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(58, 58, 92)),
+                BorderThickness = new Thickness(1),
+                CaretBrush = Brushes.White,
+            } : new TextBox
             {
                 FontSize = 16,
                 Padding = new Thickness(8),
@@ -78,13 +88,14 @@ namespace AbizShell
             };
 
             string? result = null;
+            string Value() => input is PasswordBox pb ? pb.Password : ((TextBox)input).Text;
 
-            okBtn.Click += (s, e) => { result = input.Text; win.Close(); };
+            okBtn.Click += (s, e) => { result = Value(); win.Close(); };
             cancelBtn.Click += (s, e) => win.Close();
 
             input.KeyDown += (s, e) =>
             {
-                if (e.Key == Key.Enter) { result = input.Text; win.Close(); }
+                if (e.Key == Key.Enter) { result = Value(); win.Close(); }
                 if (e.Key == Key.Escape) win.Close();
             };
 
@@ -96,7 +107,7 @@ namespace AbizShell
             panel.Children.Add(btnPanel);
             win.Content = panel;
 
-            win.Loaded += (s, e) => { input.Focus(); input.SelectAll(); };
+            win.Loaded += (s, e) => { input.Focus(); (input as TextBox)?.SelectAll(); };
             win.ShowDialog();
 
             return result;

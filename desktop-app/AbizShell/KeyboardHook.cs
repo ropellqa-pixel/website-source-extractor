@@ -70,9 +70,11 @@ namespace AbizShell
 
                 if (isKeyDown && BlockSystemKeys)
                 {
-                    // Win, Alt+Tab, Alt+F4 — блокируем всегда, чтобы нельзя было свернуться в Windows.
+                    // Win и Alt+F4 блокируем, чтобы нельзя было уйти в Windows или закрыть окно.
+                    // Alt+Tab НЕ блокируем: он нужен для переключения на Word/Excel и на
+                    // Диспетчер задач — без него из программы нельзя было выйти, если
+                    // что-то пошло не так.
                     if (vkCode == VK_LWIN || vkCode == VK_RWIN) return (IntPtr)1;
-                    if (vkCode == VK_TAB && isSysKey) return (IntPtr)1;
                     if (vkCode == VK_F4 && isSysKey) return (IntPtr)1;
                 }
 

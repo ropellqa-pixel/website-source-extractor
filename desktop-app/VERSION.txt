@@ -1,2 +1,2 @@
-ABIZ project version 12
+ABIZ project version 13
 If installer\msi and installer\bundle folders exist - archive is fresh.

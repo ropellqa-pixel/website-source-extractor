@@ -307,6 +307,18 @@ namespace AbizShell
             }
         }
 
+        private void ExitToWindows_Click(object sender, RoutedEventArgs e)
+        {
+            string? pwd = InputDialog.Show("Выход в Windows", "Пароль администратора:", "Выйти", "", true);
+            if (string.IsNullOrEmpty(pwd)) return;
+            if (pwd != AdminPassword)
+            {
+                SetStatus("Неверный пароль администратора", Color.FromRgb(0xFF, 0x6B, 0x6B));
+                return;
+            }
+            ExitToWindows();
+        }
+
         private void ExitToWindows()
         {
             _devicePollTimer?.Stop();
