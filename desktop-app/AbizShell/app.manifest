@@ -4,10 +4,11 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <!-- Нужны права администратора, чтобы блокировать Диспетчер задач, Alt+Tab
-             и завершение процесса через реестр — без этого пользователь сможет
-             свернуть или закрыть программу средствами Windows. -->
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
+        <!-- highestAvailable: у администратора Windows программа запускается с полными правами
+             (при входе — через Планировщик заданий, без запроса UAC), у обычного
+             пользователя — с его правами, но всё равно запускается. С requireAdministrator
+             у обычного пользователя программа не стартовала бы вовсе. -->
+        <requestedExecutionLevel level="highestAvailable" uiAccess="false"/>
       </requestedPrivileges>
     </security>
   </trustInfo>

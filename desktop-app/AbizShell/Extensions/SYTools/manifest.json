@@ -1,0 +1,162 @@
+{
+  "update_url": "https://clients2.google.com/service/update2/crx",
+  "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsSShe6/TWZzTuaTgGdC6zvKoM1NsyLtl7uC6qhHc3Uxd2/22hGXni8ZnbIqXFwl63Zu8wlf94mAPSipu1J2kTSduaYme3HxIjN8QOeKZVAhRuDZgE06AqRXkrFatrsBZmmpAV33bpjK0rZELT9NCVu8pRIfSHI4eRZYnSc7qzn2rUyjp0mCIsgW65B2Zm+nG6ftb21pOJ6RE7kzPPjiGehSaajdwh3YAk8OxBJCY31KB519o3WyIl9wjLLS9UC1sBwDq91uolGmTNZC1W+xoVPy9cnG1LrdvSn8gu5nU+yzISG0vmqsNVyfK4OR7OncfPGl8BSAkmZvjJDCKj6gtHwIDAQAB",
+  "name": "SYTools",
+  "version": "26.4213.4",
+  "description": "Расширение для тесной интеграции между браузером и приложениями, созданными на платформе Wasaby",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "injectExtensionId.js"
+      ],
+      "matches": [
+        "*://*.k-vesta.ru/*",
+        "*://*.квеста.рф/*",
+        "*://*.квестааф.рф/*",
+        "*://*.questa.ru/*",
+        "*://*.tensor.ru/*",
+        "*://*.sbis.ru/*",
+        "*://*.sbis.dev/*",
+        "*://*.sabyc.ru/*",
+        "*://*.sabyd.ru/*",
+        "*://*.sabytest.ru/*",
+        "*://*.sbis.link/*",
+        "*://*.wasaby.dev/*",
+        "*://*.sabylink.ru/*",
+        "*://*.saby.dev/*",
+        "*://*.saby.ru/*",
+        "*://*.sabytrade.ru/*",
+        "*://*.sabyget.ru/*",
+        "*://*.s-billing.ru/*",
+        "*://*.setty.kz/*",
+        "*://*.settyd.kz/*",
+        "*://*.saby.uz/*",
+        "*://*.settyget.kz/*",
+        "*://*.sabyget.uz/*",
+        "*://*.dpc24.ru/*",
+        "*://*.uc-tensor.ru/*",
+        "*://*.inory.ru/*"
+      ]
+    }
+  ],
+  "host_permissions": [
+    "*://*.k-vesta.ru/*",
+    "*://*.квеста.рф/*",
+    "*://*.квестааф.рф/*",
+    "*://*.questa.ru/*",
+    "*://*.tensor.ru/*",
+    "*://*.sbis.ru/*",
+    "*://*.sbis.dev/*",
+    "*://*.sabyc.ru/*",
+    "*://*.sabyd.ru/*",
+    "*://*.sabytest.ru/*",
+    "*://*.sbis.link/*",
+    "*://*.wasaby.dev/*",
+    "*://*.sabylink.ru/*",
+    "*://*.saby.dev/*",
+    "*://*.saby.ru/*",
+    "*://*.sabytrade.ru/*",
+    "*://*.sabyget.ru/*",
+    "*://*.s-billing.ru/*",
+    "*://*.setty.kz/*",
+    "*://*.settyd.kz/*",
+    "*://*.saby.uz/*",
+    "*://*.settyget.kz/*",
+    "*://*.sabyget.uz/*",
+    "*://*.dpc24.ru/*",
+    "*://*.uc-tensor.ru/*",
+    "*://*.inory.ru/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.k-vesta.ru/*",
+        "*://*.квеста.рф/*",
+        "*://*.квестааф.рф/*",
+        "*://*.questa.ru/*",
+        "*://*.tensor.ru/*",
+        "*://*.sbis.ru/*",
+        "*://*.sbis.dev/*",
+        "*://*.sabyc.ru/*",
+        "*://*.sabyd.ru/*",
+        "*://*.sabytest.ru/*",
+        "*://*.sbis.link/*",
+        "*://*.wasaby.dev/*",
+        "*://*.sabylink.ru/*",
+        "*://*.saby.dev/*",
+        "*://*.saby.ru/*",
+        "*://*.sabytrade.ru/*",
+        "*://*.sabyget.ru/*",
+        "*://*.s-billing.ru/*",
+        "*://*.setty.kz/*",
+        "*://*.settyd.kz/*",
+        "*://*.saby.uz/*",
+        "*://*.settyget.kz/*",
+        "*://*.sabyget.uz/*",
+        "*://*.dpc24.ru/*",
+        "*://*.uc-tensor.ru/*",
+        "*://*.inory.ru/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "icons": {
+    "48": "logo_48.png",
+    "128": "logo_128.png"
+  },
+  "action": {
+    "default_popup": "popup/index.html"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "nativeMessaging",
+    "alarms",
+    "scripting",
+    "downloads",
+    "downloads.open",
+    "notifications",
+    "debugger"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "optional_permissions": [
+    "bookmarks"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "*://*.k-vesta.ru/*",
+      "*://*.квеста.рф/*",
+      "*://*.квестааф.рф/*",
+      "*://*.questa.ru/*",
+      "*://*.tensor.ru/*",
+      "*://*.sbis.ru/*",
+      "*://*.sbis.dev/*",
+      "*://*.sabyc.ru/*",
+      "*://*.sabyd.ru/*",
+      "*://*.sabytest.ru/*",
+      "*://*.sbis.link/*",
+      "*://*.wasaby.dev/*",
+      "*://*.sabylink.ru/*",
+      "*://*.saby.dev/*",
+      "*://*.saby.ru/*",
+      "*://*.sabytrade.ru/*",
+      "*://*.sabyget.ru/*",
+      "*://*.s-billing.ru/*",
+      "*://*.setty.kz/*",
+      "*://*.settyd.kz/*",
+      "*://*.saby.uz/*",
+      "*://*.settyget.kz/*",
+      "*://*.sabyget.uz/*",
+      "*://*.dpc24.ru/*",
+      "*://*.uc-tensor.ru/*",
+      "*://*.inory.ru/*"
+    ]
+  }
+}

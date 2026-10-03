@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -8,7 +9,7 @@ namespace AbizShell
     /// <summary>Простое модальное окно "введите текст" в тёмном стиле программы.</summary>
     public static class InputDialog
     {
-        public static string? Show(string title, string prompt, string okLabel = "Готово")
+        public static string? Show(string title, string prompt, string okLabel = "Готово", string initial = "")
         {
             var win = new Window
             {
@@ -17,6 +18,7 @@ namespace AbizShell
                 Height = 190,
                 WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 Topmost = true,
+                Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive),
                 ShowInTaskbar = false,
                 Background = new SolidColorBrush(Color.FromRgb(30, 30, 46)),
                 ResizeMode = ResizeMode.NoResize,
@@ -41,6 +43,8 @@ namespace AbizShell
                 Foreground = Brushes.White,
                 BorderBrush = new SolidColorBrush(Color.FromRgb(58, 58, 92)),
                 BorderThickness = new Thickness(1),
+                CaretBrush = Brushes.White,
+                Text = initial,
             };
 
             var btnPanel = new StackPanel
@@ -92,7 +96,7 @@ namespace AbizShell
             panel.Children.Add(btnPanel);
             win.Content = panel;
 
-            win.Loaded += (s, e) => input.Focus();
+            win.Loaded += (s, e) => { input.Focus(); input.SelectAll(); };
             win.ShowDialog();
 
             return result;

@@ -1,14 +1,14 @@
 using System;
-using System.Diagnostics;
 using System.Threading;
 using System.Windows;
-using Microsoft.Win32;
+using System.Windows.Threading;
 
 namespace AbizShell
 {
     /// <summary>
-    /// Точка входа программы. Файл App.xaml НЕ используется — приложение запускается
-    /// из метода Main. Если в папке проекта остался старый App.xaml — удали его.
+    /// Точка входа программы. Файл App.xaml НЕ используется — приложение запускается из Main.
+    /// Автозапуск с правами администратора настраивает установщик (задача в Планировщике
+    /// заданий Windows «AbizShell»), поэтому сама программа в автозагрузку больше не пишет.
     /// </summary>
     public class App : Application
     {
@@ -20,27 +20,33 @@ namespace AbizShell
             _singleInstanceMutex = new Mutex(true, "AbizShell_SingleInstance_8F2A1C", out bool isNew);
             if (!isNew) return;
 
-            var app = new App { ShutdownMode = ShutdownMode.OnLastWindowClose };
+            var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
             app.Run();
         }
 
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
-            RegisterAutoStart();
+
+            // При любой непредвиденной ошибке возвращаем панель задач Windows,
+            // чтобы компьютер не остался без неё.
+            DispatcherUnhandledException += OnUnhandled;
+            AppDomain.CurrentDomain.ProcessExit += (s, a) => TaskbarManager.Restore();
+
             new MainWindow().Show();
         }
 
-        private static void RegisterAutoStart()
+        private void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
         {
-            try
-            {
-                string? exePath = Process.GetCurrentProcess().MainModule?.FileName;
-                if (string.IsNullOrEmpty(exePath)) return;
-                using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-                key?.SetValue("AbizShell", $"\"{exePath}\"");
-            }
-            catch { }
+            e.Handled = true;
+            MessageBox.Show("Произошла ошибка:\n" + e.Exception.Message + "\n\nПрограмма продолжит работу.",
+                "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            TaskbarManager.Restore();
+            base.OnExit(e);
         }
     }
 }

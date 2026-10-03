@@ -1,0 +1,55 @@
+{
+  "update_url": "https://clients2.google.com/service/update2/crx",
+  "name": "Адаптер Рутокен Коннект",
+  "description": "Защищенное TLS-соединение в браузере по ГОСТу с Рутокен",
+  "icons": {
+    "16": "icons/extension/color/16.png",
+    "48": "icons/extension/color/48.png",
+    "128": "icons/extension/color/128.png"
+  },
+  "manifest_version": 3,
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "error.html",
+        "login.html",
+        "check_rtconnect_extension"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "minimum_chrome_version": "103",
+  "permissions": [
+    "webRequest",
+    "declarativeNetRequestWithHostAccess",
+    "storage",
+    "proxy",
+    "nativeMessaging",
+    "notifications",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://*/**",
+    "https://*/**",
+    "file:///*/**"
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/extension/gray/16.png",
+      "48": "icons/extension/gray/48.png",
+      "128": "icons/extension/gray/128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "version": "6.2.5",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq1DsfO1x3+uCZucHkOyNjwZnIuIHOwi+ibtIdkYXCAWE0YsP7lKBPtNjUALfkjQF/9LP+cQTnrKKK8In69OXd9/w6coPGEJyYh3K4yLlvpefxOA2nmHQVlxtKjEwpptgWY64xT6nUU9g1VeMjeQLJiIstXM9FEwsWI8GH9YhF2sHhMHc2QlqrUVGriaHNztURuJELjCC2rpVUwzyEp5Si7z0mkA6DRKfb+DaQiyGhSulhVb47w+CJmmE/fZV5Z3at6LQwLLKkwbIMwdZPnWuJzD3qIoFegVEdrLJqKrUdkLsKYPqG6Vp6wUwXmOJMCQys1O4/Mi82l3gc3B5qya/dwIDAQAB"
+}

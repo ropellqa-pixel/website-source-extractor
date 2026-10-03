@@ -1,0 +1,1 @@
+window.sendStatus=s=>{window.postMessage({rutoken:{uuid:"EE4F9C58-64D8-4FCD-AB45-0E3040EEB37D",status:s}},"*")},console.assert(void 0!==window.sendStatus,"window.sendStatus is missing");

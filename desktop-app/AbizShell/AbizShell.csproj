@@ -13,11 +13,16 @@
 		<AssemblyTitle>ABIZ</AssemblyTitle>
 		<Product>ABIZ</Product>
 		<Company>Rassvet</Company>
+		<Version>1.0.1</Version>
 	</PropertyGroup>
 	<ItemGroup>
 		<ApplicationDefinition Remove="App.xaml" />
 		<Page Remove="App.xaml" />
 		<None Remove="App.xaml" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- Встроенные расширения браузера (КриптоПро, Рутокен, СБИС) копируются рядом с программой. -->
+		<None Include="Extensions\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	</ItemGroup>
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />

@@ -1,0 +1,130 @@
+<Window x:Class="AbizShell.ExplorerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="АБИЗ — Проводник" Width="1100" Height="700" MinWidth="700" MinHeight="420"
+        WindowStartupLocation="CenterOwner" Background="#1A1A2E" ShowInTaskbar="False">
+
+    <Window.Resources>
+        <Style x:Key="ExBtn" TargetType="Button">
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="#2A2A40" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#3A3A58"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="b" Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="AccentBtn" TargetType="Button" BasedOn="{StaticResource ExBtn}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="#4A90D9" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#5AA0E9"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="b" Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Навигация и действия -->
+        <DockPanel Grid.Row="0" Grid.ColumnSpan="2" Margin="0,0,0,10">
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                <Button Style="{StaticResource ExBtn}" Content="&#x2190;" Click="Back_Click" ToolTip="Назад"/>
+                <Button Style="{StaticResource ExBtn}" Content="&#x2191;" Click="Up_Click" ToolTip="На уровень выше"/>
+                <Button Style="{StaticResource ExBtn}" Content="&#x27F3;" Click="Refresh_Click" ToolTip="Обновить"/>
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="6,0,0,0">
+                <Button x:Name="OpenBtn" Style="{StaticResource ExBtn}" Content="Открыть" Click="Open_Click"/>
+                <Button x:Name="PrintBtn" Style="{StaticResource AccentBtn}" Click="Print_Click" ToolTip="Напечатать выбранные файлы">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#x1F5A8;" Margin="0,0,6,0"/>
+                        <TextBlock Text="Печать"/>
+                    </StackPanel>
+                </Button>
+                <Button Style="{StaticResource ExBtn}" Content="Новая папка" Click="NewFolder_Click"/>
+                <Button x:Name="RenameBtn" Style="{StaticResource ExBtn}" Content="Переименовать" Click="Rename_Click"/>
+                <Button x:Name="DeleteBtn" Style="{StaticResource ExBtn}" Content="Удалить" Click="Delete_Click" Foreground="#FF9A9A"/>
+            </StackPanel>
+            <TextBox x:Name="PathBox" FontSize="13" Padding="8,6" VerticalContentAlignment="Center"
+                     Background="#0D0D14" Foreground="White" CaretBrush="White" BorderBrush="#33FFFFFF"
+                     KeyDown="PathBox_KeyDown" ToolTip="Путь к папке — можно ввести и нажать Enter"/>
+        </DockPanel>
+
+        <!-- Быстрый доступ и диски -->
+        <Border Grid.Row="1" Grid.Column="0" Background="#14141F" CornerRadius="10" Margin="0,0,10,0" Padding="6">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="PlacesPanel"/>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Файлы -->
+        <ListView Grid.Row="1" Grid.Column="1" x:Name="FilesList" SelectionMode="Extended"
+                  Background="#14141F" Foreground="White" BorderThickness="0" FontSize="13"
+                  MouseDoubleClick="FilesList_MouseDoubleClick" KeyDown="FilesList_KeyDown"
+                  SelectionChanged="FilesList_SelectionChanged">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Padding" Value="4,5"/>
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Имя" Width="460">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Icon}" Margin="0,0,8,0"/>
+                                    <TextBlock Text="{Binding Name}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Изменён" Width="150" DisplayMemberBinding="{Binding Modified}"/>
+                    <GridViewColumn Header="Тип" Width="110" DisplayMemberBinding="{Binding Kind}"/>
+                    <GridViewColumn Header="Размер" Width="100" DisplayMemberBinding="{Binding SizeText}"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+        <TextBlock Grid.Row="2" Grid.ColumnSpan="2" x:Name="StatusText" Foreground="#88FFFFFF" FontSize="12" Margin="0,8,0,0"
+                   Text="Двойной клик — открыть. Выделите файлы и нажмите «Печать». Ctrl или Shift — выбрать несколько."/>
+    </Grid>
+</Window>

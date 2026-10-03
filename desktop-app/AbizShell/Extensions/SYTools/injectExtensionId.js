@@ -1,0 +1,1 @@
+window.sbisPluginExtensionInfo = {"version":"26.4213.4","isNewArch":true}

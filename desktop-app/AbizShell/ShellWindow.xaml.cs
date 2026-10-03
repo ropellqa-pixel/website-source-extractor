@@ -1,11 +1,11 @@
+using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Runtime.InteropServices;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
@@ -16,38 +16,22 @@ using System.Windows.Threading;
 
 namespace AbizShell
 {
+    /// <summary>
+    /// Главное окно оболочки: встроенный браузер, меню кнопок, календарь, редактор кнопок.
+    /// Все кнопки управления — в верхней панели (TopBarWindow). Окно занимает экран под
+    /// панелью и НЕ является «поверх всех», поэтому Word/Excel/MAX и проводник открываются поверх него.
+    /// </summary>
     public partial class ShellWindow : Window
     {
         public bool IsAdmin { get; set; }
         public string ApiToken { get; set; } = "";
         public string DeviceCode { get; set; } = "";
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
-        private static extern IntPtr LoadKeyboardLayout(string pwszKLID, uint Flags);
-        [DllImport("user32.dll")]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
-        [DllImport("user32.dll")]
-        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-        [DllImport("user32.dll")]
-        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
-        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
-
-        private static readonly IntPtr HWND_TOPMOST = new(-1);
-        private const uint SWP_NOMOVE = 0x0002;
-        private const uint SWP_NOSIZE = 0x0001;
-        private const uint SWP_SHOWWINDOW = 0x0040;
-        private const int SW_RESTORE = 9;
-        private const uint KLF_ACTIVATE = 0x00000001;
-        private const string RU_LAYOUT = "00000419";
-        private const string EN_LAYOUT = "00000409";
-        private const string HomePage = "https://anod.saou.ru/";
+        public const string HomePage = "https://anod.saou.ru/";
         private const string RuDesktopAcceptId = "2364029";
 
-        private bool _isRussian = true;
-        private DispatcherTimer? _clockTimer, _networkTimer, _remoteDesktopTimer, _notificationTimer;
+        private DispatcherTimer? _networkTimer, _remoteDesktopTimer, _notificationTimer;
         private DateTime _lastSpacePress = DateTime.MinValue;
-        private DateTime _lastEnterPress = DateTime.MinValue;
         private const int DoublePressInterval = 450;
         private KeyboardHook? _keyboardHook;
         private int _codeClickCount;
@@ -57,7 +41,12 @@ namespace AbizShell
         private string _selectedDate = "";
         private AnodBizClient? _client;
         private List<KioskButton> _buttons = new();
-        private readonly ObservableCollection<KioskButtonEditRow> _editorRows = new();
+        private readonly List<KioskButtonEditRow> _editorRows = new();
+        private TopBarWindow? _topBar;
+        private ExplorerWindow? _explorer;
+        private bool _allowClose;
+        private int _networkFailures;
+        private bool _networkOverlayDismissed;
 
         public ShellWindow()
         {
@@ -66,11 +55,6 @@ namespace AbizShell
             Closing += ShellWindow_Closing;
             _notesPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AbizShell", "notes.json");
             LoadNotes();
-
-            _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-            _clockTimer.Tick += (s, e) => UpdateClock();
-            _clockTimer.Start();
-            UpdateClock();
 
             _networkTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
             _networkTimer.Tick += async (s, e) => await CheckNetworkAsync();
@@ -85,18 +69,32 @@ namespace AbizShell
             _notificationTimer.Start();
         }
 
-        // Администратор может закрыть окно (например, через системное меню) — обычный
-        // пользователь не может, окно без этого было бы неубиваемым даже для директора.
+        public CoreWebView2? Browser => MainBrowser.CoreWebView2;
+
         private void ShellWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
-            if (!IsAdmin) { e.Cancel = true; return; }
+            if (!_allowClose) { e.Cancel = true; return; }
+            StopEverything();
+        }
+
+        private void StopEverything()
+        {
+            _networkTimer?.Stop(); _remoteDesktopTimer?.Stop(); _notificationTimer?.Stop();
             _keyboardHook?.Dispose();
             _keyboardHook = null;
+            if (_explorer != null) { _explorer.ForceClose(); _explorer = null; }
+            if (_topBar != null) { _topBar.ForceClose(); _topBar = null; }
         }
 
         private async void ShellWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            AdminBtn.Visibility = IsAdmin ? Visibility.Visible : Visibility.Collapsed;
+            TaskbarManager.Hide();
+
+            _topBar = new TopBarWindow(this, IsAdmin);
+            _topBar.WorkAreaChanged += FitToWorkArea;
+            _topBar.Show();
+            FitToWorkArea();
+
             if (!string.IsNullOrEmpty(DeviceCode))
                 DeviceCodeDisplay.Text = "Код ПК: " + DeviceManager.FormatCode(DeviceCode);
             SideCalendar.SelectedDate = DateTime.Today;
@@ -104,13 +102,27 @@ namespace AbizShell
             if (!string.IsNullOrEmpty(ApiToken))
                 _client = new AnodBizClient(ApiToken);
 
-            // Перехват системных клавиш и реакция на Tab/2×Space для открытия меню кнопок.
+            // Горячие клавиши работают только когда активна наша программа — иначе
+            // Tab и пробел перестали бы работать в Word, Excel и других программах.
             _keyboardHook = new KeyboardHook { BlockSystemKeys = true };
             _keyboardHook.KeyHandler = (vkCode, isSysKey) =>
             {
-                if (vkCode == KeyboardHook.VK_TAB && !isSysKey)
+                if (!NativeMethods.IsOwnProcessForeground()) return false;
+
+                if (vkCode == KeyboardHook.VK_ESCAPE)
                 {
-                    Dispatcher.Invoke(ToggleOverlay);
+                    bool handled = false;
+                    Dispatcher.Invoke(() =>
+                    {
+                        if (OverlayGrid.Visibility == Visibility.Visible) { OverlayGrid.Visibility = Visibility.Collapsed; handled = true; }
+                        else if (SidePanel.Visibility == Visibility.Visible) { SidePanel.Visibility = Visibility.Collapsed; handled = true; }
+                    });
+                    return handled;
+                }
+
+                if (vkCode == KeyboardHook.VK_TAB && !isSysKey && OverlayGrid.Visibility == Visibility.Visible)
+                {
+                    Dispatcher.Invoke(ToggleMenu);
                     return true;
                 }
 
@@ -119,34 +131,35 @@ namespace AbizShell
                     var now = DateTime.Now;
                     if ((now - _lastSpacePress).TotalMilliseconds < DoublePressInterval)
                     {
-                        Dispatcher.Invoke(ToggleOverlay);
                         _lastSpacePress = DateTime.MinValue;
+                        Dispatcher.Invoke(ToggleMenu);
                         return true;
                     }
                     _lastSpacePress = now;
-                    return false;
                 }
-
-                if (vkCode == KeyboardHook.VK_ESCAPE && OverlayGrid.Visibility == Visibility.Visible)
-                {
-                    Dispatcher.Invoke(() => OverlayGrid.Visibility = Visibility.Collapsed);
-                    return true;
-                }
-
                 return false;
             };
 
+            BuildTilesFromDefaults();
             await InitBrowserAsync();
 
             _ = CheckNotificationsAsync();
             _ = CheckNetworkAsync();
         }
 
-        /// <summary>
-        /// Запуск встроенного браузера. Папка данных браузера — в LocalAppData: программа
-        /// установлена в Program Files, куда писать нельзя, и без явной папки движок
-        /// браузера не запускался — окно оставалось пустым.
-        /// </summary>
+        /// <summary>Окно занимает всю рабочую область — под верхней панелью.</summary>
+        public void FitToWorkArea()
+        {
+            var wa = SystemParameters.WorkArea;
+            WindowState = WindowState.Normal;
+            Left = wa.Left;
+            Top = wa.Top;
+            Width = wa.Width;
+            Height = wa.Height;
+        }
+
+        // --- Браузер ---
+
         private async Task InitBrowserAsync()
         {
             try
@@ -156,27 +169,93 @@ namespace AbizShell
                     "AbizShell", "WebView2");
                 Directory.CreateDirectory(dataDir);
 
-                var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(null, dataDir);
+                var options = new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true };
+                var env = await CoreWebView2Environment.CreateAsync(null, dataDir, options);
                 await MainBrowser.EnsureCoreWebView2Async(env);
             }
-            catch (Microsoft.Web.WebView2.Core.WebView2RuntimeNotFoundException)
+            catch (WebView2RuntimeNotFoundException)
             {
-                MessageBox.Show(
+                MessageBox.Show(this,
                     "На компьютере не установлен компонент Microsoft Edge WebView2 — без него браузер не работает.\n\n" +
-                    "Установите его с сайта Microsoft (поиск: «WebView2 Runtime») или переустановите АБИЗ из полного установщика.",
+                    "Переустановите АБИЗ из полного установщика.",
                     "АБИЗ — браузер", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Не удалось запустить встроенный браузер:\n" + ex.Message,
+                MessageBox.Show(this, "Не удалось запустить встроенный браузер:\n" + ex.Message,
                     "АБИЗ — браузер", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
-            ConfigureBrowserSettings();
+            var core = MainBrowser.CoreWebView2;
+            core.Settings.AreDefaultContextMenusEnabled = true;
+            core.Settings.AreDevToolsEnabled = IsAdmin;
+            core.Settings.IsZoomControlEnabled = true;
+            core.Settings.IsStatusBarEnabled = false;
+            core.Settings.AreBrowserAcceleratorKeysEnabled = true;
+
+            // Ссылки «в новом окне» открываем в этом же браузере, а не в отдельном окне.
+            core.NewWindowRequested += (s, a) =>
+            {
+                a.Handled = true;
+                try { core.Navigate(a.Uri); } catch { }
+            };
+
+            try { await ExtensionsService.InstallAllAsync(core.Profile); } catch { }
+
             try { await LoadButtonsAsync(); } catch { BuildTilesFromDefaults(); }
             await AutoLoginAndNavigateAsync();
+        }
+
+        public void NavigateBrowser(string url)
+        {
+            try
+            {
+                if (MainBrowser.CoreWebView2 != null)
+                    MainBrowser.CoreWebView2.Navigate(url);
+                else
+                    MainBrowser.Source = new Uri(url);
+                Activate();
+            }
+            catch
+            {
+                MessageBox.Show(this, "Не удалось открыть: " + url, "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        public void GoHome() => NavigateBrowser(HomePage);
+        public void GoBack() { if (Browser?.CanGoBack == true) Browser.GoBack(); }
+        public void GoForward() { if (Browser?.CanGoForward == true) Browser.GoForward(); }
+        public void ReloadPage() => Browser?.Reload();
+        public void PrintPage() { Activate(); PrintService.PrintSystemDialog(Browser); }
+        public string CurrentUrl => Browser?.Source ?? HomePage;
+
+        public void OpenCurrentPageInEdge()
+        {
+            try { Process.Start(new ProcessStartInfo("msedge.exe", CurrentUrl) { UseShellExecute = true }); }
+            catch { MessageBox.Show("Microsoft Edge не найден на этом компьютере.", "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        }
+
+        private async Task AutoLoginAndNavigateAsync()
+        {
+            if (string.IsNullOrEmpty(ApiToken))
+            {
+                NavigateBrowser(HomePage);
+                return;
+            }
+            string? code = await AnodBizClient.RequestLoginLinkAsync(ApiToken);
+            NavigateBrowser(!string.IsNullOrEmpty(code)
+                ? $"https://anod.saou.ru/device-login?code={code}"
+                : HomePage);
+        }
+
+        // --- Меню кнопок ---
+
+        private async Task LoadButtonsAsync()
+        {
+            _buttons = _client != null ? await KioskButtonsService.LoadAsync(_client) : KioskButtonsService.DefaultButtons();
+            BuildTiles();
         }
 
         private void BuildTilesFromDefaults()
@@ -185,26 +264,10 @@ namespace AbizShell
             BuildTiles();
         }
 
-        /// <summary>
-        /// Отключает поисковую строку и адресную строку WebView2 — своя программа работает
-        /// только как показ заданных сайтов, без свободной навигации пользователем.
-        /// </summary>
-        private void ConfigureBrowserSettings()
+        private static Brush SafeBrush(string color)
         {
-            var settings = MainBrowser.CoreWebView2.Settings;
-            settings.AreDefaultContextMenusEnabled = IsAdmin;
-            settings.AreDevToolsEnabled = IsAdmin;
-            settings.IsZoomControlEnabled = true;
-            settings.IsStatusBarEnabled = false;
-            settings.AreBrowserAcceleratorKeysEnabled = IsAdmin;
-        }
-
-        // --- Загрузка/сохранение кнопок киоска ---
-
-        private async Task LoadButtonsAsync()
-        {
-            _buttons = _client != null ? await KioskButtonsService.LoadAsync(_client) : KioskButtonsService.DefaultButtons();
-            BuildTiles();
+            try { return new SolidColorBrush((Color)ColorConverter.ConvertFromString(string.IsNullOrWhiteSpace(color) ? "#125499" : color)); }
+            catch { return new SolidColorBrush(Color.FromRgb(0x12, 0x54, 0x99)); }
         }
 
         private void BuildTiles()
@@ -212,14 +275,24 @@ namespace AbizShell
             TilesPanel.Children.Clear();
             foreach (var btn in _buttons)
             {
+                var content = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
+                content.Children.Add(new TextBlock
+                {
+                    Text = btn.Action == "app" ? "\U0001F5A5" : "\U0001F310",
+                    FontSize = 30, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 8),
+                });
+                content.Children.Add(new TextBlock
+                {
+                    Text = btn.Text, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
+                    MaxWidth = 120, HorizontalAlignment = HorizontalAlignment.Center,
+                });
                 var tile = new Button
                 {
                     Style = (Style)FindResource("AppTile"),
-                    Content = btn.Text,
-                    Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(
-                        string.IsNullOrWhiteSpace(btn.Color) ? "#125499" : btn.Color)),
+                    Content = content,
+                    Background = SafeBrush(btn.Color),
                     Tag = btn,
-                    ToolTip = btn.Action == "app" ? "Запустить: " + btn.Target : "Открыть: " + btn.Target,
+                    ToolTip = btn.Action == "app" ? "Программа: " + btn.Target : "Сайт: " + btn.Target,
                 };
                 tile.Click += Tile_Click;
                 TilesPanel.Children.Add(tile);
@@ -229,83 +302,47 @@ namespace AbizShell
         private void Tile_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not Button btn || btn.Tag is not KioskButton k) return;
-
+            OverlayGrid.Visibility = Visibility.Collapsed;
             if (k.Action == "app")
-                LaunchAppOnTop(k.Target);
+                AppLauncher.Launch(k.Target, this);
             else
                 NavigateBrowser(k.Target);
+        }
 
+        public void ToggleMenu()
+        {
+            Activate();
+            EditorOverlay.Visibility = Visibility.Collapsed;
+            OverlayGrid.Visibility = OverlayGrid.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        private void OverlayBackground_MouseDown(object sender, MouseButtonEventArgs e) =>
             OverlayGrid.Visibility = Visibility.Collapsed;
-        }
 
-        // --- Меню кнопок (Launchpad): показ/скрытие без мигания панелей ---
+        // --- Проводник ---
 
-        private void ToggleOverlay()
+        public void OpenExplorer()
         {
-            // Браузер и панели НИКОГДА не скрываются и не меняют Margin — переключаем
-            // только видимость полупрозрачного оверлея поверх них. Это убирает мигание,
-            // которое было при Collapsed/Visible у самого MainBrowser.
-            OverlayGrid.Visibility = OverlayGrid.Visibility == Visibility.Visible
-                ? Visibility.Collapsed
-                : Visibility.Visible;
-        }
-
-        // --- Навигация и запуск приложений ---
-
-        private void NavigateBrowser(string url)
-        {
-            try
+            if (_explorer == null || !_explorer.IsLoaded)
             {
-                if (MainBrowser.CoreWebView2 != null)
-                    MainBrowser.Source = new Uri(url);
+                _explorer = new ExplorerWindow { Owner = this };
+                _explorer.Show();
             }
-            catch
+            else
             {
-                MessageBox.Show("Не удалось открыть: " + url, "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (_explorer.WindowState == WindowState.Minimized) _explorer.WindowState = WindowState.Normal;
+                _explorer.Show();
+                _explorer.Activate();
             }
         }
 
-        private void BringWindowOnTop(IntPtr handle)
+        public void OpenWindowsExplorer()
         {
-            if (handle == IntPtr.Zero) return;
-            ShowWindow(handle, SW_RESTORE);
-            SetWindowPos(handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-            SetForegroundWindow(handle);
+            try { Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true }); } catch { }
         }
 
-        /// <summary>Запускает внешнее приложение (Word, Excel, MAX, RuDesktop...) и держит его окно поверх, но не выходя за пределы системы.</summary>
-        private void LaunchAppOnTop(string exeName)
-        {
-            try
-            {
-                var proc = Process.Start(new ProcessStartInfo(exeName) { UseShellExecute = true });
-                int attempts = 0;
-                var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-                timer.Tick += (s, e) =>
-                {
-                    attempts++;
-                    try
-                    {
-                        if (proc is { HasExited: false })
-                        {
-                            proc.Refresh();
-                            if (proc.MainWindowHandle != IntPtr.Zero)
-                                BringWindowOnTop(proc.MainWindowHandle);
-                        }
-                    }
-                    catch { }
-                    if (attempts >= 10) timer.Stop();
-                };
-                timer.Start();
-            }
-            catch
-            {
-                MessageBox.Show("Не удалось запустить: " + exeName + "\nПроверьте, что программа установлена.",
-                    "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
-        }
+        // --- Удалённый доступ RuDesktop ---
 
-        /// <summary>Автоматически принимает запрос на подключение от заданного ID RuDesktop (не требует участия сотрудника).</summary>
         private void AutoAcceptRemoteDesktop()
         {
             try
@@ -318,110 +355,78 @@ namespace AbizShell
                         if (string.IsNullOrEmpty(title)) continue;
                         if (title.Contains(RuDesktopAcceptId) || title.Contains("вход", StringComparison.OrdinalIgnoreCase))
                         {
-                            PostMessage(proc.MainWindowHandle, 0x0100, (IntPtr)0x0D, IntPtr.Zero);
-                            PostMessage(proc.MainWindowHandle, 0x0101, (IntPtr)0x0D, IntPtr.Zero);
+                            NativeMethods.PostMessage(proc.MainWindowHandle, 0x0100, (IntPtr)0x0D, IntPtr.Zero);
+                            NativeMethods.PostMessage(proc.MainWindowHandle, 0x0101, (IntPtr)0x0D, IntPtr.Zero);
                         }
                     }
                     catch { }
+                    finally { proc.Dispose(); }
                 }
             }
             catch { }
         }
 
-        // --- Автовход в личный кабинет через одноразовый код (см. API.md, раздел 7.5) ---
-
-        private async Task AutoLoginAndNavigateAsync()
-        {
-            if (string.IsNullOrEmpty(ApiToken))
-            {
-                NavigateBrowser(HomePage);
-                return;
-            }
-            try
-            {
-                string? code = await AnodBizClient.RequestLoginLinkAsync(ApiToken);
-                NavigateBrowser(!string.IsNullOrEmpty(code)
-                    ? $"https://anod.saou.ru/device-login?code={code}"
-                    : HomePage);
-            }
-            catch
-            {
-                NavigateBrowser(HomePage);
-            }
-        }
-
-        private void UpdateClock()
-        {
-            ClockLabel.Text = DateTime.Now.ToString("HH:mm");
-            DateLabel.Text = DateTime.Now.ToString("d MMM", new CultureInfo("ru-RU"));
-        }
-
-        private int _networkFailures;
+        // --- Сеть ---
 
         private async Task CheckNetworkAsync()
         {
             bool online = await AnodBizClient.CheckNetworkAsync();
             _networkFailures = online ? 0 : _networkFailures + 1;
             bool showOffline = _networkFailures >= 2;
-            Dispatcher.Invoke(() =>
-            {
-                ShellNetworkOverlay.Visibility = showOffline ? Visibility.Visible : Visibility.Collapsed;
-                StatusDot.Fill = new SolidColorBrush(online
-                    ? Color.FromRgb(0x28, 0xC8, 0x40)
-                    : Color.FromRgb(0xFF, 0x6B, 0x6B));
-                StatusDotBorder.ToolTip = online ? "Статус сети: подключено" : "Статус сети: нет соединения";
-            });
+            if (online) _networkOverlayDismissed = false;
+            ShellNetworkOverlay.Visibility = showOffline && !_networkOverlayDismissed ? Visibility.Visible : Visibility.Collapsed;
+            _topBar?.SetOnline(online);
         }
 
-        // --- Верхняя/нижняя панель: обработчики ---
-
-        private void Home_Click(object sender, RoutedEventArgs e) => NavigateBrowser(HomePage);
-
-        private void Print_Click(object sender, RoutedEventArgs e) => PrintService.PrintSystemDialog(MainBrowser);
-
-        // Проводник и выход в Windows доступны только администратору — обычный
-        // сотрудник не должен иметь возможность обойти систему киоска.
-        private void Explorer_Click(object sender, RoutedEventArgs e)
+        private async void ShellRetryNetwork_Click(object sender, RoutedEventArgs e)
         {
-            if (!IsAdmin)
-            {
-                MessageBox.Show("Доступно только администратору.", "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-            try { Process.Start("explorer.exe"); } catch { }
+            _networkFailures = 1;
+            await CheckNetworkAsync();
+            if (ShellNetworkOverlay.Visibility == Visibility.Collapsed) ReloadPage();
         }
 
-        private void Lock_Click(object sender, RoutedEventArgs e)
+        private void HideNetworkOverlay_Click(object sender, RoutedEventArgs e)
         {
-            _clockTimer?.Stop(); _networkTimer?.Stop(); _remoteDesktopTimer?.Stop(); _notificationTimer?.Stop();
-            _keyboardHook?.Dispose();
-            _keyboardHook = null;
-            IsAdmin = true; // разрешаем Closing себя закрыть
+            _networkOverlayDismissed = true;
+            ShellNetworkOverlay.Visibility = Visibility.Collapsed;
+        }
+
+        // --- Блокировка, выключение, выход ---
+
+        public void LockScreen()
+        {
+            _allowClose = true;
             new MainWindow().Show();
             Close();
         }
 
-        private void ShutdownBtn_Click(object sender, RoutedEventArgs e)
+        public void ShutdownPc()
         {
             if (MessageBox.Show("Выключить компьютер?", "АБИЗ", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 return;
-
-            _clockTimer?.Stop(); _networkTimer?.Stop(); _remoteDesktopTimer?.Stop(); _notificationTimer?.Stop();
-            _keyboardHook?.Dispose();
-            _keyboardHook = null;
-            Process.Start("shutdown", "/s /t 0");
+            StopEverything();
+            try { Process.Start(new ProcessStartInfo("shutdown", "/s /t 0") { CreateNoWindow = true, UseShellExecute = false }); } catch { }
         }
 
-        private void Lang_Click(object sender, RoutedEventArgs e)
+        public void ExitToWindows()
         {
-            if (_isRussian) { LoadKeyboardLayout(EN_LAYOUT, KLF_ACTIVATE); LangBtn.Content = "EN"; _isRussian = false; }
-            else { LoadKeyboardLayout(RU_LAYOUT, KLF_ACTIVATE); LangBtn.Content = "RU"; _isRussian = true; }
+            if (MessageBox.Show("Закрыть АБИЗ и выйти в обычный Windows?", "АБИЗ", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+            _allowClose = true;
+            StopEverything();
+            TaskbarManager.Restore();
+            Application.Current.Shutdown();
         }
 
-        private void ToggleSidePanel_Click(object sender, RoutedEventArgs e)
+        // --- Календарь и заметки ---
+
+        public void ToggleCalendar()
         {
+            Activate();
             SidePanel.Visibility = SidePanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         }
+
+        private void CloseSidePanel_Click(object sender, RoutedEventArgs e) => SidePanel.Visibility = Visibility.Collapsed;
 
         private void Calendar_SelectedDatesChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -444,8 +449,7 @@ namespace AbizShell
             try
             {
                 if (!File.Exists(_notesPath)) return;
-                var json = File.ReadAllText(_notesPath);
-                var data = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                var data = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(_notesPath));
                 if (data == null) return;
                 foreach (var kv in data) _notes[kv.Key] = kv.Value;
             }
@@ -456,8 +460,7 @@ namespace AbizShell
         {
             try
             {
-                var dir = Path.GetDirectoryName(_notesPath);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                Directory.CreateDirectory(Path.GetDirectoryName(_notesPath)!);
                 File.WriteAllText(_notesPath, JsonSerializer.Serialize(_notes));
             }
             catch { }
@@ -479,7 +482,7 @@ namespace AbizShell
             SidePanel.Visibility = Visibility.Collapsed;
         }
 
-        // --- Уведомления (чат / инкассация) ---
+        // --- Уведомления ---
 
         private async Task CheckNotificationsAsync()
         {
@@ -513,58 +516,44 @@ namespace AbizShell
         }
 
         private static bool HasRows(JsonElement result) =>
+            result.ValueKind == JsonValueKind.Object &&
             result.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array && data.GetArrayLength() > 0;
 
         private void ShowNotification(string icon, string title, string message)
         {
-            Dispatcher.Invoke(() =>
-            {
-                NotificationIcon.Text = icon;
-                NotificationTitle.Text = title;
-                NotificationMessage.Text = message;
-                NotificationPanel.Visibility = Visibility.Visible;
+            NotificationIcon.Text = icon;
+            NotificationTitle.Text = title;
+            NotificationMessage.Text = message;
+            NotificationPanel.Visibility = Visibility.Visible;
 
-                var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
-                timer.Tick += (s, e) => { timer.Stop(); NotificationPanel.Visibility = Visibility.Collapsed; };
-                timer.Start();
-            });
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
+            timer.Tick += (s, e) => { timer.Stop(); NotificationPanel.Visibility = Visibility.Collapsed; };
+            timer.Start();
         }
 
         private void CloseNotification_Click(object sender, RoutedEventArgs e) => NotificationPanel.Visibility = Visibility.Collapsed;
 
-        // --- Админ-меню ---
+        // --- Меню администратора ---
 
-        private void AdminBtn_Click(object sender, RoutedEventArgs e)
+        public void ShowAdminMenu(UIElement target)
         {
-            var menu = new ContextMenu
+            var menu = new ContextMenu { PlacementTarget = target, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+
+            void Add(string header, Action action)
             {
-                Background = new SolidColorBrush(Color.FromArgb(0xCC, 42, 42, 60)),
-                Foreground = Brushes.White,
-                BorderBrush = Brushes.Transparent,
-                Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
-                PlacementTarget = AdminBtn,
-            };
+                var item = new MenuItem { Header = header };
+                item.Click += (s, a) => action();
+                menu.Items.Add(item);
+            }
 
-            var editButtonsItem = new MenuItem { Header = "Изменить кнопки киоска", Foreground = Brushes.White };
-            editButtonsItem.Click += (s, a) => OpenEditor();
-
-            var exitItem = new MenuItem { Header = "Выйти в Windows", Foreground = Brushes.White };
-            exitItem.Click += (s, a) => ExitToWindows();
-
-            var searchItem = new MenuItem { Header = "Поиск сотрудников", Foreground = Brushes.White };
-            searchItem.Click += async (s, a) => await SearchEmployeeAsync();
-
-            var printersItem = new MenuItem { Header = "Список принтеров", Foreground = Brushes.White };
-            printersItem.Click += (s, a) => ShowPrinters();
-
-            var shutdownItem = new MenuItem { Header = "Выключить компьютер", Foreground = Brushes.White };
-            shutdownItem.Click += ShutdownBtn_Click;
-
-            menu.Items.Add(editButtonsItem);
-            menu.Items.Add(exitItem);
-            menu.Items.Add(searchItem);
-            menu.Items.Add(printersItem);
-            menu.Items.Add(shutdownItem);
+            Add("Изменить кнопки меню", OpenEditor);
+            Add("Обновить кнопки с сервера", async () => { try { await LoadButtonsAsync(); } catch { } });
+            Add("Поиск сотрудников", async () => await SearchEmployeeAsync());
+            Add("Список принтеров", ShowPrinters);
+            Add("Проводник Windows", OpenWindowsExplorer);
+            Add("Диспетчер задач", () => AppLauncher.Launch("taskmgr.exe", this));
+            menu.Items.Add(new Separator());
+            Add("Выйти в Windows", ExitToWindows);
             menu.IsOpen = true;
         }
 
@@ -572,14 +561,14 @@ namespace AbizShell
         {
             var printers = PrintService.GetInstalledPrinters();
             string text = printers.Count > 0 ? string.Join("\n", printers) : "Принтеры не найдены";
-            MessageBox.Show(text, "Установленные принтеры", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, text, "Установленные принтеры", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private async Task SearchEmployeeAsync()
         {
             if (_client == null)
             {
-                MessageBox.Show("Нет связи с сервером (устройство не привязано).", "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, "Нет связи с сервером (устройство не привязано).", "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
@@ -590,49 +579,43 @@ namespace AbizShell
             {
                 var result = await _client.SearchEmployeesAsync(query);
                 string info = "Ничего не найдено";
-                if (result.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+                if (result.ValueKind == JsonValueKind.Object && result.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
                 {
                     var lines = new List<string>();
                     foreach (var item in data.EnumerateArray())
                     {
-                        string name = item.TryGetProperty("full_name", out var n) ? n.GetString() ?? "???" : "???";
-                        string role = item.TryGetProperty("role", out var r) ? r.GetString() ?? "" : "";
-                        string dept = item.TryGetProperty("department", out var d) ? d.GetString() ?? "" : "";
+                        string name = Str(item, "full_name", "???");
+                        string role = Str(item, "role", "");
+                        string dept = Str(item, "department", "");
                         lines.Add($"{name} | {role} | {dept}");
                     }
                     if (lines.Count > 0) info = string.Join("\n", lines);
                 }
-                MessageBox.Show(info, "Результаты поиска", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, info, "Результаты поиска", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Ошибка: " + ex.Message, "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(this, "Ошибка: " + ex.Message, "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
-        private void ExitToWindows()
-        {
-            _keyboardHook?.Dispose();
-            _keyboardHook = null;
-            try { Process.Start("explorer.exe"); } catch { }
-            IsAdmin = true;
-            Application.Current.Shutdown();
-        }
+        private static string Str(JsonElement el, string prop, string fallback) =>
+            el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? fallback : fallback;
 
-        private async void ShellRetryNetwork_Click(object sender, RoutedEventArgs e) => await CheckNetworkAsync();
-
-        private void ShellCallAdmin_Click(object sender, RoutedEventArgs e) => Lock_Click(sender, e);
+        // --- Код ПК ---
 
         private async void DeviceCode_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if ((DateTime.Now - _lastCodeClick).TotalSeconds > 2) _codeClickCount = 0;
             _codeClickCount++;
             _lastCodeClick = DateTime.Now;
-            if (_codeClickCount >= 3) { _codeClickCount = 0; await RegenerateDeviceCodeAsync(); }
-        }
-
-        private async Task RegenerateDeviceCodeAsync()
-        {
+            if (_codeClickCount < 3) return;
+            _codeClickCount = 0;
+            if (!IsAdmin)
+            {
+                MessageBox.Show(this, "Получить новый код может только администратор.", "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
             try
             {
                 string newCode = await AnodBizClient.RegisterDeviceAsync(Environment.MachineName);
@@ -647,95 +630,92 @@ namespace AbizShell
 
         private void OpenEditor()
         {
+            OverlayGrid.Visibility = Visibility.Collapsed;
             _editorRows.Clear();
             foreach (var b in _buttons)
                 _editorRows.Add(new KioskButtonEditRow(b));
-
-            EditorItemsControl.ItemsSource = _editorRows;
-            EditorItemsControl.ItemTemplate = BuildEditorItemTemplate();
-
+            RenderEditor();
             EditorOverlay.Visibility = Visibility.Visible;
+            Activate();
         }
 
-        private DataTemplate BuildEditorItemTemplate()
+        private TextBox EditorBox(string text, double width, string tip) => new()
         {
-            // Строим шаблон строки редактора кодом (текст, цвет, тип, цель, порядок, удалить).
-            var template = new DataTemplate(typeof(KioskButtonEditRow));
-            var factory = new FrameworkElementFactory(typeof(Border));
-            factory.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromArgb(0x22, 255, 255, 255)));
-            factory.SetValue(Border.CornerRadiusProperty, new CornerRadius(10));
-            factory.SetValue(Border.MarginProperty, new Thickness(0, 0, 0, 8));
-            factory.SetValue(Border.PaddingProperty, new Thickness(12));
+            Text = text, Width = width, Margin = new Thickness(0, 0, 8, 0), FontSize = 13, Padding = new Thickness(6, 4, 6, 4),
+            Background = new SolidColorBrush(Color.FromRgb(0x0D, 0x0D, 0x14)), Foreground = Brushes.White, CaretBrush = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x44, 255, 255, 255)), ToolTip = tip, VerticalContentAlignment = VerticalAlignment.Center,
+        };
 
-            var stack = new FrameworkElementFactory(typeof(StackPanel));
-            stack.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
-
-            var textBox = new FrameworkElementFactory(typeof(TextBox));
-            textBox.SetBinding(TextBox.TextProperty, new System.Windows.Data.Binding(nameof(KioskButtonEditRow.Text)) { Mode = System.Windows.Data.BindingMode.TwoWay });
-            textBox.SetValue(TextBox.WidthProperty, 140.0);
-            textBox.SetValue(TextBox.MarginProperty, new Thickness(0, 0, 8, 0));
-
-            var targetBox = new FrameworkElementFactory(typeof(TextBox));
-            targetBox.SetBinding(TextBox.TextProperty, new System.Windows.Data.Binding(nameof(KioskButtonEditRow.Target)) { Mode = System.Windows.Data.BindingMode.TwoWay });
-            targetBox.SetValue(TextBox.WidthProperty, 280.0);
-            targetBox.SetValue(TextBox.MarginProperty, new Thickness(0, 0, 8, 0));
-            targetBox.SetValue(ToolTipService.ToolTipProperty, "Ссылка (https://...) или имя .exe файла");
-
-            var colorBox = new FrameworkElementFactory(typeof(TextBox));
-            colorBox.SetBinding(TextBox.TextProperty, new System.Windows.Data.Binding(nameof(KioskButtonEditRow.Color)) { Mode = System.Windows.Data.BindingMode.TwoWay });
-            colorBox.SetValue(TextBox.WidthProperty, 90.0);
-            colorBox.SetValue(TextBox.MarginProperty, new Thickness(0, 0, 8, 0));
-            colorBox.SetValue(ToolTipService.ToolTipProperty, "Цвет HEX, например #125499");
-
-            var actionCombo = new FrameworkElementFactory(typeof(ComboBox));
-            actionCombo.SetValue(ComboBox.ItemsSourceProperty, new[] { "web", "app" });
-            actionCombo.SetBinding(ComboBox.SelectedItemProperty, new System.Windows.Data.Binding(nameof(KioskButtonEditRow.Action)) { Mode = System.Windows.Data.BindingMode.TwoWay });
-            actionCombo.SetValue(ComboBox.WidthProperty, 70.0);
-            actionCombo.SetValue(ComboBox.MarginProperty, new Thickness(0, 0, 8, 0));
-
-            var upBtn = new FrameworkElementFactory(typeof(Button));
-            upBtn.SetValue(Button.ContentProperty, "↑");
-            upBtn.SetValue(Button.WidthProperty, 28.0);
-            upBtn.SetValue(Button.MarginProperty, new Thickness(0, 0, 4, 0));
-            upBtn.AddHandler(Button.ClickEvent, (RoutedEventHandler)((s, e) => MoveRow(((FrameworkElement)s).DataContext as KioskButtonEditRow, -1)));
-
-            var downBtn = new FrameworkElementFactory(typeof(Button));
-            downBtn.SetValue(Button.ContentProperty, "↓");
-            downBtn.SetValue(Button.WidthProperty, 28.0);
-            downBtn.SetValue(Button.MarginProperty, new Thickness(0, 0, 4, 0));
-            downBtn.AddHandler(Button.ClickEvent, (RoutedEventHandler)((s, e) => MoveRow(((FrameworkElement)s).DataContext as KioskButtonEditRow, 1)));
-
-            var delBtn = new FrameworkElementFactory(typeof(Button));
-            delBtn.SetValue(Button.ContentProperty, "✕");
-            delBtn.SetValue(Button.WidthProperty, 28.0);
-            delBtn.SetValue(Button.ForegroundProperty, Brushes.OrangeRed);
-            delBtn.AddHandler(Button.ClickEvent, (RoutedEventHandler)((s, e) => DeleteRow(((FrameworkElement)s).DataContext as KioskButtonEditRow)));
-
-            stack.AppendChild(textBox);
-            stack.AppendChild(targetBox);
-            stack.AppendChild(colorBox);
-            stack.AppendChild(actionCombo);
-            stack.AppendChild(upBtn);
-            stack.AppendChild(downBtn);
-            stack.AppendChild(delBtn);
-            factory.AppendChild(stack);
-            template.VisualTree = factory;
-            return template;
+        private Button EditorButton(string text, string tip, Action onClick, Brush? fg = null)
+        {
+            var b = new Button
+            {
+                Content = text, MinWidth = 30, Height = 30, Margin = new Thickness(0, 0, 4, 0), Padding = new Thickness(8, 0, 8, 0),
+                ToolTip = tip, Cursor = Cursors.Hand, Foreground = fg ?? Brushes.White,
+                Background = new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x44)), BorderThickness = new Thickness(0),
+            };
+            b.Click += (s, e) => onClick();
+            return b;
         }
 
-        private void MoveRow(KioskButtonEditRow? row, int direction)
+        private void RenderEditor()
         {
-            if (row == null) return;
-            int index = _editorRows.IndexOf(row);
+            EditorRowsPanel.Children.Clear();
+            for (int i = 0; i < _editorRows.Count; i++)
+            {
+                var row = _editorRows[i];
+                var line = new StackPanel { Orientation = Orientation.Horizontal };
+
+                var swatch = new Border { Width = 14, Height = 30, CornerRadius = new CornerRadius(4), Background = SafeBrush(row.Color), Margin = new Thickness(0, 0, 8, 0) };
+                var name = EditorBox(row.Text, 150, "Название кнопки");
+                name.TextChanged += (s, e) => row.Text = name.Text;
+                var target = EditorBox(row.Target, 300, "Сайт (https://...) или путь к программе (.exe)");
+                target.TextChanged += (s, e) => row.Target = target.Text;
+                var color = EditorBox(row.Color, 84, "Цвет, например #125499");
+                color.TextChanged += (s, e) => { row.Color = color.Text; swatch.Background = SafeBrush(color.Text); };
+
+                var type = new ComboBox { Width = 110, Margin = new Thickness(0, 0, 8, 0), Height = 30 };
+                type.Items.Add("Сайт");
+                type.Items.Add("Программа");
+                type.SelectedIndex = row.Action == "app" ? 1 : 0;
+                type.SelectionChanged += (s, e) => row.Action = type.SelectedIndex == 1 ? "app" : "web";
+
+                line.Children.Add(swatch);
+                line.Children.Add(name);
+                line.Children.Add(target);
+                line.Children.Add(EditorButton("Обзор", "Выбрать программу (.exe) на компьютере", () =>
+                {
+                    var dlg = new OpenFileDialog { Filter = "Программы (*.exe;*.lnk)|*.exe;*.lnk|Все файлы|*.*", Title = "Выберите программу" };
+                    if (dlg.ShowDialog(this) == true)
+                    {
+                        target.Text = dlg.FileName;
+                        type.SelectedIndex = 1;
+                        if (string.IsNullOrWhiteSpace(name.Text) || name.Text == "Новая кнопка")
+                            name.Text = Path.GetFileNameWithoutExtension(dlg.FileName);
+                    }
+                }));
+                line.Children.Add(color);
+                line.Children.Add(type);
+                int index = i;
+                line.Children.Add(EditorButton("↑", "Выше", () => MoveRow(index, -1)));
+                line.Children.Add(EditorButton("↓", "Ниже", () => MoveRow(index, 1)));
+                line.Children.Add(EditorButton("✕", "Удалить", () => { _editorRows.RemoveAt(index); RenderEditor(); }, Brushes.OrangeRed));
+
+                EditorRowsPanel.Children.Add(new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(0x22, 255, 255, 255)),
+                    CornerRadius = new CornerRadius(10), Margin = new Thickness(0, 0, 0, 8), Padding = new Thickness(10),
+                    Child = line,
+                });
+            }
+        }
+
+        private void MoveRow(int index, int direction)
+        {
             int newIndex = index + direction;
             if (newIndex < 0 || newIndex >= _editorRows.Count) return;
-            _editorRows.Move(index, newIndex);
-        }
-
-        private void DeleteRow(KioskButtonEditRow? row)
-        {
-            if (row == null) return;
-            _editorRows.Remove(row);
+            (_editorRows[index], _editorRows[newIndex]) = (_editorRows[newIndex], _editorRows[index]);
+            RenderEditor();
         }
 
         private void AddButton_Click(object sender, RoutedEventArgs e)
@@ -748,38 +728,45 @@ namespace AbizShell
                 Action = "web",
                 Target = "https://",
             }));
+            RenderEditor();
         }
 
         private async void SaveButtons_Click(object sender, RoutedEventArgs e)
         {
             if (_client == null)
             {
-                MessageBox.Show("Нет связи с сервером — сохранение недоступно.", "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, "Компьютер не привязан к личному кабинету — сохранить кнопки на сервере нельзя.", "АБИЗ",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            _buttons = new List<KioskButton>();
-            foreach (var row in _editorRows)
-                _buttons.Add(row.ToButton());
+            var bad = _editorRows.FirstOrDefault(r => string.IsNullOrWhiteSpace(r.Text) || string.IsNullOrWhiteSpace(r.Target) || r.Target == "https://");
+            if (bad != null)
+            {
+                MessageBox.Show(this, "У каждой кнопки должны быть название и адрес сайта или программа.", "АБИЗ",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
 
-            bool ok = await KioskButtonsService.SaveAsync(_client, _buttons);
+            var list = _editorRows.Select(r => r.ToButton()).ToList();
+            bool ok = await KioskButtonsService.SaveAsync(_client, list);
             if (ok)
             {
+                _buttons = list;
                 BuildTiles();
                 EditorOverlay.Visibility = Visibility.Collapsed;
-                MessageBox.Show("Порядок кнопок сохранён — подхватится на всех устройствах.", "АБИЗ",
+                MessageBox.Show(this, "Кнопки сохранены — появятся на всех компьютерах при следующем входе.", "АБИЗ",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
             else
             {
-                MessageBox.Show("Не удалось сохранить — проверьте сеть.", "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, "Не удалось сохранить — проверьте интернет.", "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
 
         private void CloseEditor_Click(object sender, RoutedEventArgs e) => EditorOverlay.Visibility = Visibility.Collapsed;
     }
 
-    /// <summary>Редактируемая обёртка над KioskButton для биндинга в WPF (реализует INotifyPropertyChanged не нужен для простого списка с явной записью).</summary>
     public class KioskButtonEditRow
     {
         public string Id { get; }
@@ -800,10 +787,10 @@ namespace AbizShell
         public KioskButton ToButton() => new()
         {
             Id = Id,
-            Text = Text,
-            Color = Color,
+            Text = Text.Trim(),
+            Color = Color.Trim(),
             Action = Action,
-            Target = Target,
+            Target = Target.Trim(),
         };
     }
 }

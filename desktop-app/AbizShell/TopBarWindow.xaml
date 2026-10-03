@@ -1,0 +1,160 @@
+<Window x:Class="AbizShell.TopBarWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="АБИЗ — панель" WindowStyle="None" ResizeMode="NoResize"
+        Topmost="True" ShowInTaskbar="False" Background="#1A1A2E"
+        Height="60" Left="0" Top="0">
+
+    <Window.Resources>
+        <Style x:Key="BarBtn" TargetType="Button">
+            <Setter Property="Height" Value="42"/>
+            <Setter Property="MinWidth" Value="42"/>
+            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="Padding" Value="10,0"/>
+            <Setter Property="Foreground" Value="#EEFFFFFF"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ToolTipService.InitialShowDelay" Value="300"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="#22FFFFFF" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#44FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#66FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="LabeledBtn" TargetType="Button" BasedOn="{StaticResource BarBtn}">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="12,0"/>
+        </Style>
+
+        <Style x:Key="ShutdownBtn" TargetType="Button" BasedOn="{StaticResource LabeledBtn}">
+            <Setter Property="Foreground" Value="#FFAAAA"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="#33D32F2F" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#66D32F2F"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PopupBox" TargetType="Border">
+            <Setter Property="Background" Value="#F01E1E2E"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="14"/>
+            <Setter Property="BorderBrush" Value="#33FFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="10,0">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Слева: статус сети, название, навигация браузера, меню кнопок, окна -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+            <Ellipse x:Name="StatusDot" Width="10" Height="10" Fill="#28C840" Margin="4,0,10,0" ToolTip="Сеть: подключено"/>
+            <TextBlock Text="АБИЗ" FontSize="18" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" Margin="0,0,14,0"/>
+
+            <Button Style="{StaticResource LabeledBtn}" Click="Menu_Click" ToolTip="Меню программ и сайтов (Tab или 2× Пробел)">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#x25A6;" FontSize="18" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="Меню" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+            <Button x:Name="WindowsBtn" Style="{StaticResource LabeledBtn}" Click="Windows_Click" ToolTip="Открытые программы — переключиться или закрыть">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#x1F5D7;" FontSize="16" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="WindowsBtnText" Text="Окна" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
+            <Rectangle Width="1" Height="28" Fill="#33FFFFFF" Margin="8,0"/>
+
+            <Button Style="{StaticResource BarBtn}" Content="&#x1F3E0;" Click="Home_Click" ToolTip="Главная страница"/>
+            <Button Style="{StaticResource BarBtn}" Content="&#x2190;" Click="Back_Click" ToolTip="Назад"/>
+            <Button Style="{StaticResource BarBtn}" Content="&#x2192;" Click="Forward_Click" ToolTip="Вперёд"/>
+            <Button Style="{StaticResource BarBtn}" Content="&#x27F3;" Click="Reload_Click" ToolTip="Обновить страницу"/>
+        </StackPanel>
+
+        <!-- По центру: часы -->
+        <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Center">
+            <TextBlock x:Name="ClockLabel" Text="00:00" FontSize="24" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+            <TextBlock x:Name="DateLabel" Text="1 янв" FontSize="11" Foreground="#88FFFFFF" HorizontalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- Справа: инструменты и завершение работы (раньше часть была в нижней панели) -->
+        <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+            <Button Style="{StaticResource BarBtn}" Content="&#x1F4C1;" Click="Explorer_Click" ToolTip="Проводник — файлы, флешки, печать файлов"/>
+            <Button Style="{StaticResource BarBtn}" Content="&#x1F5A8;" Click="Print_Click" ToolTip="Печать текущей страницы"/>
+            <Button x:Name="ExtensionsBtn" Style="{StaticResource BarBtn}" Content="&#x1F9E9;" Click="Extensions_Click" ToolTip="Расширения браузера (ЭЦП, Рутокен, СБИС)"/>
+            <Button Style="{StaticResource BarBtn}" Content="&#x1F4C5;" Click="Calendar_Click" ToolTip="Календарь и заметки"/>
+            <Button x:Name="LangBtn" Style="{StaticResource LabeledBtn}" Content="RU" Click="Lang_Click" ToolTip="Сменить раскладку клавиатуры"/>
+            <Button x:Name="AdminBtn" Style="{StaticResource BarBtn}" Content="&#x2699;" Click="Admin_Click" Visibility="Collapsed" ToolTip="Меню администратора"/>
+            <Button Style="{StaticResource BarBtn}" Content="&#x1F512;" Click="Lock_Click" ToolTip="Заблокировать экран"/>
+            <Button Style="{StaticResource ShutdownBtn}" Click="Shutdown_Click" ToolTip="Выключить компьютер">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#x23FB;" FontSize="16" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="#FF6B6B"/>
+                    <TextBlock Text="Завершить" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+        </StackPanel>
+
+        <!-- Список открытых окон -->
+        <Popup x:Name="WindowsPopup" PlacementTarget="{Binding ElementName=WindowsBtn}" Placement="Bottom"
+               StaysOpen="False" AllowsTransparency="True" VerticalOffset="8">
+            <Border Style="{StaticResource PopupBox}" Width="420">
+                <StackPanel>
+                    <TextBlock Text="Открытые программы" FontSize="15" FontWeight="Bold" Foreground="White" Margin="0,0,0,10"/>
+                    <ScrollViewer MaxHeight="460" VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="WindowsList"/>
+                    </ScrollViewer>
+                </StackPanel>
+            </Border>
+        </Popup>
+
+        <!-- Расширения браузера -->
+        <Popup x:Name="ExtensionsPopup" PlacementTarget="{Binding ElementName=ExtensionsBtn}" Placement="Bottom"
+               StaysOpen="False" AllowsTransparency="True" VerticalOffset="8" HorizontalOffset="-300">
+            <Border Style="{StaticResource PopupBox}" Width="420">
+                <StackPanel>
+                    <TextBlock Text="Расширения браузера" FontSize="15" FontWeight="Bold" Foreground="White" Margin="0,0,0,4"/>
+                    <TextBlock Text="Для работы с ЭЦП на компьютере должны быть установлены программы КриптоПро / Рутокен / СБИС Плагин."
+                               FontSize="11" Foreground="#88FFFFFF" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <StackPanel x:Name="ExtensionsList"/>
+                    <Button Style="{StaticResource LabeledBtn}" Margin="0,10,0,0" HorizontalAlignment="Left" Click="OpenInEdge_Click"
+                            ToolTip="Если подпись не работает во встроенном браузере — откройте эту же страницу в Microsoft Edge">
+                        <TextBlock Text="Открыть страницу в Microsoft Edge" FontSize="13"/>
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Popup>
+    </Grid>
+</Window>

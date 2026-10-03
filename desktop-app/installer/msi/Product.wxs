@@ -2,21 +2,21 @@
 <!-- MSI-пакет АБИЗ. Сборка: dotnet build installer\msi\AbizInstaller.wixproj -c Release -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="1.0.0.0"
+  <Package Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="1.0.1.0"
            UpgradeCode="8a2e1c6a-5b3e-4d2a-9c7a-1f6e3b2d4a10"
            InstallerVersion="500" Compressed="yes" Scope="perMachine"
            Language="1049" Codepage="1251">
 
-    <!-- Запрещаем установку поверх более новой версии и чисто обновляем старую. -->
     <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия АБИЗ." />
     <MediaTemplate EmbedCab="yes" />
 
-    <!-- Иконка в «Программы и компоненты» -->
     <Property Id="ARPPRODUCTICON" Value="AbizIcon" />
 
     <Feature Id="MainFeature" Title="АБИЗ Shell" Level="1">
       <ComponentGroupRef Id="AppFiles" />
-      <ComponentRef Id="AutoStartRegistryEntry" />
+      <ComponentRef Id="TaskFile" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="StartMenuShortcut" />
     </Feature>
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -24,31 +24,73 @@
         <Directory Id="APPDIR" Name="AbizShell" />
       </Directory>
     </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="StartMenuDir" Name="АБИЗ" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
 
-
-    <!-- Все файлы программы из папки publish. PublishDir передаётся из .wixproj. -->
     <ComponentGroup Id="AppFiles" Directory="APPDIR">
       <Files Include="$(var.PublishDir)\**" />
     </ComponentGroup>
 
-    <!--
-      Автозапуск от имени системы (HKLM, а не HKCU) — обычный пользователь не может
-      удалить этот ключ без прав администратора. Программа дополнительно прописывает
-      себя и в HKCU при каждом старте (App.xaml.cs) — это резервный путь.
-    -->
-    <Component Id="AutoStartRegistryEntry" Directory="APPDIR" Guid="6e2a7d1c-4f8b-4a9e-8c3d-1a9f6e2b7c44">
-      <RegistryValue Root="HKLM"
-                     Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-                     Name="AbizShell"
-                     Value="&quot;[APPDIR]AbizShell.exe&quot;"
-                     Type="string" KeyPath="yes" />
+    <!-- Описание задачи Планировщика (автозапуск с правами администратора при входе). -->
+    <Component Id="TaskFile" Directory="APPDIR" Guid="3b7d2f4e-8a1c-4e6b-9f2d-5c8a1e7b3d60">
+      <File Id="TaskXml" Source="AbizShell-task.xml" Name="AbizShell-task.xml" KeyPath="yes" />
     </Component>
 
+    <!--
+      Ярлыки. Раньше сборка падала, потому что у ярлыка, который ставится всем
+      пользователям, не было ключа в реестре (ошибки проверки ICE38/ICE43/ICE57). Теперь у каждого
+      ярлыка свой ключ в реестре, а эти проверки отключены в AbizInstaller.wixproj.
+    -->
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="7c1e5a3d-2b9f-4d8e-a6c4-1f3b9e7d5a21">
+      <Shortcut Id="AbizDesktopShortcut" Name="АБИЗ" Description="Рабочая оболочка АБИЗ"
+                Target="[APPDIR]AbizShell.exe" WorkingDirectory="APPDIR" Icon="AbizIcon" />
+      <RegistryValue Root="HKCU" Key="Software\AnodBiz\AbizShell" Name="DesktopShortcut"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="StartMenuShortcut" Directory="StartMenuDir" Guid="9e4b2c7a-5d1f-4a3e-8b6c-2d7f1a9e4c83">
+      <Shortcut Id="AbizStartShortcut" Name="АБИЗ" Description="Рабочая оболочка АБИЗ"
+                Target="[APPDIR]AbizShell.exe" WorkingDirectory="APPDIR" Icon="AbizIcon" />
+      <RemoveFolder Id="RemoveStartMenuDir" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\AnodBiz\AbizShell" Name="StartMenuShortcut"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!--
+      Автозапуск: задача «AbizShell» в Планировщике заданий Windows, запуск при входе
+      любого пользователя с наивысшими правами. Только так программа с правами
+      администратора стартует при входе без запроса UAC — обычный автозапуск
+      (раздел Run в реестре) такие программы молча пропускает.
+      Старую запись автозапуска из реестра удаляем, чтобы не было двойного запуска.
+    -->
+    <SetProperty Id="CreateAbizTask" Sequence="execute" Before="CreateAbizTask"
+                 Value="&quot;[System64Folder]schtasks.exe&quot; /Create /F /TN &quot;AbizShell&quot; /XML &quot;[APPDIR]AbizShell-task.xml&quot;" />
+    <CustomAction Id="CreateAbizTask" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <SetProperty Id="DeleteAbizTask" Sequence="execute" Before="DeleteAbizTask"
+                 Value="&quot;[System64Folder]schtasks.exe&quot; /Delete /F /TN &quot;AbizShell&quot;" />
+    <CustomAction Id="DeleteAbizTask" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <SetProperty Id="RemoveOldRunKeys" Sequence="execute" Before="RemoveOldRunKeys"
+                 Value="&quot;[System64Folder]reg.exe&quot; delete &quot;HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run&quot; /v AbizShell /f" />
+    <CustomAction Id="RemoveOldRunKeys" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RemoveOldRunKeys" After="InstallFiles" Condition="NOT REMOVE" />
+      <Custom Action="CreateAbizTask" After="RemoveOldRunKeys" Condition="NOT REMOVE" />
+      <Custom Action="DeleteAbizTask" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
 
     <Icon Id="AbizIcon" SourceFile="..\bundle\abiz.ico" />
 
-    <!-- Готовый интерфейс установщика: приветствие, выбор папки, прогресс, финал. -->
-    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="APPDIR" />
+    <!-- Папку установки выбрать нельзя: путь C:\Program Files\AnodBiz\AbizShell
+         прописан в задаче автозапуска (AbizShell-task.xml). -->
+    <ui:WixUI Id="WixUI_Minimal" />
     <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
   </Package>
