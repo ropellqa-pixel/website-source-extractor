@@ -1,4 +1,5 @@
 {
+  "cameras-api": "https://functions.poehali.dev/246cb9d5-b997-40d1-8f46-082cafe7879e",
   "auth-api": "https://functions.poehali.dev/0cc75331-123f-465b-a6da-01ba5f142bfa",
   "data-api": "https://functions.poehali.dev/e40aca0d-1c72-49c0-84a1-cf57b44984ec",
   "file-upload": "https://functions.poehali.dev/5250ef3b-f3ae-4031-9d3c-2ca46f38a8bc",

@@ -18,6 +18,7 @@ import Documents from "./pages/Documents";
 import DocumentBase from "./pages/DocumentBase";
 import Dto from "./pages/Dto";
 import Chat from "./pages/Chat";
+import Cameras from "./pages/Cameras";
 import Employees from "./pages/Employees";
 import Settings from "./pages/Settings";
 import Salary from "./pages/Salary";
@@ -66,6 +67,7 @@ const App = () => (
             <Route path="/base" element={<ProtectedRoute><DocumentBase /></ProtectedRoute>} />
             <Route path="/dto" element={<ProtectedRoute><Dto /></ProtectedRoute>} />
             <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+            <Route path="/cameras" element={<ProtectedRoute><Cameras /></ProtectedRoute>} />
             <Route path="/salary" element={<ProtectedRoute><Salary /></ProtectedRoute>} />
             <Route path="/schedule" element={<ProtectedRoute><Schedule /></ProtectedRoute>} />
             <Route path="/collection" element={<ProtectedRoute><Collection /></ProtectedRoute>} />
