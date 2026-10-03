@@ -54,18 +54,24 @@ def _signature(tm: str) -> str:
 
 def _cloud_token(serial: str) -> Optional[str]:
     tm = '000002' + str(int(time.time() * 1000))
-    r = requests.post(f'{TKS_URL}/v2/device/token/{tm}/{_signature(tm)}.rs', json={'sns': [serial]},
-                      headers={'uuid': JF_UUID, 'appKey': JF_KEY}, timeout=8)
-    data = r.json()
+    try:
+        r = requests.post(f'{TKS_URL}/v2/device/token/{tm}/{_signature(tm)}.rs', json={'sns': [serial]},
+                          headers={'uuid': JF_UUID, 'appKey': JF_KEY}, timeout=3)
+        data = r.json()
+    except Exception:
+        return None
     if data.get('code') != 2000 or not data.get('data'):
         return None
     return data['data'][0].get('token')
 
 
 def _rds(token: str, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
-    r = requests.post(f'{RDS_URL}/{path}/{token}', json=body, timeout=12,
-                      headers={'appKey': JF_KEY, 'uuid': JF_UUID, 'Content-Type': 'application/json; charset=UTF-8'})
-    return r.json()
+    try:
+        r = requests.post(f'{RDS_URL}/{path}/{token}', json=body, timeout=3.5,
+                          headers={'appKey': JF_KEY, 'uuid': JF_UUID, 'Content-Type': 'application/json; charset=UTF-8'})
+        return r.json()
+    except Exception:
+        return {'code': 2000, 'data': {'Ret': -1, 'RetMsg': 'Камера не ответила вовремя, попробуйте ещё раз'}}
 
 
 def _camera_token(cur, cam: Dict[str, Any], force: bool = False) -> Optional[str]:
@@ -294,6 +300,11 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                         (serial, existing['id'] if existing else ''))
             if cur.fetchone():
                 return _resp(400, {'error': 'Камера с таким серийным номером уже добавлена'})
+
+            if existing and existing['serial'] == serial and existing['username'] == username \
+                    and existing['password'] == password:
+                cur.execute(f'UPDATE {SCHEMA}.cameras SET name=%s, updated_at=now() WHERE id=%s', (name, existing['id']))
+                return _resp(200, {'ok': True, 'id': existing['id'], 'cameras': _list(cur, True)})
 
             probe = {'id': None, 'serial': serial, 'username': username, 'password': password}
             token = _camera_token(cur, probe)
