@@ -51,6 +51,18 @@ namespace AbizShell
         public ShellWindow()
         {
             InitializeComponent();
+            if (!Edition.Kiosk)
+            {
+                // АБИЗ-Админ — обычное окно Windows: рамка, свернуть/развернуть, панель задач.
+                WindowStyle = WindowStyle.SingleBorderWindow;
+                ResizeMode = ResizeMode.CanResize;
+                ShowInTaskbar = true;
+                Width = 1280;
+                Height = 820;
+                WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                Title = Edition.Name;
+                if (Content is FrameworkElement root) root.Margin = new Thickness(0, TopBarWindow.BarHeight, 0, 0);
+            }
             Loaded += ShellWindow_Loaded;
             Closing += ShellWindow_Closing;
             _notesPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AbizShell", "notes.json");
@@ -73,7 +85,14 @@ namespace AbizShell
 
         private void ShellWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
-            if (!_allowClose) { e.Cancel = true; return; }
+            if (!_allowClose)
+            {
+                if (Edition.Kiosk) { e.Cancel = true; return; }
+                // АБИЗ-Админ: крестик окна закрывает программу.
+                StopEverything();
+                Application.Current.Shutdown();
+                return;
+            }
             StopEverything();
         }
 
@@ -94,12 +113,25 @@ namespace AbizShell
 
         private async void ShellWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            TaskbarManager.Hide();
-
             _topBar = new TopBarWindow(this, IsAdmin);
-            _topBar.WorkAreaChanged += FitToWorkArea;
-            _topBar.Show();
-            FitToWorkArea();
+            if (Edition.Kiosk)
+            {
+                TaskbarManager.Hide();
+                _topBar.WorkAreaChanged += FitToWorkArea;
+                _topBar.Show();
+                FitToWorkArea();
+            }
+            else
+            {
+                // АБИЗ-Админ: панель — часть обычного окна. Она «приклеена» к верху окна
+                // и двигается/сворачивается вместе с ним; рабочий стол Windows не трогаем.
+                _topBar.Owner = this;
+                _topBar.Show();
+                LocationChanged += (s, a) => PlaceAdminTopBar();
+                SizeChanged += (s, a) => PlaceAdminTopBar();
+                StateChanged += (s, a) => PlaceAdminTopBar();
+                PlaceAdminTopBar();
+            }
 
             if (!string.IsNullOrEmpty(DeviceCode))
                 DeviceCodeDisplay.Text = "Код ПК: " + DeviceManager.FormatCode(DeviceCode);
@@ -110,7 +142,7 @@ namespace AbizShell
 
             // Горячие клавиши работают только когда активна наша программа — иначе
             // Tab и пробел перестали бы работать в Word, Excel и других программах.
-            _keyboardHook = new KeyboardHook { BlockSystemKeys = true };
+            _keyboardHook = new KeyboardHook { BlockSystemKeys = Edition.Kiosk };
             _keyboardHook.KeyHandler = (vkCode, isSysKey) =>
             {
                 if (!NativeMethods.IsOwnProcessForeground()) return false;
@@ -153,9 +185,25 @@ namespace AbizShell
             _ = CheckNetworkAsync();
         }
 
+        /// <summary>АБИЗ-Админ: ставит верхнюю панель поверх верхней части окна (над браузером).</summary>
+        private void PlaceAdminTopBar()
+        {
+            if (_topBar == null || Edition.Kiosk || Content is not FrameworkElement root) return;
+            if (WindowState == WindowState.Minimized) return;
+            try
+            {
+                var src = PresentationSource.FromVisual(root);
+                if (src?.CompositionTarget == null) return;
+                var topLeft = src.CompositionTarget.TransformFromDevice.Transform(root.PointToScreen(new Point(0, 0)));
+                _topBar.PlaceInside(topLeft.X, topLeft.Y - TopBarWindow.BarHeight, root.ActualWidth);
+            }
+            catch { }
+        }
+
         /// <summary>Окно занимает всю рабочую область — под верхней панелью.</summary>
         public void FitToWorkArea()
         {
+            if (!Edition.Kiosk) return;
             var wa = SystemParameters.WorkArea;
             WindowState = WindowState.Normal;
             Left = wa.Left;
@@ -416,7 +464,8 @@ namespace AbizShell
 
         public void ExitToWindows()
         {
-            if (MessageBox.Show("Закрыть АБИЗ и выйти в обычный Windows?", "АБИЗ", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            string q = Edition.Kiosk ? "Закрыть АБИЗ и выйти в обычный Windows?" : "Закрыть АБИЗ-Админ?";
+            if (MessageBox.Show(q, Edition.Name, MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 return;
             _allowClose = true;
             StopEverything();
@@ -559,7 +608,7 @@ namespace AbizShell
             Add("Проводник Windows", OpenWindowsExplorer);
             Add("Диспетчер задач", () => AppLauncher.Launch("taskmgr.exe", this));
             menu.Items.Add(new Separator());
-            Add("Выйти в Windows", ExitToWindows);
+            Add(Edition.Kiosk ? "Выйти в Windows" : "Закрыть программу", ExitToWindows);
             menu.IsOpen = true;
         }
 

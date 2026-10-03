@@ -1,2 +1,2 @@
-ABIZ project version 13
-If installer\msi and installer\bundle folders exist - archive is fresh.
+ABIZ project version 14
+AbizShell (kiosk) + AbizAdmin (normal window). Video decoder VLC built in (H.265 without paid codecs).

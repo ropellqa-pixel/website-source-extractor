@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MSI-пакет АБИЗ-Админ: обычная программа. Без автозапуска, без задачи Планировщика.
+     Сборка: dotnet build installer\admin\AbizAdminInstaller.wixproj -c Release -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="АБИЗ-Админ" Manufacturer="ООО «Рассвет»" Version="1.1.0.0"
+           UpgradeCode="4d7b9e21-3c6a-4f58-9b1e-8a2c5d7f3e64"
+           InstallerVersion="500" Compressed="yes" Scope="perMachine"
+           Language="1049" Codepage="1251">
+
+    <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия АБИЗ-Админ." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPPRODUCTICON" Value="AbizAdminIcon" />
+
+    <Feature Id="MainFeature" Title="АБИЗ-Админ" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="AnodBiz">
+        <Directory Id="APPDIR" Name="AbizAdmin" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="StartMenuDir" Name="АБИЗ-Админ" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <ComponentGroup Id="AppFiles" Directory="APPDIR">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="b2e8c4a1-7d3f-4e9b-a5c6-3f1d8e2b7a49">
+      <Shortcut Id="AbizAdminDesktopShortcut" Name="АБИЗ-Админ" Description="АБИЗ — версия для администратора"
+                Target="[APPDIR]AbizAdmin.exe" WorkingDirectory="APPDIR" Icon="AbizAdminIcon" />
+      <RegistryValue Root="HKCU" Key="Software\AnodBiz\AbizAdmin" Name="DesktopShortcut"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="StartMenuShortcut" Directory="StartMenuDir" Guid="e6a3d9b2-1c8f-4b7e-9d2a-5c4f8b1e3a76">
+      <Shortcut Id="AbizAdminStartShortcut" Name="АБИЗ-Админ" Description="АБИЗ — версия для администратора"
+                Target="[APPDIR]AbizAdmin.exe" WorkingDirectory="APPDIR" Icon="AbizAdminIcon" />
+      <RemoveFolder Id="RemoveStartMenuDir" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\AnodBiz\AbizAdmin" Name="StartMenuShortcut"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Icon Id="AbizAdminIcon" SourceFile="..\bundle\abiz.ico" />
+
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="..\msi\License.rtf" />
+  </Package>
+</Wix>

@@ -1,13 +1,15 @@
 ﻿# Сборка инсталлятора АБИЗ "в один клик".
 # Запуск:  powershell -ExecutionPolicy Bypass -File build-installer.ps1
-# Выполняет три шага по порядку: публикация программы -> MSI -> итоговый .exe
+# Собирает две программы:
+#   АБИЗ        -> installer\out\AbizSetup.exe       (киоск, автозапуск)
+#   АБИЗ-Админ  -> installer\out\AbizAdminSetup.msi  (обычная программа)
 
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 
 function Write-Step($number, $text) {
     Write-Host ""
-    Write-Host "=== Шаг $number из 3: $text ===" -ForegroundColor Cyan
+    Write-Host "=== Шаг $number из 5: $text ===" -ForegroundColor Cyan
 }
 
 try {
@@ -45,6 +47,16 @@ try {
     dotnet build (Join-Path $root "installer\bundle\AbizBundle.wixproj") -c Release
     if ($LASTEXITCODE -ne 0) { throw "Сборка бандла не удалась" }
 
+    Write-Step 4 "публикация АБИЗ-Админ"
+    $adminDir = Join-Path $root "AbizShell\bin\publish-admin"
+    if (Test-Path $adminDir) { Remove-Item $adminDir -Recurse -Force }
+    dotnet publish (Join-Path $root "AbizShell\AbizShell.csproj") -c ReleaseAdmin -r win-x64 --self-contained false -o $adminDir
+    if ($LASTEXITCODE -ne 0) { throw "Публикация АБИЗ-Админ не удалась" }
+
+    Write-Step 5 "сборка установщика АБИЗ-Админ"
+    dotnet build (Join-Path $root "installer\admin\AbizAdminInstaller.wixproj") -c Release
+    if ($LASTEXITCODE -ne 0) { throw "Сборка установщика АБИЗ-Админ не удалась" }
+
     $result = Join-Path $root "installer\out\AbizSetup.exe"
     Write-Host ""
     Write-Host "ГОТОВО. Инсталлятор собран:" -ForegroundColor Green
@@ -54,7 +66,9 @@ try {
         Write-Host "  Размер: $sizeMb МБ"
     }
     Write-Host ""
-    Write-Host "Раздавай этот файл сотрудникам. Запускать от имени администратора." -ForegroundColor Yellow
+    Write-Host "  АБИЗ-Админ: $(Join-Path $root 'installer\out\AbizAdminSetup.msi')" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "AbizSetup.exe — на ПК сотрудников. AbizAdminSetup.msi — на ПК директора/администратора." -ForegroundColor Yellow
 }
 catch {
     Write-Host ""

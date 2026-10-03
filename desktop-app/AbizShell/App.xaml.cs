@@ -17,7 +17,7 @@ namespace AbizShell
         [STAThread]
         public static void Main()
         {
-            _singleInstanceMutex = new Mutex(true, "AbizShell_SingleInstance_8F2A1C", out bool isNew);
+            _singleInstanceMutex = new Mutex(true, Edition.MutexName, out bool isNew);
             if (!isNew) return;
 
             var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -40,7 +40,7 @@ namespace AbizShell
         {
             e.Handled = true;
             MessageBox.Show("Произошла ошибка:\n" + e.Exception.Message + "\n\nПрограмма продолжит работу.",
-                "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Edition.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         protected override void OnExit(ExitEventArgs e)

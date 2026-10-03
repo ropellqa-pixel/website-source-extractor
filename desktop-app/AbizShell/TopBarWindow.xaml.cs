@@ -26,6 +26,8 @@ namespace AbizShell
 
         public event Action? WorkAreaChanged;
 
+        public const double BarHeight = 60;
+
         public TopBarWindow(ShellWindow shell, bool isAdmin)
         {
             InitializeComponent();
@@ -34,19 +36,34 @@ namespace AbizShell
             AdminBtn.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
 
             Width = SystemParameters.PrimaryScreenWidth;
+            if (!Edition.Kiosk)
+            {
+                // АБИЗ-Админ: панель — часть окна программы, не «поверх всех» и не панель экрана.
+                Topmost = false;
+                ShowActivated = false;
+            }
 
             _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _clock.Tick += (s, e) => UpdateClock();
             _clock.Start();
             UpdateClock();
 
-            SourceInitialized += (s, e) => RegisterAppBar();
+            SourceInitialized += (s, e) => { if (Edition.Kiosk) RegisterAppBar(); };
             Closing += (s, e) =>
             {
                 if (!_allowClose) { e.Cancel = true; return; }
                 _clock.Stop();
                 UnregisterAppBar();
             };
+        }
+
+        /// <summary>АБИЗ-Админ: ставит панель в заданное место (верх окна программы).</summary>
+        public void PlaceInside(double left, double top, double width)
+        {
+            Left = left;
+            Top = top;
+            Width = Math.Max(width, 200);
+            Height = BarHeight;
         }
 
         public void ForceClose()
@@ -128,6 +145,7 @@ namespace AbizShell
         private void UpdateClock()
         {
             ClockLabel.Text = DateTime.Now.ToString("HH:mm");
+            if (DateTime.Now.Second % 5 == 0) RefreshVolumeIcon();
             DateLabel.Text = DateTime.Now.ToString("d MMMM, dddd", new CultureInfo("ru-RU"));
             int count = WindowSwitcher.GetWindows().Count;
             WindowsBtnText.Text = count > 0 ? $"Окна ({count})" : "Окна";
@@ -153,6 +171,172 @@ namespace AbizShell
         private void Lock_Click(object sender, RoutedEventArgs e) => _shell.LockScreen();
         private void Shutdown_Click(object sender, RoutedEventArgs e) => _shell.ShutdownPc();
         private void OpenInEdge_Click(object sender, RoutedEventArgs e) { ExtensionsPopup.IsOpen = false; _shell.OpenCurrentPageInEdge(); }
+
+        // --- Громкость ---
+
+        private bool _volumeUpdating;
+
+        private static string VolumeIcon(int v, bool muted) =>
+            muted || v == 0 ? "\U0001F507" : v < 34 ? "\U0001F508" : v < 67 ? "\U0001F509" : "\U0001F50A";
+
+        private void RefreshVolumeIcon()
+        {
+            int v = AudioManager.GetVolume();
+            bool muted = AudioManager.GetMute();
+            VolumeBtnIcon.Text = v < 0 ? "\U0001F507" : VolumeIcon(v, muted);
+            VolumeBtn.ToolTip = v < 0 ? "Звуковое устройство не найдено" : muted ? "Звук выключен" : $"Громкость: {v}%";
+        }
+
+        private void Volume_Click(object sender, RoutedEventArgs e)
+        {
+            int v = AudioManager.GetVolume();
+            _volumeUpdating = true;
+            if (v < 0)
+            {
+                VolumeSlider.IsEnabled = false;
+                MuteBtn.IsEnabled = false;
+                VolumeValueLabel.Text = "—";
+                VolumeHint.Text = "Звуковое устройство не найдено. Подключите колонки или наушники.";
+            }
+            else
+            {
+                VolumeSlider.IsEnabled = true;
+                MuteBtn.IsEnabled = true;
+                VolumeSlider.Value = v;
+                VolumeValueLabel.Text = v + "%";
+                VolumeHint.Text = "";
+            }
+            _volumeUpdating = false;
+            MuteBtnIcon.Text = VolumeIcon(Math.Max(v, 0), AudioManager.GetMute());
+            VolumePopup.IsOpen = true;
+        }
+
+        private void VolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_volumeUpdating) return;
+            int v = (int)Math.Round(e.NewValue);
+            AudioManager.SetVolume(v);
+            VolumeValueLabel.Text = v + "%";
+            MuteBtnIcon.Text = VolumeIcon(v, AudioManager.GetMute());
+            RefreshVolumeIcon();
+        }
+
+        private void VolumePreset_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button b && int.TryParse(b.Tag?.ToString(), out int v))
+            {
+                AudioManager.SetVolume(v);
+                if (v == 0) AudioManager.SetMute(true);
+                _volumeUpdating = true;
+                VolumeSlider.Value = v;
+                _volumeUpdating = false;
+                VolumeValueLabel.Text = v + "%";
+                MuteBtnIcon.Text = VolumeIcon(v, AudioManager.GetMute());
+                RefreshVolumeIcon();
+            }
+        }
+
+        private void Mute_Click(object sender, RoutedEventArgs e)
+        {
+            bool muted = !AudioManager.GetMute();
+            AudioManager.SetMute(muted);
+            MuteBtnIcon.Text = VolumeIcon(AudioManager.GetVolume(), muted);
+            RefreshVolumeIcon();
+        }
+
+        // --- Сеть ---
+
+        private void Network_Click(object sender, RoutedEventArgs e)
+        {
+            FillNetworkInfo();
+            NetAdaptersBtn.Visibility = _isAdmin ? Visibility.Visible : Visibility.Collapsed;
+            NetworkPopup.IsOpen = true;
+            _ = CheckInternetAsync();
+        }
+
+        private void FillNetworkInfo()
+        {
+            NetAdaptersList.Children.Clear();
+            var gray = new SolidColorBrush(Color.FromArgb(0xAA, 255, 255, 255));
+            try
+            {
+                var adapters = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up
+                                && n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback
+                                && n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Tunnel)
+                    .ToList();
+                if (adapters.Count == 0)
+                {
+                    NetAdaptersList.Children.Add(new TextBlock { Text = "Нет активных подключений", Foreground = gray, FontSize = 12 });
+                    return;
+                }
+                foreach (var a in adapters)
+                {
+                    bool wifi = a.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211;
+                    string ip = a.GetIPProperties().UnicastAddresses
+                        .FirstOrDefault(x => x.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)?.Address.ToString() ?? "нет адреса";
+                    string speed = a.Speed > 0 ? $"{a.Speed / 1_000_000} Мбит/с" : "";
+                    NetAdaptersList.Children.Add(new TextBlock
+                    {
+                        Text = $"{(wifi ? "\U0001F4F6 Wi‑Fi" : "\U0001F50C Кабель")}: {a.Name} · {ip} {speed}",
+                        Foreground = gray, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 2),
+                    });
+                }
+            }
+            catch
+            {
+                NetAdaptersList.Children.Add(new TextBlock { Text = "Не удалось получить список подключений", Foreground = gray, FontSize = 12 });
+            }
+        }
+
+        private async System.Threading.Tasks.Task CheckInternetAsync()
+        {
+            NetStateLabel.Text = "Проверяю связь с сервером...";
+            NetStateDot.Fill = new SolidColorBrush(Color.FromRgb(0xFF, 0xC1, 0x07));
+            bool online = await AnodBizClient.CheckNetworkAsync();
+            NetStateLabel.Text = online ? "Интернет есть, сервер АБИЗ доступен" : "Нет связи с сервером АБИЗ";
+            NetStateDot.Fill = new SolidColorBrush(online ? Color.FromRgb(0x28, 0xC8, 0x40) : Color.FromRgb(0xFF, 0x6B, 0x6B));
+            SetOnline(online);
+        }
+
+        private void NetCheck_Click(object sender, RoutedEventArgs e)
+        {
+            FillNetworkInfo();
+            _ = CheckInternetAsync();
+        }
+
+        private void NetWifi_Click(object sender, RoutedEventArgs e)
+        {
+            NetworkPopup.IsOpen = false;
+            OpenSettings("ms-availablenetworks:", "ms-settings:network-wifi");
+        }
+
+        private void NetSettings_Click(object sender, RoutedEventArgs e)
+        {
+            NetworkPopup.IsOpen = false;
+            OpenSettings("ms-settings:network-status", "ms-settings:network");
+        }
+
+        private void NetAdapters_Click(object sender, RoutedEventArgs e)
+        {
+            NetworkPopup.IsOpen = false;
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ncpa.cpl") { UseShellExecute = true }); }
+            catch { OpenSettings("ms-settings:network"); }
+        }
+
+        private static void OpenSettings(params string[] uris)
+        {
+            foreach (var uri in uris)
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri) { UseShellExecute = true });
+                    return;
+                }
+                catch { }
+            }
+            MessageBox.Show("Не удалось открыть настройки Windows.", Edition.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
 
         private void Lang_Click(object sender, RoutedEventArgs e)
         {

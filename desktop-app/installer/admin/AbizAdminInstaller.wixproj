@@ -1,0 +1,15 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputName>AbizAdminSetup</OutputName>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <Cultures>ru-RU</Cultures>
+    <OutputPath>$(MSBuildThisFileDirectory)..\out\</OutputPath>
+    <PublishDir>$(MSBuildThisFileDirectory)..\..\AbizShell\bin\publish-admin</PublishDir>
+    <DefineConstants>PublishDir=$(PublishDir)</DefineConstants>
+    <SuppressIces>ICE38;ICE43;ICE57;ICE64;ICE91</SuppressIces>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>

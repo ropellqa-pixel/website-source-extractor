@@ -31,11 +31,68 @@ namespace AbizShell
         {
             InitializeComponent();
             Loaded += MainWindow_Loaded;
-            StateChanged += (s, e) =>
+
+            if (Edition.Kiosk)
             {
-                if (WindowState == WindowState.Minimized)
-                    WindowState = WindowState.Maximized;
-            };
+                StateChanged += (s, e) =>
+                {
+                    if (WindowState == WindowState.Minimized)
+                        WindowState = WindowState.Maximized;
+                };
+            }
+            else
+            {
+                // АБИЗ-Админ: обычное окно Windows с рамкой, можно свернуть и закрыть.
+                WindowStyle = WindowStyle.SingleBorderWindow;
+                ResizeMode = ResizeMode.CanResize;
+                WindowState = WindowState.Normal;
+                ShowInTaskbar = true;
+                Width = 1000;
+                Height = 720;
+                Title = Edition.Name;
+                AppTitleLabel.Text = Edition.Name;
+                AppTitleLabel.FontSize = 46;
+                VersionLabel.Text = Edition.Name + " v3.2";
+                Closing += (s, e) =>
+                {
+                    if (_openingNext) return;
+                    _devicePollTimer?.Stop();
+                    _networkTimer?.Stop();
+                    _spinnerTimer?.Stop();
+                    Application.Current.Shutdown();
+                };
+            }
+        }
+
+        private bool _openingNext;
+
+        private void CameraHall_Click(object sender, RoutedEventArgs e)
+        {
+            _devicePollTimer?.Stop();
+            _networkTimer?.Stop();
+            _spinnerTimer?.Stop();
+            try
+            {
+                var cam = new CameraWindow(_apiToken);
+                if (!Edition.Kiosk)
+                {
+                    cam.Left = Left;
+                    cam.Top = Top;
+                    cam.WindowStartupLocation = WindowStartupLocation.Manual;
+                }
+                cam.Show();
+                _openingNext = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                _networkTimer?.Start();
+                _spinnerTimer?.Start();
+                if (!_isLinked) _devicePollTimer?.Start();
+                SetStatus("Не удалось открыть камеру", Color.FromRgb(0xFF, 0x6B, 0x6B));
+                MessageBox.Show(this, "Не удалось открыть окно камеры:\n" + ex.Message, Edition.Name,
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -158,7 +215,7 @@ namespace AbizShell
         private async void NewCode_Click(object sender, RoutedEventArgs e)
         {
             if (MessageBox.Show("Получить новый код устройства? Старый код перестанет действовать.",
-                    "АБИЗ", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                    Edition.Name, MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 return;
             _deviceCode = await DeviceManager.ResetDeviceAsync();
             await EnsureDeviceCodeAsync();
@@ -288,8 +345,9 @@ namespace AbizShell
                     DeviceCode = _deviceCode,
                 };
                 if (!string.IsNullOrEmpty(fullName))
-                    shell.Title = "АБИЗ — " + fullName;
+                    shell.Title = Edition.Name + " — " + fullName;
                 shell.Show();
+                _openingNext = true;
                 Close();
             }
             catch (Exception ex)
@@ -301,7 +359,7 @@ namespace AbizShell
                 MessageBox.Show(this,
                     "Не удалось открыть рабочий стол АБИЗ:\n" + ex.Message +
                     "\n\nЧтобы выйти в Windows, введите exit: и пароль администратора без пробела.",
-                    "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Error);
+                    Edition.Name, MessageBoxButton.OK, MessageBoxImage.Error);
                 PasswordBox.Clear();
                 PasswordBox.Focus();
             }
@@ -324,6 +382,7 @@ namespace AbizShell
             _devicePollTimer?.Stop();
             _networkTimer?.Stop();
             _spinnerTimer?.Stop();
+            _openingNext = true;
             TaskbarManager.Restore();
             foreach (Window w in Application.Current.Windows)
                 if (w is ShellWindow sw) sw.ForceCloseForExit();

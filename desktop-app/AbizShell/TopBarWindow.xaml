@@ -116,6 +116,12 @@
             <Button Style="{StaticResource BarBtn}" Content="&#x1F5A8;" Click="Print_Click" ToolTip="Печать текущей страницы"/>
             <Button x:Name="ExtensionsBtn" Style="{StaticResource BarBtn}" Content="&#x1F9E9;" Click="Extensions_Click" ToolTip="Расширения браузера (ЭЦП, Рутокен, СБИС)"/>
             <Button Style="{StaticResource BarBtn}" Content="&#x1F4C5;" Click="Calendar_Click" ToolTip="Календарь и заметки"/>
+            <Button x:Name="NetworkBtn" Style="{StaticResource BarBtn}" Click="Network_Click" ToolTip="Настройки сети: Wi‑Fi и подключение">
+                <TextBlock x:Name="NetworkBtnIcon" Text="&#x1F4F6;" FontSize="17"/>
+            </Button>
+            <Button x:Name="VolumeBtn" Style="{StaticResource BarBtn}" Click="Volume_Click" ToolTip="Громкость">
+                <TextBlock x:Name="VolumeBtnIcon" Text="&#x1F50A;" FontSize="17"/>
+            </Button>
             <Button x:Name="LangBtn" Style="{StaticResource LabeledBtn}" Content="RU" Click="Lang_Click" ToolTip="Сменить раскладку клавиатуры"/>
             <Button x:Name="AdminBtn" Style="{StaticResource BarBtn}" Content="&#x2699;" Click="Admin_Click" Visibility="Collapsed" ToolTip="Меню администратора"/>
             <Button Style="{StaticResource BarBtn}" Content="&#x1F512;" Click="Lock_Click" ToolTip="Заблокировать экран"/>
@@ -136,6 +142,66 @@
                     <ScrollViewer MaxHeight="460" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="WindowsList"/>
                     </ScrollViewer>
+                </StackPanel>
+            </Border>
+        </Popup>
+
+        <!-- Громкость -->
+        <Popup x:Name="VolumePopup" PlacementTarget="{Binding ElementName=VolumeBtn}" Placement="Bottom"
+               StaysOpen="False" AllowsTransparency="True" VerticalOffset="8" HorizontalOffset="-140">
+            <Border Style="{StaticResource PopupBox}" Width="320">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,10">
+                        <TextBlock x:Name="VolumeValueLabel" DockPanel.Dock="Right" Text="50%" FontSize="15"
+                                   FontWeight="Bold" Foreground="White"/>
+                        <TextBlock Text="Громкость" FontSize="15" FontWeight="Bold" Foreground="White"/>
+                    </DockPanel>
+                    <DockPanel>
+                        <Button x:Name="MuteBtn" DockPanel.Dock="Left" Style="{StaticResource BarBtn}" Click="Mute_Click"
+                                Margin="0,0,10,0" ToolTip="Выключить / включить звук">
+                            <TextBlock x:Name="MuteBtnIcon" Text="&#x1F50A;" FontSize="17"/>
+                        </Button>
+                        <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" SmallChange="2" LargeChange="10"
+                                IsMoveToPointEnabled="True" VerticalAlignment="Center"
+                                ValueChanged="VolumeSlider_ValueChanged"/>
+                    </DockPanel>
+                    <WrapPanel Margin="0,12,0,0">
+                        <Button Style="{StaticResource LabeledBtn}" Content="0%" Click="VolumePreset_Click" Tag="0" Height="34"/>
+                        <Button Style="{StaticResource LabeledBtn}" Content="25%" Click="VolumePreset_Click" Tag="25" Height="34"/>
+                        <Button Style="{StaticResource LabeledBtn}" Content="50%" Click="VolumePreset_Click" Tag="50" Height="34"/>
+                        <Button Style="{StaticResource LabeledBtn}" Content="75%" Click="VolumePreset_Click" Tag="75" Height="34"/>
+                        <Button Style="{StaticResource LabeledBtn}" Content="100%" Click="VolumePreset_Click" Tag="100" Height="34"/>
+                    </WrapPanel>
+                    <TextBlock x:Name="VolumeHint" Text="" FontSize="11" Foreground="#88FFFFFF" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
+        </Popup>
+
+        <!-- Сеть -->
+        <Popup x:Name="NetworkPopup" PlacementTarget="{Binding ElementName=NetworkBtn}" Placement="Bottom"
+               StaysOpen="False" AllowsTransparency="True" VerticalOffset="8" HorizontalOffset="-200">
+            <Border Style="{StaticResource PopupBox}" Width="400">
+                <StackPanel>
+                    <TextBlock Text="Сеть" FontSize="15" FontWeight="Bold" Foreground="White" Margin="0,0,0,8"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <Ellipse x:Name="NetStateDot" Width="10" Height="10" Fill="#28C840" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="NetStateLabel" Text="Проверяю..." FontSize="13" Foreground="White" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel x:Name="NetAdaptersList" Margin="0,4,0,8"/>
+                    <WrapPanel>
+                        <Button Style="{StaticResource LabeledBtn}" Click="NetWifi_Click" Height="36" Margin="0,0,6,6">
+                            <TextBlock Text="&#x1F4F6;  Wi‑Fi сети" FontSize="13"/>
+                        </Button>
+                        <Button Style="{StaticResource LabeledBtn}" Click="NetSettings_Click" Height="36" Margin="0,0,6,6">
+                            <TextBlock Text="&#x2699;  Параметры сети" FontSize="13"/>
+                        </Button>
+                        <Button Style="{StaticResource LabeledBtn}" Click="NetCheck_Click" Height="36" Margin="0,0,6,6">
+                            <TextBlock Text="&#x27F3;  Проверить связь" FontSize="13"/>
+                        </Button>
+                        <Button x:Name="NetAdaptersBtn" Style="{StaticResource LabeledBtn}" Click="NetAdapters_Click" Height="36" Margin="0,0,6,6">
+                            <TextBlock Text="&#x1F527;  Сетевые адаптеры" FontSize="13"/>
+                        </Button>
+                    </WrapPanel>
                 </StackPanel>
             </Border>
         </Popup>
