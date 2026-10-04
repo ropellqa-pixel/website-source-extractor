@@ -2,7 +2,7 @@
 <!-- MSI-пакет АБИЗ. Сборка: dotnet build installer\msi\AbizInstaller.wixproj -c Release -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="1.1.0.0"
+  <Package Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="1.2.0.0"
            UpgradeCode="8a2e1c6a-5b3e-4d2a-9c7a-1f6e3b2d4a10"
            InstallerVersion="500" Compressed="yes" Scope="perMachine"
            Language="1049" Codepage="1251">
@@ -60,9 +60,7 @@
 
     <!--
       Автозапуск: задача «AbizShell» в Планировщике заданий Windows, запуск при входе
-      любого пользователя с наивысшими правами. Только так программа с правами
-      администратора стартует при входе без запроса UAC — обычный автозапуск
-      (раздел Run в реестре) такие программы молча пропускает.
+      любого пользователя с обычными правами — никакого вопроса «Разрешить изменения?».
       Старую запись автозапуска из реестра удаляем, чтобы не было двойного запуска.
     -->
     <SetProperty Id="CreateAbizTask" Sequence="execute" Before="CreateAbizTask"
@@ -80,8 +78,18 @@
     <CustomAction Id="RemoveOldRunKeys" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
+    <!--
+      Права на запись в папку программы для всех пользователей ПК — чтобы удалённое
+      автообновление заменяло файлы без запроса прав администратора (UAC).
+    -->
+    <SetProperty Id="GrantAppDirWrite" Sequence="execute" Before="GrantAppDirWrite"
+                 Value="&quot;[System64Folder]icacls.exe&quot; &quot;[APPDIR].&quot; /grant *S-1-5-32-545:(OI)(CI)M /T /Q" />
+    <CustomAction Id="GrantAppDirWrite" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
     <InstallExecuteSequence>
-      <Custom Action="RemoveOldRunKeys" After="InstallFiles" Condition="NOT REMOVE" />
+      <Custom Action="GrantAppDirWrite" After="InstallFiles" Condition="NOT REMOVE" />
+      <Custom Action="RemoveOldRunKeys" After="GrantAppDirWrite" Condition="NOT REMOVE" />
       <Custom Action="CreateAbizTask" After="RemoveOldRunKeys" Condition="NOT REMOVE" />
       <Custom Action="DeleteAbizTask" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>

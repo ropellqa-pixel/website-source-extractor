@@ -126,6 +126,9 @@ namespace AbizShell
             if (!_isLinked) await PollDeviceAsync();
 
             StartRemoteAgent();
+
+            // Сотрудник вышел, а обновление уже скачано — ставим его сейчас.
+            if (Updater.StagedDir != null) ApplyUpdateNow();
         }
 
         private RemoteAgent? _remoteAgent;
@@ -140,6 +143,14 @@ namespace AbizShell
                 Presence = "login",
                 UserName = "",
                 OnReload = () => Dispatcher.Invoke(() => { _apiToken = DeviceManager.GetApiToken(); }),
+                // Удалённый вход с сайта (зам. директора): как сотрудник ПК или как администратор.
+                OnRemoteLogin = (asAdmin, fullName) => Dispatcher.BeginInvoke(() =>
+                {
+                    _ = RemoteControlClient.LogAsync(_apiToken ?? "", "signin", asAdmin ? "Удалённый вход: администратор" : "Удалённый вход: " + fullName);
+                    OpenShell(asAdmin, asAdmin ? "" : fullName);
+                }),
+                // На экране входа никто не работает — обновление ставим сразу.
+                OnUpdateReady = () => Dispatcher.BeginInvoke(ApplyUpdateNow),
                 OnRevoked = () => Dispatcher.Invoke(async () =>
                 {
                     DeviceManager.ClearApiToken();
@@ -154,6 +165,13 @@ namespace AbizShell
                 }),
             };
             _remoteAgent.Start();
+        }
+
+        private void ApplyUpdateNow()
+        {
+            if (!Updater.ApplyAndRestart()) return;
+            SetStatus("Устанавливается обновление " + Updater.StagedVersion + "...", Colors.White);
+            ExitToWindows();
         }
 
         private void StopRemoteAgent()

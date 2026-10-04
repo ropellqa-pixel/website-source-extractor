@@ -20,7 +20,8 @@ CORS = {
 # Удалённо управлять компьютерами может только заместитель директора — у него больше всех прав.
 CONTROL_ROLES = {'deputy_director'}
 # Эти команды кладёт в очередь сайт; ПК их забирает при heartbeat.
-ALLOWED_COMMANDS = {'lock', 'unlock', 'message', 'screenshot', 'rudesktop', 'reload', 'logout'}
+ALLOWED_COMMANDS = {'lock', 'unlock', 'message', 'screenshot', 'rudesktop', 'reload', 'logout',
+                    'login_user', 'login_admin', 'update'}
 # Если ПК не присылал heartbeat дольше — считаем его выключенным (не в сети).
 OFFLINE_SECONDS = 25
 
@@ -91,6 +92,14 @@ def _log(cur, device_code: str, kind: str, message: str, actor: str = None):
     )
 
 
+def _s3():
+    return boto3.client(
+        's3', endpoint_url='https://bucket.poehali.dev',
+        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+    )
+
+
 def _upload_screenshot(device_code: str, b64: str) -> Optional[str]:
     try:
         raw = base64.b64decode(b64.split(',')[-1])
@@ -98,11 +107,7 @@ def _upload_screenshot(device_code: str, b64: str) -> Optional[str]:
         return None
     if len(raw) > 6_000_000:
         return None
-    s3 = boto3.client(
-        's3', endpoint_url='https://bucket.poehali.dev',
-        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
-        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
-    )
+    s3 = _s3()
     key = f'screenshots/{device_code}/{uuidlib.uuid4().hex}.jpg'
     s3.put_object(Bucket='files', Key=key, Body=raw, ContentType='image/jpeg')
     return f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{key}"
@@ -211,6 +216,20 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                  body.get('message') or '', device.get('hostname'))
             return _resp(200, {'ok': True})
 
+        if action == 'check_update':
+            # ПК спрашивает, есть ли новая версия для его редакции (abiz / admin).
+            device = _device_by_token(cur, event, body)
+            if not device:
+                return _resp(401, {'error': 'Устройство не авторизовано'})
+            edition = 'admin' if body.get('edition') == 'admin' else 'abiz'
+            cur.execute(
+                f'SELECT version, url, sha256, size_bytes, notes FROM {SCHEMA}.app_releases '
+                f'WHERE edition = %s AND is_active ORDER BY created_at DESC LIMIT 1', (edition,))
+            r = cur.fetchone()
+            if not r:
+                return _resp(200, {'version': None})
+            return _resp(200, {'version': r[0], 'url': r[1], 'sha256': r[2], 'size': r[3], 'notes': r[4]})
+
         # ===== Действия сайта (зам директора) =====
         user = _site_user(cur, event)
         if not user:
@@ -238,6 +257,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             payload = body.get('payload') or {}
             if command not in ALLOWED_COMMANDS:
                 return _resp(400, {'error': 'Неизвестная команда'})
+            if command == 'login_user':
+                # Удалённый вход как сотрудник, к которому привязан ПК: программа получает имя для заголовка.
+                cur.execute(f'SELECT p.full_name FROM {SCHEMA}.devices d LEFT JOIN {SCHEMA}.profiles p '
+                            f'ON p.id = d.profile_id WHERE d.device_code = %s', (code,))
+                r = cur.fetchone()
+                payload = {**payload, 'full_name': (r[0] if r and r[0] else '')}
             cur.execute(f'SELECT status FROM {SCHEMA}.devices WHERE device_code = %s', (code,))
             if not cur.fetchone():
                 return _resp(404, {'error': 'Устройство не найдено'})
@@ -260,9 +285,80 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             labels = {'lock': 'заблокировал ПК', 'unlock': 'разблокировал ПК',
                       'message': 'отправил сообщение на экран', 'screenshot': 'запросил снимок экрана',
                       'rudesktop': 'запустил удалённый доступ', 'reload': 'обновил программу',
-                      'logout': 'вышел из системы на ПК'}
+                      'logout': 'вышел из системы на ПК',
+                      'login_user': 'выполнил вход на ПК как сотрудник',
+                      'login_admin': 'выполнил вход на ПК как администратор',
+                      'update': 'запустил обновление программы'}
             _log(cur, code, 'remote', f"{user['full_name']}: {labels.get(command, command)}", user['full_name'])
             return _resp(200, {'ok': True})
+
+        # ----- Выпуск обновлений программы (загрузка ZIP частями, затем «Выпустить») -----
+        if action == 'release_list':
+            cur.execute(
+                f'SELECT id, edition, version, url, size_bytes, notes, is_active, created_at FROM {SCHEMA}.app_releases '
+                f'ORDER BY created_at DESC LIMIT 30')
+            items = [{'id': r[0], 'edition': r[1], 'version': r[2], 'url': r[3], 'size': r[4], 'notes': r[5],
+                      'is_active': r[6], 'created_at': r[7]} for r in cur.fetchall()]
+            return _resp(200, {'releases': items})
+
+        if action == 'release_upload_part':
+            # Выпуск грузится частями по ~3 МБ (лимит запроса). Каждая часть — отдельный файл,
+            # программа на ПК скачивает все части по порядку, склеивает и сверяет контрольную сумму.
+            edition = 'admin' if body.get('edition') == 'admin' else 'abiz'
+            folder = (body.get('folder') or '').strip()
+            if not folder:
+                folder = f'releases/{edition}/{uuidlib.uuid4().hex}'
+            if not folder.startswith(f'releases/{edition}/'):
+                return _resp(400, {'error': 'Неверная папка выпуска'})
+            part = int(body.get('part') or 0)
+            raw = base64.b64decode(body.get('data') or '')
+            if part < 1 or not raw:
+                return _resp(400, {'error': 'Пустая часть файла'})
+            _s3().put_object(Bucket='files', Key=f'{folder}/part{part:03d}.bin', Body=raw,
+                             ContentType='application/octet-stream')
+            return _resp(200, {'folder': folder, 'part': part})
+
+        if action == 'release_publish':
+            edition = 'admin' if body.get('edition') == 'admin' else 'abiz'
+            version = (body.get('version') or '').strip()[:20]
+            folder = (body.get('folder') or '').strip()
+            parts = int(body.get('parts') or 0)
+            sha = (body.get('sha256') or '').lower()
+            if not version or not folder.startswith(f'releases/{edition}/') or parts < 1 or len(sha) != 64:
+                return _resp(400, {'error': 'Выпуск загружен не полностью'})
+            base = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{folder}"
+            url = f'{base}/part{{n:03d}}.bin|{parts}'
+            cur.execute(f'UPDATE {SCHEMA}.app_releases SET is_active = false WHERE edition = %s', (edition,))
+            rid = str(uuidlib.uuid4())
+            cur.execute(
+                f'INSERT INTO {SCHEMA}.app_releases (id, edition, version, url, sha256, size_bytes, notes, is_active, created_by) '
+                f'VALUES (%s, %s, %s, %s, %s, %s, %s, true, %s)',
+                (rid, edition, version, url, sha, int(body.get('size') or 0),
+                 (body.get('notes') or '')[:1000], user['full_name']))
+            return _resp(200, {'ok': True, 'id': rid})
+
+        if action == 'release_activate':
+            cur.execute(f'SELECT edition FROM {SCHEMA}.app_releases WHERE id = %s', (body.get('id') or '',))
+            r = cur.fetchone()
+            if not r:
+                return _resp(404, {'error': 'Выпуск не найден'})
+            cur.execute(f'UPDATE {SCHEMA}.app_releases SET is_active = (id = %s) WHERE edition = %s', (body['id'], r[0]))
+            return _resp(200, {'ok': True})
+
+        if action == 'release_delete':
+            cur.execute(f'DELETE FROM {SCHEMA}.app_releases WHERE id = %s', (body.get('id') or '',))
+            return _resp(200, {'ok': True})
+
+        if action == 'update_all':
+            # Сразу разослать всем ПК команду «обновиться» (иначе они сами проверят в течение 10 минут).
+            cur.execute(f"SELECT device_code FROM {SCHEMA}.devices WHERE status = 'linked'")
+            codes = [r[0] for r in cur.fetchall()]
+            for code in codes:
+                cur.execute(
+                    f'INSERT INTO {SCHEMA}.device_commands (id, device_code, command, payload, created_by, created_by_name) '
+                    f"VALUES (%s, %s, 'update', '{{}}'::jsonb, %s, %s)",
+                    (str(uuidlib.uuid4()), code, user['profile_id'], user['full_name']))
+            return _resp(200, {'ok': True, 'count': len(codes)})
 
         if action == 'device_logs':
             code = (body.get('device_code') or '').strip()

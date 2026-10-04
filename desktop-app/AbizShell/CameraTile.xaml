@@ -1,11 +1,10 @@
 <UserControl x:Class="AbizShell.CameraTile"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Border Margin="6" CornerRadius="12" Background="Black" ClipToBounds="True" Cursor="Hand"
             MouseLeftButtonUp="Tile_Click">
         <Grid>
-            <vlc:VideoView x:Name="Video"/>
+            <Image x:Name="Video" Stretch="Uniform" RenderOptions.BitmapScalingMode="LowQuality"/>
             <Grid IsHitTestVisible="False">
                 <Border VerticalAlignment="Top" HorizontalAlignment="Left" Margin="10" Padding="9,4"
                         Background="#99000000" CornerRadius="9">

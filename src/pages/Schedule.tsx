@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '@/lib/sdk';
 import { useAuth } from '../lib/auth';
@@ -82,105 +82,61 @@ function isAdjacentAllowed(prevShift: string, nextShift: string): boolean {
   return false;
 }
 
-export interface ShiftIssue {
-  days: Set<number>;       // индексы дней (0-based) с нарушением — подсветить
-  messages: string[];      // понятные пояснения для сотрудника/зама
-}
-
-// Проверка расписания одного сотрудника по бизнес-правилам компании.
-// СТ (старший): пары «Д, затем на следующий день Н» (Д и Н всегда рядом), затем перерыв
-//   минимум 1 день (между концом пары и началом следующей — хотя бы 1 пустой день).
-// МЛ (младший) с перерывом 0: подряд Дп (от 3 до 6 раз), серия обязана завершиться Нп,
-//   после серии — минимум 2 дня отдыха. (У МЛ с ненулевым перерывом применяется обычный break_days.)
-export function validateEmployeeShifts(shifts: string[], status: string, breakDays: number): ShiftIssue {
-  const issue: ShiftIssue = { days: new Set<number>(), messages: [] };
-  const msgs = new Set<string>();
-  const work = shifts.map(s => s || '');
-
-  if (status === 'СТ') {
-    let i = 0;
-    while (i < work.length) {
-      if (!work[i]) { i++; continue; }
-      // Старший работает парой Д+Н. День Д должен открывать пару.
-      if (work[i] === 'Д') {
-        const next = work[i + 1] || '';
-        if (next !== 'Н') {
-          issue.days.add(i);
-          msgs.add('Старший: после «Д» на следующий день должна идти «Н» (смены Д и Н всегда рядом).');
-          i++;
-          continue;
-        }
-        // Пара Д(i) + Н(i+1). Дальше минимум 1 день отдыха.
-        const after = work[i + 2] || '';
-        if (after) {
-          issue.days.add(i + 2);
-          msgs.add('Старший: после пары «Д+Н» нужен перерыв минимум 1 день.');
-        }
-        i += 2;
-        continue;
-      }
-      if (work[i] === 'Н') {
-        // Ночь без предшествующего дня Д — нарушение пары.
-        if ((work[i - 1] || '') !== 'Д') {
-          issue.days.add(i);
-          msgs.add('Старший: «Н» должна идти сразу после «Д» (пара Д+Н).');
-        }
-        i++;
-        continue;
-      }
-      // Старшему проставили смену младшего (Дп/Нп) — не его тип.
-      issue.days.add(i);
-      msgs.add('Старший работает только сменами «Д» и «Н».');
-      i++;
-    }
-  } else if (status === 'МЛ' && (!breakDays || breakDays === 0)) {
-    let i = 0;
-    while (i < work.length) {
-      if (!work[i]) { i++; continue; }
-      // Серия младшего: несколько Дп подряд, затем обязательно Нп.
-      if (work[i] === 'Дп' || work[i] === 'Нп') {
-        let j = i;
-        let dpCount = 0;
-        while (j < work.length && work[j] === 'Дп') { dpCount++; j++; }
-        const endsWithNp = work[j] === 'Нп';
-        const serieEnd = endsWithNp ? j : j - 1;
-
-        if (dpCount > 6) {
-          for (let k = i + 6; k < i + dpCount; k++) issue.days.add(k);
-          msgs.add('Младший: подряд не больше 6 смен «Дп».');
-        }
-        if (dpCount >= 1 && !endsWithNp) {
-          issue.days.add(serieEnd);
-          msgs.add('Младший: серия «Дп» обязана заканчиваться сменой «Нп».');
-        }
-        if (dpCount > 0 && dpCount < 3 && endsWithNp) {
-          for (let k = i; k < i + dpCount; k++) issue.days.add(k);
-          msgs.add('Младший: «Дп» идут подряд от 3 до 6 раз, затем «Нп».');
-        }
-        // После завершённой серии (…Нп) — минимум 2 дня отдыха.
-        if (endsWithNp) {
-          const r1 = work[serieEnd + 1] || '';
-          const r2 = work[serieEnd + 2] || '';
-          if (r1) { issue.days.add(serieEnd + 1); msgs.add('Младший: после «Нп» нужно минимум 2 дня отдыха.'); }
-          else if (r2) { issue.days.add(serieEnd + 2); msgs.add('Младший: после «Нп» нужно минимум 2 дня отдыха.'); }
-        }
-        i = serieEnd + 1;
-        continue;
-      }
-      // Младшему проставили смену старшего.
-      issue.days.add(i);
-      msgs.add('Младший работает только сменами «Дп» и «Нп».');
-      i++;
-    }
-  }
-
-  issue.messages = Array.from(msgs);
-  return issue;
-}
-
 interface CanWorkOptions {
   ignoreBreak?: boolean;
   ignoreAdjacency?: boolean;
+}
+
+// ===== Правила компании для генерации табеля =====
+// СТ (старший): работает парой «Д, на следующий день Н», после пары — отдых минимум 1 день
+//   (или больше, если в настройках сотрудника перерыв больше).
+// МЛ (младший) с перерывом 0: серия «Дп» подряд от 3 до 6 дней, серия всегда заканчивается «Нп»,
+//   после «Нп» — минимум 2 дня отдыха.
+// Если сотруднику запрещены дни или ночи, пару/серию собрать нельзя — работает по обычным правилам.
+function isStPattern(emp: ScheduleEmployee): boolean {
+  return emp.status === 'СТ' && !emp.no_day && !emp.no_night;
+}
+function isMlPattern(emp: ScheduleEmployee): boolean {
+  return emp.status === 'МЛ' && (!emp.break_days || emp.break_days === 0) && !emp.no_day && !emp.no_night;
+}
+function dpStreak(row: string[], day: number): number {
+  let n = 0;
+  for (let i = day - 1; i >= 0 && row[i] === 'Дп'; i--) n++;
+  return n;
+}
+function lastWork(row: string[], day: number): { idx: number; shift: string } {
+  for (let i = day - 1; i >= 0; i--) if (row[i]) return { idx: i, shift: row[i] };
+  return { idx: -999, shift: '' };
+}
+function dayFree(emp: ScheduleEmployee, dayIdx: number): boolean {
+  return !emp.unavailable.includes(dayIdx + 1) && !emp.delays.includes(dayIdx + 1);
+}
+
+/** Разрешает ли правило СТ/МЛ поставить смену. null — правило к сотруднику не относится. */
+function patternAllows(emp: ScheduleEmployee, row: string[], day: number, shift: string): boolean | null {
+  const prev = day > 0 ? row[day - 1] || '' : '';
+  if (isStPattern(emp)) {
+    if (shift === 'Н') return prev === 'Д';
+    if (shift !== 'Д') return false;
+    if (prev) return false;
+    const lw = lastWork(row, day);
+    if (lw.idx >= 0 && day - lw.idx <= Math.max(1, emp.break_days)) return false;
+    // Начинать пару можно, только если завтра получится выйти в ночь (или месяц заканчивается).
+    return day + 1 >= row.length || dayFree(emp, day + 1);
+  }
+  if (isMlPattern(emp)) {
+    const dp = dpStreak(row, day);
+    if (shift === 'Нп') return dp >= 3 || (dp >= 1 && day - dp === 0);
+    if (shift !== 'Дп') return false;
+    if (dp >= 6) return false;
+    if (dp > 0) return true;
+    const lw = lastWork(row, day);
+    if (lw.idx >= 0 && day - lw.idx <= 2) return false;
+    // Новую серию начинаем, только если впереди есть минимум 3 свободных дня + день на Нп.
+    for (let k = day; k < Math.min(row.length, day + 4); k++) if (!dayFree(emp, k)) return false;
+    return true;
+  }
+  return null;
 }
 
 function canWork(
@@ -199,6 +155,9 @@ function canWork(
   if (emp.unavailable.includes(dayNum)) return false;
   if (emp.delays.includes(dayNum)) return false;
   if (schedule[empIdx]?.[currentDayIndex]) return false;
+
+  const rule = patternAllows(emp, schedule[empIdx] || [], currentDayIndex, shift);
+  if (rule !== null) return rule;
 
   if (empLastWorkDay >= 0) {
     const gap = currentDayIndex - empLastWorkDay;
@@ -253,7 +212,27 @@ const ALL_SHIFTS = ['Д', 'Н', 'Дп', 'Нп'];
 // Пары "одна смена вместе": день (Д+Дп) и ночь (Н+Нп) — как в бизнес-правиле.
 const SAME_SHIFT_PAIRS: Array<[string, string]> = [['Д', 'Дп'], ['Дп', 'Д'], ['Н', 'Нп'], ['Нп', 'Н']];
 
+// Генерируем несколько вариантов и берём тот, где больше всего дней с полной сменой (4 человека).
+// Правила СТ/МЛ соблюдаются в каждом варианте, перебор только улучшает заполнение.
 function generateSchedule(employees: ScheduleEmployee[], totalDays: number): string[][] {
+  let best: string[][] = [];
+  let bestScore = -1;
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const sch = generateScheduleOnce(employees, totalDays);
+    let full = 0, filled = 0;
+    for (let d = 0; d < totalDays; d++) {
+      const cnt = sch.filter(r => r[d]).length;
+      filled += Math.min(cnt, 4);
+      if (cnt >= 4) full++;
+    }
+    const score = full * 100 + filled;
+    if (score > bestScore) { bestScore = score; best = sch; }
+    if (full === totalDays) break;
+  }
+  return best;
+}
+
+function generateScheduleOnce(employees: ScheduleEmployee[], totalDays: number): string[][] {
   const active = employees.filter(e => !e.excluded);
   const n = active.length;
   if (n === 0) return [];
@@ -261,6 +240,7 @@ function generateSchedule(employees: ScheduleEmployee[], totalDays: number): str
   const schedule: string[][] = Array.from({ length: n }, () => Array(totalDays).fill(''));
   const empLastWorkDay: number[] = Array(n).fill(-999);
   const empLastShift: string[] = Array(n).fill('');
+  const mlTarget: number[] = Array(n).fill(0);
 
   const idxMap = new Map<string, number>();
   active.forEach((emp, i) => idxMap.set(emp.profile_id, i));
@@ -304,6 +284,32 @@ function generateSchedule(employees: ScheduleEmployee[], totalDays: number): str
       filledIdx.add(idx);
       usedShifts.add(shift);
     };
+
+    // Phase 0: обязательные смены по правилам СТ/МЛ — продолжение начатой пары или серии.
+    active.forEach((emp, idx) => {
+      if (filledIdx.has(idx) || hasPreferences(emp)) return;
+      const row = schedule[idx];
+      const prev = day > 0 ? row[day - 1] : '';
+      const want: string[] = [];
+      if (isStPattern(emp) && prev === 'Д') want.push('Н');
+      if (isMlPattern(emp)) {
+        const dp = dpStreak(row, day);
+        if (dp > 0) {
+          if (mlTarget[idx] === 0) mlTarget[idx] = 3 + Math.floor(Math.random() * 4);
+          if (dp < 3) want.push('Дп');
+          else if (dp >= mlTarget[idx] || dp >= 6) want.push('Нп', 'Дп');
+          else want.push('Дп', 'Нп');
+        } else {
+          mlTarget[idx] = 0;
+        }
+      }
+      for (const sh of want) {
+        if (usedShifts.has(sh)) continue;
+        if (!canWork(emp, dayNum, sh, empLastWorkDay[idx], empLastShift[idx], day, schedule, idx)) continue;
+        place(idx, sh);
+        break;
+      }
+    });
 
     // Phase 1: расставляем пары преференций — строго вместе, строго в одну "смену" (день/ночь)
     const shuffledPairs = shuffleArray(prefPairs);
@@ -668,23 +674,6 @@ export default function Schedule() {
   const canLock = isDeputy;
   const canUnlock = isDeputy;
 
-  // Проверка каждой строки табеля по правилам СТ/МЛ. Нарушения подсвечиваем и показываем список.
-  const rowIssues = useMemo(() => {
-    const map = new Map<string, ShiftIssue>();
-    for (const row of rows) {
-      const emp = employees.find(e => e.profile_id === row.profile_id);
-      if (!emp) continue;
-      map.set(row.profile_id, validateEmployeeShifts(row.shifts, emp.status, emp.break_days));
-    }
-    return map;
-  }, [rows, employees]);
-
-  const allIssueMessages = useMemo(() => {
-    const set = new Set<string>();
-    rowIssues.forEach(i => i.messages.forEach(m => set.add(m)));
-    return Array.from(set);
-  }, [rowIssues]);
-
   const handleGenerate = () => {
     const schedule = generateSchedule(employees, getDaysInMonth());
     const activeEmps = employees.filter(e => !e.excluded);
@@ -942,16 +931,6 @@ export default function Schedule() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            {allIssueMessages.length > 0 && (
-              <div className="mb-3 rounded-lg border border-red-500/40 bg-red-500/5 p-3 text-sm">
-                <div className="mb-1 flex items-center gap-2 font-semibold text-red-600">
-                  <span>⚠</span> Нарушения правил расписания ({rowIssues.size > 0 ? Array.from(rowIssues.values()).filter(i => i.days.size > 0).length : 0} сотр.)
-                </div>
-                <ul className="list-inside list-disc space-y-0.5 text-red-700/90">
-                  {allIssueMessages.map((m, i) => <li key={i}>{m}</li>)}
-                </ul>
-              </div>
-            )}
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="bg-card">
@@ -970,18 +949,12 @@ export default function Schedule() {
                 {rows.map((row, rowIdx) => {
                   const counts = shiftCountsLocal(row.shifts);
                   const empTotal = counts['Д'] + counts['Н'] + counts['Дп'] + counts['Нп'];
-                  const issue = rowIssues.get(row.profile_id);
                   return (
                     <tr key={row.profile_id} className="hover:bg-secondary cursor-pointer select-none"
                       onContextMenu={(e) => handleRowContextMenu(e, row.profile_id)}>
-                      <td className="px-3 py-1.5 text-foreground font-medium border border-border sticky left-0 bg-background z-10 whitespace-nowrap">
-                        {issue && issue.days.size > 0 && <span title="В расписании есть нарушения правил" className="mr-1 text-red-500">⚠</span>}
-                        {row.full_name}
-                      </td>
-                      {Array.from({ length: days }, (_, dayIdx) => {
-                        const bad = issue?.days.has(dayIdx);
-                        return (
-                        <td key={dayIdx} className={`px-0.5 py-0.5 border text-center ${bad ? 'border-2 border-red-500 bg-red-500/10' : 'border-border ' + (SHIFT_COLORS[row.shifts[dayIdx]] || '')}`}>
+                      <td className="px-3 py-1.5 text-foreground font-medium border border-border sticky left-0 bg-background z-10 whitespace-nowrap">{row.full_name}</td>
+                      {Array.from({ length: days }, (_, dayIdx) => (
+                        <td key={dayIdx} className={`px-0.5 py-0.5 border border-border text-center ${SHIFT_COLORS[row.shifts[dayIdx]] || ''}`}>
                           {canEdit ? (
                             <select value={row.shifts[dayIdx] || ''} onChange={e => handleShiftChange(rowIdx, dayIdx, e.target.value)}
                               className="w-full bg-transparent border-0 text-center text-xs focus:outline-none cursor-pointer appearance-none">
@@ -989,8 +962,7 @@ export default function Schedule() {
                             </select>
                           ) : <span className="text-xs">{row.shifts[dayIdx] || '—'}</span>}
                         </td>
-                        );
-                      })}
+                      ))}
                       <td className="px-2 py-1.5 text-center text-foreground font-bold border border-border">{empTotal}</td>
                       <td className="px-2 py-1.5 text-center text-green-600 font-medium border border-border">{counts['Д']}</td>
                       <td className="px-2 py-1.5 text-center text-blue-600 font-medium border border-border">{counts['Н']}</td>

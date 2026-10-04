@@ -83,7 +83,84 @@ export interface DeviceLogEntry {
   created_at: string;
 }
 
-export type RemoteCommand = 'lock' | 'unlock' | 'message' | 'screenshot' | 'rudesktop' | 'reload' | 'logout';
+export type RemoteCommand = 'lock' | 'unlock' | 'message' | 'screenshot' | 'rudesktop' | 'reload' | 'logout'
+  | 'login_user' | 'login_admin' | 'update';
+
+export interface AppRelease {
+  id: string;
+  edition: 'abiz' | 'admin';
+  version: string;
+  size: number;
+  notes: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export async function listReleases(): Promise<AppRelease[]> {
+  try {
+    const json = await callControlApi({ action: 'release_list' });
+    return json.releases || [];
+  } catch { return []; }
+}
+
+async function sha256Hex(buf: ArrayBuffer): Promise<string> {
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let s = '';
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) s += String.fromCharCode(...bytes.subarray(i, i + step));
+  return btoa(s);
+}
+
+/** Загрузить ZIP новой версии программы и выпустить его. onProgress — от 0 до 1. */
+export async function publishRelease(
+  file: File, edition: 'abiz' | 'admin', version: string, notes: string,
+  onProgress: (p: number) => void,
+): Promise<void> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  const CH = 1536 * 1024;
+  const total = Math.ceil(bytes.length / CH);
+  let folder = '';
+  for (let n = 1; n <= total; n++) {
+    const chunk = bytes.subarray((n - 1) * CH, n * CH);
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const r = await callControlApi({ action: 'release_upload_part', edition, folder, part: n, data: toBase64(chunk) });
+        folder = r.folder;
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e;
+        await new Promise(res => setTimeout(res, 1000));
+      }
+    }
+    if (lastErr) throw new Error('Не удалось загрузить часть файла. Проверьте интернет и попробуйте снова.');
+    onProgress(n / total);
+  }
+  await callControlApi({
+    action: 'release_publish', edition, version, folder, parts: total,
+    sha256: await sha256Hex(buf), size: bytes.length, notes,
+  });
+}
+
+export async function activateRelease(id: string): Promise<void> {
+  await callControlApi({ action: 'release_activate', id });
+}
+
+export async function deleteRelease(id: string): Promise<void> {
+  await callControlApi({ action: 'release_delete', id });
+}
+
+/** Разослать всем ПК команду «обновиться сейчас». Возвращает число ПК. */
+export async function updateAllDevices(): Promise<number> {
+  const json = await callControlApi({ action: 'update_all' });
+  return json.count || 0;
+}
 
 async function callControlApi(body: Record<string, unknown>): Promise<any> {
   const token = getToken();

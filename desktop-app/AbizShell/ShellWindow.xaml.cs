@@ -211,6 +211,9 @@ namespace AbizShell
                 OnReload = () => Dispatcher.Invoke(() => { try { Browser?.Reload(); } catch { } }),
                 OnLogout = () => Dispatcher.Invoke(LockScreen),
                 OnRevoked = () => Dispatcher.Invoke(LockScreen),
+                // Сотрудник работает — не перебиваем: показываем уведомление, установка при выходе на экран входа.
+                OnUpdateReady = () => ShowNotification("\U0001F504", "Доступно обновление АБИЗ " + Updater.StagedVersion,
+                    "Установится автоматически при выходе на экран входа (кнопка 🔒)."),
             };
             _remoteAgent.Start();
         }
@@ -286,6 +289,16 @@ namespace AbizShell
                 try { core.Navigate(a.Uri); } catch { }
             };
 
+            // Раздел сайта «Камеры» внутри программы открываем родным окном камер (встроенный
+            // видеодекодер, H.265 без кодеков Windows). Сайт при этом остаётся на прежней странице.
+            core.SourceChanged += (s, a) => Dispatcher.BeginInvoke(new Action(InterceptCamerasPage));
+            core.NavigationStarting += (s, a) =>
+            {
+                if (IsCamerasUrl(a.Uri)) { a.Cancel = true; Dispatcher.BeginInvoke(new Action(OpenCamerasSection)); }
+            };
+
+            await PasswordVault.AttachAsync(core);
+
             try { await ExtensionsService.InstallAllAsync(core.Profile); } catch { }
 
             try { await LoadButtonsAsync(); } catch { BuildTilesFromDefaults(); }
@@ -306,6 +319,20 @@ namespace AbizShell
             {
                 MessageBox.Show(this, "Не удалось открыть: " + url, "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
+        }
+
+        private static bool IsCamerasUrl(string? url) =>
+            Uri.TryCreate(url, UriKind.Absolute, out var u)
+            && u.Host.EndsWith("anod.saou.ru", StringComparison.OrdinalIgnoreCase)
+            && u.AbsolutePath.TrimEnd('/').Equals("/cameras", StringComparison.OrdinalIgnoreCase);
+
+        // Сайт переходит между разделами без перезагрузки страницы — ловим смену адреса.
+        private void InterceptCamerasPage()
+        {
+            var core = MainBrowser.CoreWebView2;
+            if (core == null || !IsCamerasUrl(core.Source)) return;
+            if (core.CanGoBack) core.GoBack(); else NavigateBrowser(HomePage);
+            OpenCamerasSection();
         }
 
         public void GoHome() => NavigateBrowser(HomePage);
@@ -418,6 +445,42 @@ namespace AbizShell
                 _explorer.Show();
                 _explorer.Activate();
             }
+        }
+
+        /// <summary>Загрузить пароли из файла, выгруженного из Яндекс Браузера (или Chrome/Edge).</summary>
+        public void ImportPasswords()
+        {
+            MessageBox.Show(this,
+                "Как выгрузить пароли из Яндекс Браузера:\n\n" +
+                "1. Откройте Яндекс Браузер → Настройки → Пароли и карты (или browser://passwords).\n" +
+                "2. Нажмите ⋯ (три точки) → «Экспортировать пароли» → сохраните файл .csv.\n" +
+                "3. Выберите этот файл в следующем окне.\n\n" +
+                "Пароли сохранятся на этом компьютере в зашифрованном виде и будут сами вставляться на сайтах.\n" +
+                "Файл .csv после загрузки лучше удалить — в нём пароли открытым текстом.",
+                "АБИЗ — пароли", MessageBoxButton.OK, MessageBoxImage.Information);
+            var dlg = new OpenFileDialog { Filter = "Файл паролей (*.csv)|*.csv|Все файлы|*.*", Title = "Файл паролей из Яндекс Браузера" };
+            if (dlg.ShowDialog(this) != true) return;
+            try
+            {
+                var (added, updated) = PasswordVault.ImportCsv(dlg.FileName);
+                _ = RemoteControlClient.LogAsync(ApiToken, "note", $"Загружены пароли сайтов: новых {added}, обновлено {updated}");
+                var del = MessageBox.Show(this,
+                    $"Готово. Новых паролей: {added}, обновлено: {updated}.\nВсего на этом ПК: {PasswordVault.All().Count}.\n\nУдалить исходный файл .csv (рекомендуется)?",
+                    "АБИЗ — пароли", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (del == MessageBoxResult.Yes) { try { File.Delete(dlg.FileName); } catch { } }
+                Browser?.Reload();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Не удалось загрузить пароли: " + ex.Message, "АБИЗ — пароли", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        public void ClearPasswords()
+        {
+            if (MessageBox.Show(this, "Удалить все сохранённые пароли сайтов с этого компьютера?", "АБИЗ — пароли",
+                    MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            PasswordVault.Clear();
         }
 
         public void OpenWindowsExplorer()
@@ -693,6 +756,8 @@ namespace AbizShell
                 menu.Items.Add(item);
             }
 
+            Add("Пароли сайтов: загрузить из Яндекс Браузера", ImportPasswords);
+            Add("Пароли сайтов: удалить все с этого ПК", ClearPasswords);
             Add("Изменить кнопки меню", OpenEditor);
             Add("Обновить кнопки с сервера", async () => { try { await LoadButtonsAsync(); } catch { } });
             Add("Поиск сотрудников", async () => await SearchEmployeeAsync());

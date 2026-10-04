@@ -13,7 +13,7 @@
 		<ApplicationIcon>abiz.ico</ApplicationIcon>
 		<EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
 		<Company>Rassvet</Company>
-		<Version>1.2.0</Version>
+		<Version>1.3.0</Version>
 		<Configurations>Debug;Release;DebugAdmin;ReleaseAdmin</Configurations>
 		<Platforms>x64</Platforms>
 	</PropertyGroup>
@@ -59,6 +59,8 @@
 		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
 		<!-- Снимок экрана для удалённого контроля (GDI+, только Windows). -->
 		<PackageReference Include="System.Drawing.Common" Version="8.0.8" />
+		<!-- Шифрование сохранённых паролей сайтов (Windows DPAPI). -->
+		<PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
 		<!-- Встроенный бесплатный видеодекодер VLC: показывает камеры (H.265) без платного
 		     «Расширения для видео HEVC» из Microsoft Store. -->
 		<PackageReference Include="LibVLCSharp.WPF" Version="3.10.1" />

@@ -47,7 +47,9 @@ namespace AbizShell
         {
             StatusLabel.Visibility = Visibility.Visible;
             StatusLabel.Text = "Загрузка камер...";
-            var (cameras, error) = await CamerasClient.ListAsync(_apiToken);
+            var listTask = CamerasClient.ListAsync(_apiToken);
+            var urlsTask = CamerasClient.LiveAllAsync(_apiToken);
+            var (cameras, error) = await listTask;
             if (error != null || cameras.Count == 0)
             {
                 StatusLabel.Text = error ?? "Камеры не найдены";
@@ -61,9 +63,11 @@ namespace AbizShell
             StopAll();
             _tiles.Clear();
 
+            var urls = await urlsTask;
             foreach (var cam in cameras.OrderBy(c => c.OrderIndex))
             {
-                var tile = new CameraTile(_apiToken, cam) { Height = 240 };
+                urls.TryGetValue(cam.Id, out var known);
+                var tile = new CameraTile(_apiToken, cam, known) { Height = 240 };
                 tile.Enlarge += OpenFull;
                 _tiles.Add(tile);
                 TilesHost.Items.Add(tile);
@@ -94,10 +98,19 @@ namespace AbizShell
             return null;
         }
 
+        private bool _fullOpen;
+
         private void OpenFull(CamerasClient.CameraInfo cam)
         {
-            var win = new CameraFullWindow(_apiToken, cam) { Owner = this };
-            win.ShowDialog();
+            if (_fullOpen) return; // защита от двойного клика — только одно окно камеры
+            _fullOpen = true;
+            var tile = _tiles.FirstOrDefault(t => t.Camera.Id == cam.Id);
+            try
+            {
+                var win = new CameraFullWindow(_apiToken, cam, tile?.KnownUrl) { Owner = this };
+                win.ShowDialog();
+            }
+            finally { _fullOpen = false; }
         }
 
         private void StopAll()

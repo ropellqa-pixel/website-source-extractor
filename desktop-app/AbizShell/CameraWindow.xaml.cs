@@ -2,7 +2,6 @@ using System;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
-using LibVLCSharp.Shared;
 
 namespace AbizShell
 {
@@ -18,11 +17,8 @@ namespace AbizShell
 
         private readonly string? _apiToken;
         private readonly DispatcherTimer _clock;
-        private readonly DispatcherTimer _watchdog;
-        private MediaPlayer? _player;
+        private CameraStream? _stream;
         private bool _closing;
-        private bool _connecting;
-        private DateTime _lastPlaying = DateTime.MinValue;
 
         public CameraWindow(string? apiToken)
         {
@@ -49,38 +45,7 @@ namespace AbizShell
             _clock.Start();
             ClockLabel.Text = DateTime.Now.ToString("HH:mm:ss");
 
-            // Сторож: если видео не идёт 20 секунд — переподключаемся.
-            _watchdog = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-            _watchdog.Tick += async (s, e) =>
-            {
-                if (_closing || _connecting) return;
-                bool playing = _player?.IsPlaying == true;
-                if (playing) { _lastPlaying = DateTime.Now; return; }
-                if ((DateTime.Now - _lastPlaying).TotalSeconds > 20) await ConnectAsync();
-            };
-
-            Loaded += async (s, e) =>
-            {
-                try
-                {
-                    _player = VideoEngine.CreatePlayer();
-                    _player.Playing += (o, a) => Dispatcher.BeginInvoke(() =>
-                    {
-                        _lastPlaying = DateTime.Now;
-                        StatusBox.Visibility = Visibility.Collapsed;
-                    });
-                    _player.EncounteredError += (o, a) => Dispatcher.BeginInvoke(() => ShowStatus("Связь с камерой прервалась. Переподключение..."));
-                    _player.EndReached += (o, a) => Dispatcher.BeginInvoke(() => ShowStatus("Связь с камерой прервалась. Переподключение..."));
-                    Video.MediaPlayer = _player;
-                }
-                catch (Exception ex)
-                {
-                    ShowStatus("Не удалось запустить видеоплеер: " + ex.Message);
-                    return;
-                }
-                await ConnectAsync();
-                _watchdog.Start();
-            };
+            Loaded += async (s, e) => await StartAsync();
 
             Closing += (s, e) =>
             {
@@ -99,35 +64,25 @@ namespace AbizShell
             StatusBox.Visibility = Visibility.Visible;
         }
 
-        private async Task ConnectAsync()
+        private async Task StartAsync()
         {
-            if (_closing || _player == null || _connecting) return;
-            _connecting = true;
-            try
+            ShowStatus("Подключение к камере...");
+            var (cameras, error) = await CamerasClient.ListAsync(_apiToken);
+            if (_closing) return;
+            if (cameras.Count == 0)
             {
-                ShowStatus("Подключение к камере...");
-                var result = await CamerasClient.LiveByNameAsync(_apiToken, CameraNamePrefix);
-                if (_closing) return;
-                if (!string.IsNullOrEmpty(result.Name)) CameraNameLabel.Text = result.Name;
-
-                if (string.IsNullOrEmpty(result.Url))
-                {
-                    ShowStatus(result.Error ?? "Камера недоступна. Повтор через несколько секунд...");
-                    _lastPlaying = DateTime.Now;
-                    return;
-                }
-
-                // Облако готовит поток 2–4 секунды после выдачи ссылки.
-                await Task.Delay(2500);
-                if (_closing) return;
-                using var media = VideoEngine.CreateMedia(result.Url);
-                _player.Play(media);
-                _lastPlaying = DateTime.Now;
+                ShowStatus(error ?? "Камеры не найдены");
+                await Task.Delay(5000);
+                if (!_closing) await StartAsync();
+                return;
             }
-            finally
-            {
-                _connecting = false;
-            }
+            var cam = cameras.Find(c => c.Name.StartsWith(CameraNamePrefix, StringComparison.OrdinalIgnoreCase))
+                      ?? cameras.Find(c => c.IsDefault) ?? cameras[0];
+            CameraNameLabel.Text = cam.Name;
+            _stream = new CameraStream(_apiToken ?? "", cam.Id, Video, null, 1920, muted: true);
+            _stream.Status += t => Dispatcher.BeginInvoke(() => ShowStatus(t));
+            _stream.Started += () => Dispatcher.BeginInvoke(() => StatusBox.Visibility = Visibility.Collapsed);
+            await _stream.StartAsync();
         }
 
         private void Cleanup()
@@ -135,15 +90,8 @@ namespace AbizShell
             if (_closing) return;
             _closing = true;
             _clock.Stop();
-            _watchdog.Stop();
-            var p = _player;
-            _player = null;
-            if (p != null)
-            {
-                // Остановка VLC может занять секунду — делаем её в фоне, чтобы окно закрылось сразу.
-                Video.MediaPlayer = null;
-                Task.Run(() => { try { p.Stop(); p.Dispose(); } catch { } });
-            }
+            _stream?.Dispose();
+            _stream = null;
         }
 
         private bool _goingToLogin;

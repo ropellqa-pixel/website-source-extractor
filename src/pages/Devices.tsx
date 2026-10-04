@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '@/components/ui/icon';
+import ReleasePanel from '@/components/devices/ReleasePanel';
 import {
   getDevicesStatus, sendDeviceCommand, getDeviceLogs,
   type DeviceStatus, type DeviceLogEntry, type RemoteCommand,
@@ -58,6 +59,9 @@ export default function Devices() {
         rudesktop: 'Запущен удалённый доступ на ПК',
         reload: 'Команда «Обновить» отправлена',
         logout: 'Команда «Выход» отправлена',
+        login_user: 'Вход в АБИЗ как сотрудник выполнен',
+        login_admin: 'Вход в АБИЗ как администратор выполнен',
+        update: 'Команда «Обновить программу» отправлена',
       };
       notify(labels[command]);
       setTimeout(load, 1500);
@@ -100,6 +104,8 @@ export default function Devices() {
           <Icon name="RefreshCw" size={15} /> Обновить
         </button>
       </div>
+
+      <ReleasePanel notify={notify} />
 
       {devices.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card p-10 text-center text-muted-foreground">
@@ -160,7 +166,30 @@ export default function Devices() {
                   </button>
                   <button disabled={!online || busy === d.device_code + 'reload'} onClick={() => run(d, 'reload')}
                     className="flex items-center gap-1 rounded-lg bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/70 disabled:opacity-40">
-                    <Icon name="RotateCw" size={13} /> Обновить
+                    <Icon name="RotateCw" size={13} /> Обновить страницу
+                  </button>
+                  {d.presence === 'login' && (
+                    <>
+                      <button disabled={!d.profile_id} onClick={() => run(d, 'login_user')}
+                        title={d.profile_id ? 'Открыть рабочий стол АБИЗ под сотрудником этого ПК' : 'ПК не привязан к сотруднику'}
+                        className="flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40">
+                        <Icon name="LogIn" size={13} /> Войти как сотрудник
+                      </button>
+                      <button onClick={() => run(d, 'login_admin')}
+                        className="flex items-center gap-1 rounded-lg bg-slate-700 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
+                        <Icon name="ShieldCheck" size={13} /> Войти как админ
+                      </button>
+                    </>
+                  )}
+                  {d.presence === 'working' && (
+                    <button onClick={() => run(d, 'logout')}
+                      className="flex items-center gap-1 rounded-lg bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/70">
+                      <Icon name="LogOut" size={13} /> Выйти на экран входа
+                    </button>
+                  )}
+                  <button disabled={!online} onClick={() => run(d, 'update')}
+                    className="flex items-center gap-1 rounded-lg bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/70 disabled:opacity-40">
+                    <Icon name="CloudDownload" size={13} /> Обновить программу
                   </button>
                   <button onClick={() => openLogs(d)}
                     className="flex items-center gap-1 rounded-lg bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/70">

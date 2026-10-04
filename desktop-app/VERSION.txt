@@ -1,2 +1,2 @@
-ABIZ project version 15
-Remote control by deputy (lock/unlock/message/RuDesktop/reload), native Cameras on VLC, real notifications, activity log. Admin edition included.
+ABIZ project version 16
+Cameras drawn inside the app (no extra windows), cached stream links. Passwords from Yandex Browser + autofill. Remote login as user/admin. Remote auto-update. No UAC prompt.

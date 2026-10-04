@@ -56,7 +56,7 @@ def _cloud_token(serial: str) -> Optional[str]:
     tm = '000002' + str(int(time.time() * 1000))
     try:
         r = requests.post(f'{TKS_URL}/v2/device/token/{tm}/{_signature(tm)}.rs', json={'sns': [serial]},
-                          headers={'uuid': JF_UUID, 'appKey': JF_KEY}, timeout=3)
+                          headers={'uuid': JF_UUID, 'appKey': JF_KEY}, timeout=min(4.0, _budget(1.5)))
         data = r.json()
     except Exception:
         return None
@@ -65,9 +65,9 @@ def _cloud_token(serial: str) -> Optional[str]:
     return data['data'][0].get('token')
 
 
-def _rds(token: str, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+def _rds(token: str, path: str, body: Dict[str, Any], timeout: float = 3.5) -> Dict[str, Any]:
     try:
-        r = requests.post(f'{RDS_URL}/{path}/{token}', json=body, timeout=3.5,
+        r = requests.post(f'{RDS_URL}/{path}/{token}', json=body, timeout=timeout,
                           headers={'appKey': JF_KEY, 'uuid': JF_UUID, 'Content-Type': 'application/json; charset=UTF-8'})
         return r.json()
     except Exception:
@@ -115,16 +115,98 @@ def _with_token(cur, cam: Dict[str, Any], path: str, body: Dict[str, Any]) -> Di
     return data
 
 
-def _live_url(cur, cam: Dict[str, Any], quality: str) -> Dict[str, Any]:
-    stream = '0' if quality == 'hd' else '1'
-    data = _with_token(cur, cam, 'livestream', {
+LIVE_CACHE_MINUTES = 60
+
+
+_DEADLINE = [0.0]
+
+
+def _budget(reserve: float = 0.4) -> float:
+    """Сколько секунд ещё можно ждать облако, чтобы функция успела ответить до своего лимита."""
+    left = _DEADLINE[0] - time.time() - reserve
+    return max(1.0, left)
+
+
+def _fetch_live(cam: Dict[str, Any], token: str, stream: str) -> Dict[str, Any]:
+    """Один запрос ссылки к облаку. Ждём столько, сколько позволяет лимит функции."""
+    return _rds(token, 'livestream', {
         'mediaType': 'hls', 'protocol': 'ts', 'channel': '0', 'stream': stream,
         'username': cam['username'], 'password': cam['password'], 'expireTime': _expire_ms(),
-    })
+    }, timeout=_budget())
+
+
+def _live_url(cur, cam: Dict[str, Any], quality: str, fresh: bool = False) -> Dict[str, Any]:
+    """Ссылка на живое видео. Готовая ссылка облака живёт долго, поэтому кэшируем её на 20 минут —
+    повторные открытия камеры мгновенные. fresh=True — принудительно новая (если старая перестала играть)."""
+    q = 'hd' if quality == 'hd' else 'sd'
+    stream = '0' if q == 'hd' else '1'
+    cur.execute(f'SELECT live_url_{q}, live_url_{q}_at FROM {SCHEMA}.cameras WHERE id = %s', (cam['id'],))
+    row = cur.fetchone()
+    now = datetime.now(timezone.utc)
+    if not fresh and row and row[0] and row[1] and now - row[1] < timedelta(minutes=LIVE_CACHE_MINUTES):
+        return {'url': row[0], 'cached': True}
+
+    token = _camera_token(cur, cam)
+    if not token:
+        return {'error': 'Камера не найдена в облаке. Проверьте, что камера в сети'}
+    data = _fetch_live(cam, token, stream)
     err = _ret_error(data)
     if err:
+        # Старая ссылка всё равно лучше, чем ничего: облако часто держит её дольше кэша.
+        if row and row[0]:
+            return {'url': row[0], 'cached': True}
         return {'error': err}
-    return {'url': data['data']['url']}
+    url = data['data']['url']
+    cur.execute(f'UPDATE {SCHEMA}.cameras SET live_url_{q} = %s, live_url_{q}_at = now() WHERE id = %s', (url, cam['id']))
+    return {'url': url}
+
+
+def _live_all(cur, quality: str) -> Dict[str, Any]:
+    """Ссылки сразу для всех камер: из кэша мгновенно, недостающие — параллельно из облака."""
+    q = 'hd' if quality == 'hd' else 'sd'
+    stream = '0' if q == 'hd' else '1'
+    cur.execute(f'SELECT {", ".join(COLS)}, live_url_{q}, live_url_{q}_at FROM {SCHEMA}.cameras ORDER BY order_index, created_at')
+    now = datetime.now(timezone.utc)
+    result: Dict[str, Any] = {}
+    need = []
+    for r in cur.fetchall():
+        cam = dict(zip(COLS, r[:len(COLS)]))
+        url, at = r[len(COLS)], r[len(COLS) + 1]
+        if url and at and now - at < timedelta(minutes=LIVE_CACHE_MINUTES):
+            result[cam['id']] = {'url': url}
+        else:
+            need.append((cam, url))
+
+    if need:
+        nowt = datetime.now(timezone.utc)
+        tokens: Dict[str, Optional[str]] = {}
+        for cam, _ in need:
+            if cam.get('cloud_token') and cam.get('cloud_token_expires') and cam['cloud_token_expires'] > nowt:
+                tokens[cam['id']] = cam['cloud_token']
+
+        def work(item):
+            cam, old = item
+            cached_tok = tokens.get(cam['id'])
+            tok = cached_tok or _cloud_token(cam['serial'])
+            new_tok = tok if tok and not cached_tok else None
+            if not tok:
+                return cam['id'], ({'url': old} if old else {'error': 'Камера не в сети'}), None, None
+            data = _fetch_live(cam, tok, stream)
+            err = _ret_error(data)
+            if err:
+                return cam['id'], ({'url': old} if old else {'error': err}), None, new_tok
+            return cam['id'], {'url': data['data']['url']}, data['data']['url'], new_tok
+
+        with ThreadPoolExecutor(max_workers=len(need)) as ex:
+            for cam_id, res, new_url, new_tok in ex.map(work, need):
+                result[cam_id] = res
+                if new_url:
+                    cur.execute(f'UPDATE {SCHEMA}.cameras SET live_url_{q} = %s, live_url_{q}_at = now() WHERE id = %s',
+                                (new_url, cam_id))
+                if new_tok:
+                    cur.execute(f'UPDATE {SCHEMA}.cameras SET cloud_token = %s, cloud_token_expires = %s WHERE id = %s',
+                                (new_tok, datetime.now(timezone.utc) + timedelta(hours=12), cam_id))
+    return {'streams': result}
 
 
 def _login(cur, cam: Dict[str, Any]) -> Optional[str]:
@@ -248,6 +330,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     body = json.loads(event.get('body') or '{}')
     action = body.get('action', 'list')
+    try:
+        remaining_ms = context.get_remaining_time_in_millis()
+    except Exception:
+        remaining_ms = 5000
+    # Не дольше 4.3 с от начала: даже на «холодном» старте функция успеет ответить.
+    _DEADLINE[0] = time.time() + min(remaining_ms or 5000, 4300) / 1000.0
 
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     conn.autocommit = True
@@ -259,6 +347,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         if action == 'list':
             return _resp(200, {'cameras': _list(cur, user['can_manage']), 'can_manage': user['can_manage']})
+
+        if action == 'live_all':
+            return _resp(200, _live_all(cur, body.get('quality') or 'sd'))
 
         if action == 'snapshot':
             cam = _get_camera(cur, body.get('id') or '')
@@ -274,7 +365,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if not cam:
                 return _resp(404, {'error': 'Камера не найдена'})
             if action == 'live':
-                return _resp(200, _live_url(cur, cam, body.get('quality') or 'sd'))
+                return _resp(200, _live_url(cur, cam, body.get('quality') or 'sd', bool(body.get('fresh'))))
             if action == 'records':
                 day = body.get('day') or datetime.now().strftime('%Y-%m-%d')
                 return _resp(200, _records(cur, cam, day, int(body.get('from_hour', 0)), int(body.get('to_hour', 5))))

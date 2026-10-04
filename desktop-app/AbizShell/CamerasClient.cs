@@ -97,27 +97,44 @@ namespace AbizShell
             }
         }
 
-        /// <summary>Живое видео камеры по её id. Медленные камеры повторяем до 3 раз.</summary>
-        public static async Task<Result> LiveAsync(string apiToken, string cameraId)
+        /// <summary>Живое видео камеры по её id. Сервер отдаёт готовую ссылку из кэша мгновенно.</summary>
+        public static async Task<Result> LiveAsync(string apiToken, string cameraId, bool fresh = false)
         {
             string? lastError = null;
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < 2; i++)
             {
                 try
                 {
-                    var (_, body) = await PostAsync(apiToken, new { action = "live", id = cameraId, quality = "sd" });
+                    var (_, body) = await PostAsync(apiToken, new { action = "live", id = cameraId, quality = "sd", fresh });
                     string? url = Str(body, "url");
                     if (!string.IsNullOrEmpty(url)) return new Result(url, null);
                     lastError = Str(body, "error") ?? "Камера не ответила";
-                    if (!lastError.Contains("не ответила", StringComparison.OrdinalIgnoreCase)) break;
                 }
                 catch
                 {
                     lastError = "Нет связи с сервером";
                 }
-                await Task.Delay(800);
+                await Task.Delay(1200);
             }
             return new Result(null, lastError);
+        }
+
+        /// <summary>Готовые ссылки сразу на все камеры (один запрос) — сетка открывается быстро.</summary>
+        public static async Task<System.Collections.Generic.Dictionary<string, string>> LiveAllAsync(string apiToken)
+        {
+            var map = new System.Collections.Generic.Dictionary<string, string>();
+            try
+            {
+                var (_, body) = await PostAsync(apiToken, new { action = "live_all" });
+                if (body.TryGetProperty("streams", out var st) && st.ValueKind == JsonValueKind.Object)
+                    foreach (var p in st.EnumerateObject())
+                    {
+                        var u = Str(p.Value, "url");
+                        if (!string.IsNullOrEmpty(u)) map[p.Name] = u!;
+                    }
+            }
+            catch { }
+            return map;
         }
 
         /// <summary>Ссылки, которые разрешено открывать во встроенном видеоплеере (облако камер).</summary>

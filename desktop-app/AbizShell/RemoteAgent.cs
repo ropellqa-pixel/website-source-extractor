@@ -31,6 +31,12 @@ namespace AbizShell
         public Action? OnLogout { get; set; }
         /// <summary>Вызывается, если сервер сообщил, что устройство отвязано.</summary>
         public Action? OnRevoked { get; set; }
+        /// <summary>Удалённый вход: true — как администратор, false — как сотрудник ПК (с его ФИО).</summary>
+        public Action<bool, string>? OnRemoteLogin { get; set; }
+        /// <summary>Обновление скачано — можно ставить (на экране входа — сразу, в работе — после выхода).</summary>
+        public Action? OnUpdateReady { get; set; }
+
+        private DateTime _lastUpdateCheck = DateTime.MinValue;
 
         public RemoteAgent(string apiToken)
         {
@@ -72,6 +78,13 @@ namespace AbizShell
 
                 foreach (var cmd in hb.Commands)
                     await HandleCommandAsync(cmd);
+
+                // Проверка выпуска новой версии: при запуске и затем раз в 10 минут.
+                if ((DateTime.Now - _lastUpdateCheck).TotalMinutes >= 10)
+                {
+                    _lastUpdateCheck = DateTime.Now;
+                    _ = CheckUpdateAsync();
+                }
             }
             finally
             {
@@ -103,6 +116,18 @@ namespace AbizShell
                     case "logout":
                         OnLogout?.Invoke();
                         break;
+                    case "login_user":
+                        if (OnRemoteLogin == null) result = "сотрудник уже в системе";
+                        else OnRemoteLogin(false, cmd.PayloadString("full_name") ?? "");
+                        break;
+                    case "login_admin":
+                        if (OnRemoteLogin == null) result = "уже выполнен вход";
+                        else OnRemoteLogin(true, "");
+                        break;
+                    case "update":
+                        _lastUpdateCheck = DateTime.Now;
+                        result = await CheckUpdateAsync() ? "обновление скачано" : "новой версии нет (сейчас " + Updater.CurrentVersion + ")";
+                        break;
                     case "lock":
                     case "unlock":
                         // Фактическое состояние блокировки приходит в RemoteLock — здесь ничего не делаем.
@@ -111,6 +136,13 @@ namespace AbizShell
             }
             catch (Exception ex) { result = "ошибка: " + ex.Message; }
             await RemoteControlClient.ReportResultAsync(_apiToken, cmd.Id, result, screenshot);
+        }
+
+        private async System.Threading.Tasks.Task<bool> CheckUpdateAsync()
+        {
+            bool ready = await Updater.CheckAndDownloadAsync(_apiToken);
+            if (ready && !_disposed) Application.Current?.Dispatcher.BeginInvoke(() => OnUpdateReady?.Invoke());
+            return ready;
         }
 
         private static string LaunchRuDesktop()

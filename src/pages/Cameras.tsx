@@ -33,6 +33,7 @@ export default function Cameras() {
   const [isFull, setIsFull] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const reqId = useRef(0);
+  const liveCache = useRef<Record<string, string>>({});
 
   const cam = cameras[index];
 
@@ -45,6 +46,9 @@ export default function Cameras() {
       setIndex(def >= 0 ? def : 0);
       if (r.error) setError(r.error);
       setLoading(false);
+    });
+    camerasCall<{ streams?: Record<string, { url?: string }> }>({ action: 'live_all' }).then((r) => {
+      Object.entries(r.streams || {}).forEach(([id, v]) => { if (v.url) liveCache.current[id] = v.url; });
     });
   }, []);
 
@@ -59,7 +63,9 @@ export default function Cameras() {
     setSrc(null); setError(null); setConnecting(true); setPlayPos(null);
     let r: { url?: string; error?: string };
     if (mode.kind === 'live') {
-      r = await camerasCall({ action: 'live', id: cam.id, quality: hd ? 'hd' : 'sd' });
+      const cached = !hd ? liveCache.current[cam.id] : undefined;
+      r = cached ? { url: cached } : await camerasCall({ action: 'live', id: cam.id, quality: hd ? 'hd' : 'sd' });
+      if (!hd && r.url) liveCache.current[cam.id] = r.url;
     } else {
       const start = `${mode.day} ${fmtSec(mode.sec)}`;
       const end = `${mode.day} ${fmtSec(Math.min(mode.sec + 3600, 86399))}`;
@@ -102,9 +108,10 @@ export default function Cameras() {
   };
 
   const onFatal = useCallback(() => {
+    if (cam) delete liveCache.current[cam.id];
     if (mode.kind === 'live') setTimeout(() => connect(), 2000);
     else setError('Запись прервалась. Выберите другое время.');
-  }, [mode, connect]);
+  }, [mode, connect, cam]);
 
   const onTime = useCallback((t: number) => {
     if (mode.kind === 'archive') setPlayPos(Math.min(mode.sec + Math.floor(t), 86399));
