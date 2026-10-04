@@ -3,12 +3,16 @@ import Icon from '@/components/ui/icon';
 import HlsPlayer from '@/components/cameras/HlsPlayer';
 import ArchiveBar from '@/components/cameras/ArchiveBar';
 import CameraManager from '@/components/cameras/CameraManager';
-import SnapshotView from '@/components/cameras/SnapshotView';
+import WasmHevcPlayer from '@/components/cameras/WasmHevcPlayer';
 import { camerasCall, fmtSec, type Camera } from '@/lib/camerasApi';
 
-// Камеры снимают в H.265. Его умеют Edge/Chrome на Windows с аппаратным декодером и Safari.
-// Если браузер не умеет — в эфире показываем частые снимки вместо видео.
-const HEVC_OK = typeof window !== 'undefined' && (
+// Камеры снимают в H.265. Если браузер умеет его сам (Яндекс Браузер, Edge с кодеком, Safari) —
+// играем родным видеоплеером. Иначе (встроенный браузер АБИЗ, Chrome без кодека) — свой декодер
+// в WebAssembly: видео показывается везде, без расширений и платных кодеков.
+// Встроенный браузер программы АБИЗ (WebView2): всегда свой декодер — он проверен и не зависит от Windows.
+const IN_ABIZ = typeof navigator !== 'undefined' && /AbizShell|AbizAdmin|\bABIZ\//.test(navigator.userAgent);
+const PREFER_WASM = IN_ABIZ || (typeof location !== 'undefined' && new URLSearchParams(location.search).has('wasm'));
+const HEVC_OK = !PREFER_WASM && typeof window !== 'undefined' && (
   (window.MediaSource?.isTypeSupported?.('video/mp4; codecs="hvc1.1.6.L93.B0"') ?? false) ||
   (window.MediaSource?.isTypeSupported?.('video/mp4; codecs="hev1.1.6.L93.B0"') ?? false) ||
   !!document.createElement('video').canPlayType('application/vnd.apple.mpegurl')
@@ -33,6 +37,7 @@ export default function Cameras() {
   const [isFull, setIsFull] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const reqId = useRef(0);
+  const freshNext = useRef(false);
   const liveCache = useRef<Record<string, string>>({});
 
   const cam = cameras[index];
@@ -54,17 +59,14 @@ export default function Cameras() {
 
   const connect = useCallback(async () => {
     if (!cam) return;
-    if (!HEVC_OK) {
-      setSrc(null); setConnecting(false);
-      setError(mode.kind === 'archive' ? 'Этот браузер не умеет показывать видео H.265 с камеры. Откройте сайт в Microsoft Edge или Google Chrome на Windows.' : null);
-      return;
-    }
     const id = ++reqId.current;
     setSrc(null); setError(null); setConnecting(true); setPlayPos(null);
     let r: { url?: string; error?: string };
     if (mode.kind === 'live') {
       const cached = !hd ? liveCache.current[cam.id] : undefined;
-      r = cached ? { url: cached } : await camerasCall({ action: 'live', id: cam.id, quality: hd ? 'hd' : 'sd' });
+      const fresh = freshNext.current;
+      freshNext.current = false;
+      r = cached ? { url: cached } : await camerasCall({ action: 'live', id: cam.id, quality: hd ? 'hd' : 'sd', fresh });
       if (!hd && r.url) liveCache.current[cam.id] = r.url;
     } else {
       const start = `${mode.day} ${fmtSec(mode.sec)}`;
@@ -109,7 +111,8 @@ export default function Cameras() {
 
   const onFatal = useCallback(() => {
     if (cam) delete liveCache.current[cam.id];
-    if (mode.kind === 'live') setTimeout(() => connect(), 2000);
+    freshNext.current = true;
+    if (mode.kind === 'live') setTimeout(() => connect(), 1000);
     else setError('Запись прервалась. Выберите другое время.');
   }, [mode, connect, cam]);
 
@@ -158,9 +161,13 @@ export default function Cameras() {
   return (
     <div ref={wrapRef} className="relative flex h-full flex-col bg-black text-white">
       <div className="relative min-h-0 flex-1">
-        {!HEVC_OK && mode.kind === 'live' ? <SnapshotView key={cam.id} cameraId={cam.id} /> : <HlsPlayer
+        {HEVC_OK ? <HlsPlayer
           key={`${cam.id}-${mode.kind}-${mode.kind === 'archive' ? mode.day + mode.sec : ''}-${hd}`}
           src={src} loading={connecting} error={error} muted={muted} onFatal={onFatal} onTime={onTime}
+        /> : <WasmHevcPlayer
+          key={`${cam.id}-${mode.kind}-${mode.kind === 'archive' ? mode.day + mode.sec : ''}-${hd}`}
+          src={src} loading={connecting} error={error} onFatal={onFatal}
+          live={mode.kind === 'live'} onTime={onTime}
         />}
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 bg-gradient-to-b from-black/70 to-transparent p-3 sm:p-4">

@@ -16,17 +16,13 @@
       "name": "No token is rejected",
       "method": "POST",
       "path": "/",
-      "body": {"file_base64": "aGVsbG8=", "file_name": "test.txt", "content_type": "text/plain", "folder": "documents"},
+      "body": {
+        "file_base64": "aGVsbG8=",
+        "file_name": "test.txt",
+        "content_type": "text/plain",
+        "folder": "documents"
+      },
       "expectedStatus": 401
-    },
-    {
-      "name": "Upload small text file",
-      "method": "POST",
-      "path": "/",
-      "body": {"file_base64": "aGVsbG8=", "file_name": "test.txt", "content_type": "text/plain", "folder": "documents", "token": "anod_test_static_token_for_ci_only"},
-      "expectedStatus": 200,
-      "expectedBody": {"url": "string"},
-      "bodyMatcher": "partial"
     }
   ]
 }

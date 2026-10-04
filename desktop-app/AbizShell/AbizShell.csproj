@@ -13,7 +13,7 @@
 		<ApplicationIcon>abiz.ico</ApplicationIcon>
 		<EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
 		<Company>Rassvet</Company>
-		<Version>1.3.0</Version>
+		<Version>1.4.0</Version>
 		<Configurations>Debug;Release;DebugAdmin;ReleaseAdmin</Configurations>
 		<Platforms>x64</Platforms>
 	</PropertyGroup>
@@ -61,30 +61,6 @@
 		<PackageReference Include="System.Drawing.Common" Version="8.0.8" />
 		<!-- Шифрование сохранённых паролей сайтов (Windows DPAPI). -->
 		<PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
-		<!-- Встроенный бесплатный видеодекодер VLC: показывает камеры (H.265) без платного
-		     «Расширения для видео HEVC» из Microsoft Store. -->
-		<PackageReference Include="LibVLCSharp.WPF" Version="3.10.1" />
-		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
 	</ItemGroup>
 
-	<!-- Из VLC берём только то, что нужно камерам: HLS по https, H.265/H.264, звук AAC,
-	     вывод картинки и звука. Так программа весит ~40 МБ вместо ~300 МБ. -->
-	<PropertyGroup>
-		<VlcWindowsX86Enabled>false</VlcWindowsX86Enabled>
-		<VlcWindowsArm64Enabled>false</VlcWindowsArm64Enabled>
-		<VlcWindowsX64Enabled>true</VlcWindowsX64Enabled>
-	</PropertyGroup>
-	<ItemGroup>
-		<VlcWindowsX64IncludeFiles Include="libvlc.dll;libvlccore.dll" />
-		<VlcWindowsX64IncludeFiles Include="plugins\access\libhttp_plugin.dll;plugins\access\libhttps_plugin.dll;plugins\access\libtcp_plugin.dll;plugins\access\libfilesystem_plugin.dll" />
-		<VlcWindowsX64IncludeFiles Include="plugins\demux\libadaptive_plugin.dll;plugins\demux\libts_plugin.dll;plugins\demux\libes_plugin.dll;plugins\demux\libh26x_plugin.dll;plugins\demux\libmp4_plugin.dll" />
-		<VlcWindowsX64IncludeFiles Include="plugins\codec\libavcodec_plugin.dll;plugins\codec\libd3d11va_plugin.dll;plugins\codec\libdxva2_plugin.dll" />
-		<VlcWindowsX64IncludeFiles Include="plugins\packetizer\libpacketizer_hevc_plugin.dll;plugins\packetizer\libpacketizer_h264_plugin.dll;plugins\packetizer\libpacketizer_mpeg4audio_plugin.dll" />
-		<VlcWindowsX64IncludeFiles Include="plugins\video_output\libdirect3d11_plugin.dll;plugins\video_output\libdirect3d9_plugin.dll;plugins\video_output\libwingdi_plugin.dll;plugins\video_output\libwinhibit_plugin.dll" />
-		<VlcWindowsX64IncludeFiles Include="plugins\d3d11\%2A%2A;plugins\video_chroma\%2A%2A;plugins\audio_mixer\%2A%2A" />
-		<VlcWindowsX64IncludeFiles Include="plugins\audio_output\libmmdevice_plugin.dll;plugins\audio_output\libwasapi_plugin.dll;plugins\audio_output\libdirectsound_plugin.dll" />
-		<VlcWindowsX64IncludeFiles Include="plugins\audio_filter\libaudio_format_plugin.dll;plugins\audio_filter\libspeex_resampler_plugin.dll;plugins\audio_filter\libugly_resampler_plugin.dll;plugins\audio_filter\libtrivial_channel_mixer_plugin.dll;plugins\audio_filter\libsimple_channel_mixer_plugin.dll" />
-		<VlcWindowsX64IncludeFiles Include="plugins\misc\libgnutls_plugin.dll;plugins\misc\libxml_plugin.dll;plugins\keystore\libmemory_keystore_plugin.dll" />
-		<VlcWindowsX64IncludeFiles Include="plugins\stream_filter\libcache_block_plugin.dll;plugins\stream_filter\libcache_read_plugin.dll;plugins\stream_filter\libprefetch_plugin.dll" />
-	</ItemGroup>
 </Project>

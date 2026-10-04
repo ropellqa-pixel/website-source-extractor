@@ -11,6 +11,7 @@ import Register from "./pages/Register";
 import PinLogin from "./pages/PinLogin";
 import PinAuth from "./pages/PinAuth";
 import DeviceLogin from "./pages/DeviceLogin";
+import CamView from "./pages/CamView";
 import AdpodPinLogin from "./pages/AdpodPinLogin";
 import { PIN_ADPODS } from "./lib/pinAdpods";
 import Dashboard from "./pages/Dashboard";
@@ -63,6 +64,7 @@ const App = () => (
             <Route path="/pin-login" element={<PinLogin />} />
             <Route path="/pin-auth" element={<PinAuth />} />
             <Route path="/device-login" element={<DeviceLogin />} />
+            <Route path="/cam-view" element={<CamView />} />
             {PIN_ADPODS.map(adpod => (
               <Route key={adpod.slug} path={adpod.path} element={<AdpodPinLogin adpodSlug={adpod.slug} />} />
             ))}

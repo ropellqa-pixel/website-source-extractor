@@ -132,6 +132,11 @@ export default function Devices() {
                       {d.hostname && d.profile_name ? d.hostname + ' · ' : ''}код {d.device_code}
                       {d.app_version ? ` · v${d.app_version}` : ''}
                     </div>
+                    {d.update_status && (
+                      <div className={`mt-0.5 text-xs ${d.update_status.startsWith('ошибка') ? 'text-red-600' : 'text-blue-600'}`}>
+                        Обновление: {d.update_status}
+                      </div>
+                    )}
                     {d.current_user_name && d.presence === 'working' && (
                       <div className="mt-0.5 text-xs text-emerald-600">В системе: {d.current_user_name}</div>
                     )}

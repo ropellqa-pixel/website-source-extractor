@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../lib/auth';
 import { db } from '@/lib/sdk';
 import { ensureWorkingRoom, WORKING_CHAT_NAME, type ChatRoom } from '@/lib/chatRoom';
-import { resetUnread, setChatActive } from '@/lib/chatUnread';
+import { resetUnread, setChatActive, markChatReadOnServer } from '@/lib/chatUnread';
 import { MessageSquare, Send, Users, Loader2 } from 'lucide-react';
 
 interface ChatMessage {
@@ -67,7 +67,8 @@ export default function Chat() {
   useEffect(() => {
     setChatActive(true);
     resetUnread();
-    return () => setChatActive(false);
+    markChatReadOnServer();
+    return () => { setChatActive(false); markChatReadOnServer(); };
   }, []);
 
   useEffect(() => {
@@ -84,7 +85,7 @@ export default function Chat() {
   // Пока пользователь на странице чата — обновляем переписку и сразу гасим счётчик непрочитанных
   useEffect(() => {
     if (!room) return;
-    pollRef.current = setInterval(() => { loadMessages(room.id); resetUnread(); }, 4000);
+    pollRef.current = setInterval(() => { loadMessages(room.id); resetUnread(); markChatReadOnServer(); }, 4000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [room, loadMessages]);
 

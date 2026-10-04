@@ -45,9 +45,17 @@ namespace AbizShell
             _timer.Tick += async (s, e) => await TickAsync();
         }
 
+        private static bool _installLogSent;
+
         public void Start()
         {
             if (string.IsNullOrEmpty(_apiToken)) return;
+            if (!_installLogSent)
+            {
+                _installLogSent = true;
+                var log = Updater.LastInstallLog();
+                if (!string.IsNullOrEmpty(log)) _ = RemoteControlClient.LogAsync(_apiToken, "note", $"Версия {Updater.CurrentVersion}. Установка: {log}");
+            }
             _timer.Start();
             _ = TickAsync();
         }
@@ -125,9 +133,11 @@ namespace AbizShell
                         else OnRemoteLogin(true, "");
                         break;
                     case "update":
+                        // Команда «Обновить программу» с сайта: скачать и поставить СРАЗУ (даже если сотрудник работает).
                         _lastUpdateCheck = DateTime.Now;
-                        result = await CheckUpdateAsync() ? "обновление скачано" : "новой версии нет (сейчас " + Updater.CurrentVersion + ")";
-                        break;
+                        _ = ReportResultLaterAsync(cmd.Id);
+                        _ = ForceUpdateAsync();
+                        return;
                     case "lock":
                     case "unlock":
                         // Фактическое состояние блокировки приходит в RemoteLock — здесь ничего не делаем.
@@ -136,6 +146,21 @@ namespace AbizShell
             }
             catch (Exception ex) { result = "ошибка: " + ex.Message; }
             await RemoteControlClient.ReportResultAsync(_apiToken, cmd.Id, result, screenshot);
+        }
+
+        /// <summary>Вызывается при «Обновить программу» с сайта: установить без ожидания выхода сотрудника.</summary>
+        public Action? OnForceUpdate { get; set; }
+
+        private async System.Threading.Tasks.Task ReportResultLaterAsync(string id)
+        {
+            await RemoteControlClient.ReportResultAsync(_apiToken, id, "проверка обновления запущена (сейчас " + Updater.CurrentVersion + ")");
+        }
+
+        private async System.Threading.Tasks.Task ForceUpdateAsync()
+        {
+            bool ready = await Updater.CheckAndDownloadAsync(_apiToken);
+            if (!ready || _disposed) return;
+            Application.Current?.Dispatcher.BeginInvoke(() => (OnForceUpdate ?? OnUpdateReady)?.Invoke());
         }
 
         private async System.Threading.Tasks.Task<bool> CheckUpdateAsync()

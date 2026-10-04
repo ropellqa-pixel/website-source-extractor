@@ -20,8 +20,10 @@ export default function ReleasePanel({ notify }: { notify: (t: string) => void }
   const load = () => listReleases().then(setReleases);
   useEffect(() => { load(); }, []);
 
+  const versionOk = /^\d+(\.\d+){1,3}$/.test(version.trim());
   const submit = async () => {
     if (!file || !version.trim()) return;
+    if (!versionOk) { setError('Номер версии — только цифры с точками, например 3.5'); return; }
     setError('');
     setProgress(0);
     try {
@@ -95,7 +97,7 @@ export default function ReleasePanel({ notify }: { notify: (t: string) => void }
           <div className="w-full max-w-md rounded-2xl bg-card p-5" onClick={e => e.stopPropagation()}>
             <h3 className="mb-1 text-lg font-bold text-foreground">Выпустить новую версию</h3>
             <p className="mb-4 text-sm text-muted-foreground">
-              Загрузите архив программы (ABIZ-…-win64.zip). Все ПК скачают его и обновятся сами — на экране входа сразу, у работающего сотрудника — после выхода.
+              Загрузите архив программы (ABIZ-…-win64.zip) и укажите номер версии из файла ПРОЧТИ.txt. Все ПК скачают обновление сами: на экране входа ставится сразу, у работающего сотрудника — после выхода. Кнопка «Обновить все ПК сейчас» ставит сразу везде.
             </p>
             <div className="mb-3 flex gap-2">
               {(['abiz', 'admin'] as const).map(ed => (
@@ -105,7 +107,7 @@ export default function ReleasePanel({ notify }: { notify: (t: string) => void }
                 </button>
               ))}
             </div>
-            <input value={version} onChange={e => setVersion(e.target.value)} placeholder="Номер версии, например 3.4"
+            <input value={version} onChange={e => setVersion(e.target.value)} placeholder="Номер версии, например 3.5 (больше текущей)"
               className="mb-3 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />
             <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Что нового (необязательно)" rows={2}
               className="mb-3 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />

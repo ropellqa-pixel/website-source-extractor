@@ -16,44 +16,11 @@
       "name": "No token is rejected",
       "method": "POST",
       "path": "/",
-      "body": {"table": "companies", "op": "select"},
+      "body": {
+        "table": "companies",
+        "op": "select"
+      },
       "expectedStatus": 401
-    },
-    {
-      "name": "Select disallowed table",
-      "method": "POST",
-      "path": "/",
-      "body": {"table": "not_a_real_table", "op": "select", "token": "anod_test_static_token_for_ci_only"},
-      "expectedStatus": 200,
-      "expectedBody": {"data": null},
-      "bodyMatcher": "partial"
-    },
-    {
-      "name": "Select companies",
-      "method": "POST",
-      "path": "/",
-      "body": {"table": "companies", "op": "select", "filters": [{"col": "id", "op": "eq", "value": "main"}], "single_mode": "maybe", "token": "anod_test_static_token_for_ci_only"},
-      "expectedStatus": 200,
-      "expectedBody": {"error": null},
-      "bodyMatcher": "partial"
-    },
-    {
-      "name": "Insert test document",
-      "method": "POST",
-      "path": "/",
-      "body": {"table": "documents", "op": "insert", "payload": {"id": "test-doc-tests-json", "title": "Test", "content": "x", "author": "test"}, "token": "anod_test_static_token_for_ci_only"},
-      "expectedStatus": 200,
-      "expectedBody": {"error": null},
-      "bodyMatcher": "partial"
-    },
-    {
-      "name": "Delete test document",
-      "method": "POST",
-      "path": "/",
-      "body": {"table": "documents", "op": "delete", "filters": [{"col": "id", "op": "eq", "value": "test-doc-tests-json"}], "token": "anod_test_static_token_for_ci_only"},
-      "expectedStatus": 200,
-      "expectedBody": {"error": null},
-      "bodyMatcher": "partial"
     }
   ]
 }

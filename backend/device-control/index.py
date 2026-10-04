@@ -1,4 +1,5 @@
 import base64
+import re
 import json
 import os
 import uuid as uuidlib
@@ -125,6 +126,7 @@ def _presence_row(d) -> Dict[str, Any]:
         'profile_id': d[4], 'presence': presence, 'heartbeat_at': heartbeat,
         'current_user_name': d[7], 'app_version': d[8], 'remote_lock': d[9],
         'profile_name': d[10], 'screenshot_url': d[11], 'screenshot_at': d[12],
+        'update_status': d[13] if len(d) > 13 else None,
     }
 
 
@@ -159,11 +161,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 presence = 'login'
             user_name = (body.get('user_name') or '')[:200]
             app_version = (body.get('app_version') or '')[:50]
+            update_status = (body.get('update_status') or '')[:200]
 
             cur.execute(
                 f'UPDATE {SCHEMA}.devices SET heartbeat_at = now(), presence = %s, '
-                f'current_user_name = %s, app_version = %s, last_seen_at = now() WHERE device_code = %s',
-                (presence, user_name, app_version, code),
+                f'current_user_name = %s, app_version = %s, update_status = %s, last_seen_at = now() WHERE device_code = %s',
+                (presence, user_name, app_version, update_status, code),
             )
             # Забираем неотправленные команды
             cur.execute(
@@ -281,7 +284,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return _resp(403, {'error': 'Недостаточно прав'})
             cur.execute(
                 f'SELECT d.id, d.device_code, d.hostname, d.status, d.profile_id, d.presence, d.heartbeat_at, '
-                f'd.current_user_name, d.app_version, d.remote_lock, p.full_name, d.screenshot_url, d.screenshot_at '
+                f'd.current_user_name, d.app_version, d.remote_lock, p.full_name, d.screenshot_url, d.screenshot_at, d.update_status '
                 f'FROM {SCHEMA}.devices d LEFT JOIN {SCHEMA}.profiles p ON p.id = d.profile_id '
                 f'ORDER BY d.created_at DESC')
             devices = [_presence_row(r) for r in cur.fetchall()]
@@ -361,6 +364,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if action == 'release_publish':
             edition = 'admin' if body.get('edition') == 'admin' else 'abiz'
             version = (body.get('version') or '').strip()[:20]
+            if not re.fullmatch(r'\d+(\.\d+){1,3}', version):
+                return _resp(400, {'error': 'Номер версии — только цифры с точками, например 3.5'})
             folder = (body.get('folder') or '').strip()
             parts = int(body.get('parts') or 0)
             sha = (body.get('sha256') or '').lower()

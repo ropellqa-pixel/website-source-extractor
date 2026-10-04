@@ -1,2 +1,2 @@
-ABIZ project version 16
-Cameras drawn inside the app (no extra windows), cached stream links. Passwords from Yandex Browser + autofill. Remote login as user/admin. Remote auto-update. No UAC prompt.
+ABIZ project version 17 (program 3.5)
+Cameras via site player (WASM H.265), no VLC. Chat read-tracking. Reliable auto-update with rollback.

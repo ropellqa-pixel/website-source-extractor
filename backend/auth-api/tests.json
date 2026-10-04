@@ -10,113 +10,149 @@
       "name": "Unknown action",
       "method": "POST",
       "path": "/",
-      "body": {"action": "unknown"},
+      "body": {
+        "action": "unknown"
+      },
       "expectedStatus": 400
-    },
-    {
-      "name": "Signin demo director",
-      "method": "POST",
-      "path": "/",
-      "body": {"action": "signin", "email": "director@anodbiz.ru", "password": "anodbiz"},
-      "expectedStatus": 200,
-      "expectedBody": {"user": {"email": "director@anodbiz.ru"}},
-      "bodyMatcher": "partial"
     },
     {
       "name": "Signin wrong password",
       "method": "POST",
       "path": "/",
-      "body": {"action": "signin", "email": "director@anodbiz.ru", "password": "wrong"},
+      "body": {
+        "action": "signin",
+        "email": "nobody@example.com",
+        "password": "wrong"
+      },
       "expectedStatus": 401
-    },
-    {
-      "name": "Pin lookup demo director",
-      "method": "POST",
-      "path": "/",
-      "body": {"action": "pin_lookup", "pin": "1234"},
-      "expectedStatus": 200,
-      "expectedBody": {"email": "director@anodbiz.ru"},
-      "bodyMatcher": "partial"
     },
     {
       "name": "Register device returns 9-digit code",
       "method": "POST",
       "path": "/",
-      "body": {"action": "register_device", "hostname": "TEST-PC-CI"},
+      "body": {
+        "action": "register_device",
+        "hostname": "TEST-PC-CI"
+      },
       "expectedStatus": 200,
-      "expectedBody": {"device_code": "string"},
+      "expectedBody": {
+        "device_code": "string"
+      },
       "bodyMatcher": "partial"
     },
     {
       "name": "Device status unknown code",
       "method": "POST",
       "path": "/",
-      "body": {"action": "device_status", "device_code": "000000000"},
+      "body": {
+        "action": "device_status",
+        "device_code": "000000000"
+      },
       "expectedStatus": 404
     },
     {
       "name": "List devices without session rejected",
       "method": "POST",
       "path": "/",
-      "body": {"action": "list_devices"},
+      "body": {
+        "action": "list_devices"
+      },
       "expectedStatus": 401
     },
     {
       "name": "Link device without session rejected",
       "method": "POST",
       "path": "/",
-      "body": {"action": "link_device", "device_code": "123456789", "profile_id": "x"},
+      "body": {
+        "action": "link_device",
+        "device_code": "123456789",
+        "profile_id": "x"
+      },
       "expectedStatus": 401
     },
     {
       "name": "Request login link without api_token rejected",
       "method": "POST",
       "path": "/",
-      "body": {"action": "request_login_link"},
+      "body": {
+        "action": "request_login_link"
+      },
       "expectedStatus": 400
     },
     {
       "name": "Request login link with bad api_token rejected",
       "method": "POST",
       "path": "/",
-      "body": {"action": "request_login_link", "api_token": "not_a_real_token"},
+      "body": {
+        "action": "request_login_link",
+        "api_token": "not_a_real_token"
+      },
       "expectedStatus": 401
     },
     {
       "name": "Redeem unknown login code",
       "method": "POST",
       "path": "/",
-      "body": {"action": "redeem_login_link", "code": "unknown_code_xyz"},
+      "body": {
+        "action": "redeem_login_link",
+        "code": "unknown_code_xyz"
+      },
       "expectedStatus": 404
     },
     {
       "name": "Ping without auth",
       "method": "POST",
       "path": "/",
-      "body": {"action": "ping"},
+      "body": {
+        "action": "ping"
+      },
       "expectedStatus": 200,
-      "expectedBody": {"ok": true},
+      "expectedBody": {
+        "ok": true
+      },
       "bodyMatcher": "partial"
     },
     {
       "name": "Device signin with bad token rejected",
       "method": "POST",
       "path": "/",
-      "body": {"action": "device_signin", "api_token": "not_a_real_token", "password": "123456"},
+      "body": {
+        "action": "device_signin",
+        "api_token": "not_a_real_token",
+        "password": "123456"
+      },
       "expectedStatus": 403
     },
     {
       "name": "Device signin without password rejected",
       "method": "POST",
       "path": "/",
-      "body": {"action": "device_signin", "api_token": "x"},
+      "body": {
+        "action": "device_signin",
+        "api_token": "x"
+      },
       "expectedStatus": 400
     },
     {
       "name": "Set employee password without session rejected",
       "method": "POST",
       "path": "/",
-      "body": {"action": "set_employee_password", "profile_id": "x", "password": "123456"},
+      "body": {
+        "action": "set_employee_password",
+        "profile_id": "x",
+        "password": "123456"
+      },
+      "expectedStatus": 401
+    },
+    {
+      "name": "Removed demo account cannot sign in",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "signin",
+        "email": "director@anodbiz.ru",
+        "password": "anodbiz"
+      },
       "expectedStatus": 401
     }
   ]

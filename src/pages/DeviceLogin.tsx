@@ -22,8 +22,10 @@ export default function DeviceLogin() {
       setError('Ссылка неполная: отсутствует код входа.');
       return;
     }
+    const next = searchParams.get('next') || '';
+    const target = /^\/[a-z0-9/-]*$/i.test(next) ? next : '/dashboard';
     signInWithLoginCode(code)
-      .then(() => navigate('/dashboard', { replace: true }))
+      .then(() => navigate(target, { replace: true }))
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Не удалось выполнить вход.');
       });

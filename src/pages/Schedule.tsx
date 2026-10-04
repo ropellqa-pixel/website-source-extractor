@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { solveSchedule } from '@/lib/scheduleSolver';
 import { useNavigate } from 'react-router-dom';
 import { db } from '@/lib/sdk';
 import { useAuth } from '../lib/auth';
@@ -42,15 +43,6 @@ function parseDateRange(rangeStr: string): number[] {
   return result;
 }
 
-function shuffleArray<T>(array: T[]): T[] {
-  const copy = [...array];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
 interface ScheduleEmployee {
   profile_id: string;
   full_name: string;
@@ -82,298 +74,10 @@ function isAdjacentAllowed(prevShift: string, nextShift: string): boolean {
   return false;
 }
 
-interface CanWorkOptions {
-  ignoreBreak?: boolean;
-  ignoreAdjacency?: boolean;
-}
-
-// ===== Правила компании для генерации табеля =====
-// СТ (старший): работает парой «Д, на следующий день Н», после пары — отдых минимум 1 день
-//   (или больше, если в настройках сотрудника перерыв больше).
-// МЛ (младший) с перерывом 0: серия «Дп» подряд от 3 до 6 дней, серия всегда заканчивается «Нп»,
-//   после «Нп» — минимум 2 дня отдыха.
-// Если сотруднику запрещены дни или ночи, пару/серию собрать нельзя — работает по обычным правилам.
-function isStPattern(emp: ScheduleEmployee): boolean {
-  return emp.status === 'СТ' && !emp.no_day && !emp.no_night;
-}
-function isMlPattern(emp: ScheduleEmployee): boolean {
-  return emp.status === 'МЛ' && (!emp.break_days || emp.break_days === 0) && !emp.no_day && !emp.no_night;
-}
-function dpStreak(row: string[], day: number): number {
-  let n = 0;
-  for (let i = day - 1; i >= 0 && row[i] === 'Дп'; i--) n++;
-  return n;
-}
-function lastWork(row: string[], day: number): { idx: number; shift: string } {
-  for (let i = day - 1; i >= 0; i--) if (row[i]) return { idx: i, shift: row[i] };
-  return { idx: -999, shift: '' };
-}
-function dayFree(emp: ScheduleEmployee, dayIdx: number): boolean {
-  return !emp.unavailable.includes(dayIdx + 1) && !emp.delays.includes(dayIdx + 1);
-}
-
-/** Разрешает ли правило СТ/МЛ поставить смену. null — правило к сотруднику не относится. */
-function patternAllows(emp: ScheduleEmployee, row: string[], day: number, shift: string): boolean | null {
-  const prev = day > 0 ? row[day - 1] || '' : '';
-  if (isStPattern(emp)) {
-    if (shift === 'Н') return prev === 'Д';
-    if (shift !== 'Д') return false;
-    if (prev) return false;
-    const lw = lastWork(row, day);
-    if (lw.idx >= 0 && day - lw.idx <= Math.max(1, emp.break_days)) return false;
-    // Начинать пару можно, только если завтра получится выйти в ночь (или месяц заканчивается).
-    return day + 1 >= row.length || dayFree(emp, day + 1);
-  }
-  if (isMlPattern(emp)) {
-    const dp = dpStreak(row, day);
-    if (shift === 'Нп') return dp >= 3 || (dp >= 1 && day - dp === 0);
-    if (shift !== 'Дп') return false;
-    if (dp >= 6) return false;
-    if (dp > 0) return true;
-    const lw = lastWork(row, day);
-    if (lw.idx >= 0 && day - lw.idx <= 2) return false;
-    // Новую серию начинаем, только если впереди есть минимум 3 свободных дня + день на Нп.
-    for (let k = day; k < Math.min(row.length, day + 4); k++) if (!dayFree(emp, k)) return false;
-    return true;
-  }
-  return null;
-}
-
-function canWork(
-  emp: ScheduleEmployee,
-  dayNum: number,
-  shift: string,
-  empLastWorkDay: number,
-  empLastShift: string,
-  currentDayIndex: number,
-  schedule: string[][],
-  empIdx: number,
-  options: CanWorkOptions = {}
-): boolean {
-  if ((shift === 'Д' || shift === 'Дп') && emp.no_day) return false;
-  if ((shift === 'Н' || shift === 'Нп') && emp.no_night) return false;
-  if (emp.unavailable.includes(dayNum)) return false;
-  if (emp.delays.includes(dayNum)) return false;
-  if (schedule[empIdx]?.[currentDayIndex]) return false;
-
-  const rule = patternAllows(emp, schedule[empIdx] || [], currentDayIndex, shift);
-  if (rule !== null) return rule;
-
-  if (empLastWorkDay >= 0) {
-    const gap = currentDayIndex - empLastWorkDay;
-    if (gap === 1 && !options.ignoreAdjacency) {
-      if (!isAdjacentAllowed(empLastShift, shift)) return false;
-    }
-    if (!options.ignoreBreak && gap <= emp.break_days) return false;
-  }
-
-  return true;
-}
-
-function getShiftTypes(emp: ScheduleEmployee): string[] {
-  switch (emp.status) {
-    case 'СТ': return ['Д', 'Н'];
-    case 'МЛ': return ['Дп', 'Нп'];
-    case 'ЛБ':
-    default: return ['Д', 'Н', 'Дп', 'Нп'];
-  }
-}
-
-function isSubTypeAllowed(shift: string, emp: ScheduleEmployee): boolean {
-  if (emp.status !== 'ЛБ') return true;
-  if (shift === 'Д' && emp.st_no_day) return false;
-  if (shift === 'Н' && emp.st_no_night) return false;
-  if (shift === 'Дп' && emp.ml_no_day) return false;
-  if (shift === 'Нп' && emp.ml_no_night) return false;
-  return true;
-}
-
-function countShifts(scheduleRow: string[]): number {
-  return scheduleRow.filter(s => s !== '').length;
-}
-
-// Преференс = жёсткое ограничение: сотрудник с непустым списком preferences
-// в этот день может работать ТОЛЬКО в паре с кем-то из своего списка
-// (и только с ним — не с произвольным человеком). Если подходящего партнёра
-// на день нет — сотрудник в этот день не ставится вообще (не подставляется "кто попало").
-function hasPreferences(emp: ScheduleEmployee): boolean {
-  return emp.preferences.length > 0;
-}
-
-// Совместимость двух сотрудников для совместной смены с учётом преференций.
-// Если у сотрудника указаны преференции — партнёр обязан входить в этот список.
-function isCompatiblePair(empA: ScheduleEmployee, empB: ScheduleEmployee): boolean {
-  if (hasPreferences(empA) && !empA.preferences.includes(empB.profile_id)) return false;
-  if (hasPreferences(empB) && !empB.preferences.includes(empA.profile_id)) return false;
-  return true;
-}
-
-const ALL_SHIFTS = ['Д', 'Н', 'Дп', 'Нп'];
-// Пары "одна смена вместе": день (Д+Дп) и ночь (Н+Нп) — как в бизнес-правиле.
-const SAME_SHIFT_PAIRS: Array<[string, string]> = [['Д', 'Дп'], ['Дп', 'Д'], ['Н', 'Нп'], ['Нп', 'Н']];
-
-// Генерируем несколько вариантов и берём тот, где больше всего дней с полной сменой (4 человека).
-// Правила СТ/МЛ соблюдаются в каждом варианте, перебор только улучшает заполнение.
+// Генерация табеля: ровно 4 смены в день, правила СТ/МЛ, равномерность смен (см. scheduleSolver).
 function generateSchedule(employees: ScheduleEmployee[], totalDays: number): string[][] {
-  let best: string[][] = [];
-  let bestScore = -1;
-  for (let attempt = 0; attempt < 400; attempt++) {
-    const sch = generateScheduleOnce(employees, totalDays);
-    let full = 0, filled = 0;
-    for (let d = 0; d < totalDays; d++) {
-      const cnt = sch.filter(r => r[d]).length;
-      filled += Math.min(cnt, 4);
-      if (cnt >= 4) full++;
-    }
-    const score = full * 100 + filled;
-    if (score > bestScore) { bestScore = score; best = sch; }
-    if (full === totalDays) break;
-  }
-  return best;
-}
-
-function generateScheduleOnce(employees: ScheduleEmployee[], totalDays: number): string[][] {
   const active = employees.filter(e => !e.excluded);
-  const n = active.length;
-  if (n === 0) return [];
-
-  const schedule: string[][] = Array.from({ length: n }, () => Array(totalDays).fill(''));
-  const empLastWorkDay: number[] = Array(n).fill(-999);
-  const empLastShift: string[] = Array(n).fill('');
-  const mlTarget: number[] = Array(n).fill(0);
-
-  const idxMap = new Map<string, number>();
-  active.forEach((emp, i) => idxMap.set(emp.profile_id, i));
-
-  // Пары преференций: только сотрудники, у которых оба совместимы друг с другом
-  const prefPairs: Array<[number, number]> = [];
-  const pairSeen = new Set<string>();
-  active.forEach((emp, i) => {
-    for (const prefId of emp.preferences) {
-      const j = idxMap.get(prefId);
-      if (j === undefined || j === i) continue;
-      if (!isCompatiblePair(emp, active[j])) continue;
-      const key = Math.min(i, j) + ':' + Math.max(i, j);
-      if (pairSeen.has(key)) continue;
-      pairSeen.add(key);
-      prefPairs.push([i, j]);
-    }
-  });
-
-  const pickTier = <T extends { emp: ScheduleEmployee; idx: number }>(candidates: T[]): T => {
-    candidates.sort((a, b) => {
-      const pd = a.emp.priority - b.emp.priority;
-      if (pd !== 0) return pd;
-      return countShifts(schedule[a.idx]) - countShifts(schedule[b.idx]);
-    });
-    const bestPriority = candidates[0].emp.priority;
-    const bestCount = countShifts(schedule[candidates[0].idx]);
-    const tier = candidates.filter(
-      c => c.emp.priority === bestPriority && countShifts(schedule[c.idx]) === bestCount
-    );
-    return tier[Math.floor(Math.random() * tier.length)];
-  };
-
-  for (let day = 0; day < totalDays; day++) {
-    const dayNum = day + 1;
-    const filledIdx = new Set<number>();
-    const usedShifts = new Set<string>();
-
-    const place = (idx: number, shift: string) => {
-      schedule[idx][day] = shift;
-      filledIdx.add(idx);
-      usedShifts.add(shift);
-    };
-
-    // Phase 0: обязательные смены по правилам СТ/МЛ — продолжение начатой пары или серии.
-    active.forEach((emp, idx) => {
-      if (filledIdx.has(idx) || hasPreferences(emp)) return;
-      const row = schedule[idx];
-      const prev = day > 0 ? row[day - 1] : '';
-      const want: string[] = [];
-      if (isStPattern(emp) && prev === 'Д') want.push('Н');
-      if (isMlPattern(emp)) {
-        const dp = dpStreak(row, day);
-        if (dp > 0) {
-          if (mlTarget[idx] === 0) mlTarget[idx] = 3 + Math.floor(Math.random() * 4);
-          if (dp < 3) want.push('Дп');
-          else if (dp >= mlTarget[idx] || dp >= 6) want.push('Нп', 'Дп');
-          else want.push('Дп', 'Нп');
-        } else {
-          mlTarget[idx] = 0;
-        }
-      }
-      for (const sh of want) {
-        if (usedShifts.has(sh)) continue;
-        if (!canWork(emp, dayNum, sh, empLastWorkDay[idx], empLastShift[idx], day, schedule, idx)) continue;
-        place(idx, sh);
-        break;
-      }
-    });
-
-    // Phase 1: расставляем пары преференций — строго вместе, строго в одну "смену" (день/ночь)
-    const shuffledPairs = shuffleArray(prefPairs);
-    for (const [i, j] of shuffledPairs) {
-      if (filledIdx.has(i) || filledIdx.has(j)) continue;
-      const empI = active[i];
-      const empJ = active[j];
-      const placements = shuffleArray(SAME_SHIFT_PAIRS);
-
-      for (const [si, sj] of placements) {
-        if (usedShifts.has(si) || usedShifts.has(sj)) continue;
-        if (!getShiftTypes(empI).includes(si) || !getShiftTypes(empJ).includes(sj)) continue;
-        if (!isSubTypeAllowed(si, empI) || !isSubTypeAllowed(sj, empJ)) continue;
-        if (!canWork(empI, dayNum, si, empLastWorkDay[i], empLastShift[i], day, schedule, i)) continue;
-        if (!canWork(empJ, dayNum, sj, empLastWorkDay[j], empLastShift[j], day, schedule, j)) continue;
-        place(i, si);
-        place(j, sj);
-        break;
-      }
-    }
-
-    // Phase 2: оставшиеся слоты — только сотрудниками БЕЗ преференций
-    // (сотрудник с преференциями, не нашедший пару, в этот день не ставится вообще)
-    const fillEmptySlots = (opts: CanWorkOptions) => {
-      const emptySlots = ALL_SHIFTS.filter(s => !usedShifts.has(s));
-      for (const shift of shuffleArray(emptySlots)) {
-        const candidates = active
-          .map((emp, idx) => ({ emp, idx }))
-          .filter(({ emp, idx }) =>
-            !filledIdx.has(idx) &&
-            !hasPreferences(emp) &&
-            getShiftTypes(emp).includes(shift) &&
-            isSubTypeAllowed(shift, emp) &&
-            canWork(emp, dayNum, shift, empLastWorkDay[idx], empLastShift[idx], day, schedule, idx, opts)
-          );
-        if (candidates.length === 0) continue;
-        const chosen = pickTier(candidates);
-        place(chosen.idx, shift);
-      }
-    };
-
-    // Строгий проход
-    fillEmptySlots({});
-    // Если строго ровно 4 в день не набралось — постепенно ослабляем отдых/смежность
-    // (правило "преференция — только с этими людьми" при этом никогда не нарушается)
-    if (usedShifts.size < 4) fillEmptySlots({ ignoreAdjacency: true });
-    if (usedShifts.size < 4) fillEmptySlots({ ignoreAdjacency: true, ignoreBreak: true });
-
-    // Phase 3: если совсем не хватает свободных "безпреференсных" сотрудников —
-    // в крайнем случае берём и сотрудников с преференциями, но ТОЛЬКО если для них
-    // в этот день в принципе нет совместимого партнёра ни при каких раскладах —
-    // такого сотрудника всё равно не ставим одного (жёсткое правило), поэтому здесь
-    // просто пытаемся полностью снятыми мягкими ограничениями добрать оставшихся
-    // безпреференсных кандидатов ещё раз (уже сделано выше) — форс сверх этого не делаем,
-    // чтобы не нарушить правило преференций.
-
-    for (const idx of filledIdx) {
-      const shift = schedule[idx][day];
-      empLastWorkDay[idx] = day;
-      empLastShift[idx] = shift;
-    }
-  }
-
-  return schedule;
+  return solveSchedule(active, totalDays, isAdjacentAllowed);
 }
 
 function createScheduleImage(monthYear: string, rows: ScheduleRow[], days: number): Promise<string> {
@@ -674,14 +378,21 @@ export default function Schedule() {
   const canLock = isDeputy;
   const canUnlock = isDeputy;
 
+  const [generating, setGenerating] = useState(false);
   const handleGenerate = () => {
-    const schedule = generateSchedule(employees, getDaysInMonth());
-    const activeEmps = employees.filter(e => !e.excluded);
-    setRows(activeEmps.map((emp, i) => ({
-      profile_id: emp.profile_id, full_name: emp.full_name, shifts: schedule[i] || Array(getDaysInMonth()).fill(''),
-    })));
-    setStatusMessage('Расписание сгенерировано');
-    setTimeout(() => setStatusMessage(''), 3000);
+    setGenerating(true);
+    setStatusMessage('Подбираю лучший вариант табеля...');
+    // Даём странице нарисовать индикатор, затем считаем (1–3 секунды).
+    setTimeout(() => {
+      const schedule = generateSchedule(employees, getDaysInMonth());
+      const activeEmps = employees.filter(e => !e.excluded);
+      setRows(activeEmps.map((emp, i) => ({
+        profile_id: emp.profile_id, full_name: emp.full_name, shifts: schedule[i] || Array(getDaysInMonth()).fill(''),
+      })));
+      setGenerating(false);
+      setStatusMessage('Расписание сгенерировано: 4 смены каждый день');
+      setTimeout(() => setStatusMessage(''), 3000);
+    }, 50);
   };
 
   const handleShiftChange = (rowIdx: number, dayIdx: number, value: string) => {
@@ -1034,8 +745,8 @@ export default function Schedule() {
         <div className="mt-4 flex items-center justify-between sticky bottom-0 bg-background py-3 border-t border-border">
           <div className="flex items-center gap-2">
             {(isDeputy || isResponsible) && !isLocked && (
-              <button onClick={handleGenerate} className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm">
-                <RefreshCw className="w-4 h-4" /> Генерировать
+              <button onClick={handleGenerate} disabled={generating} className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm disabled:opacity-60">
+                {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} {generating ? 'Подбираю...' : 'Генерировать'}
               </button>
             )}
           </div>

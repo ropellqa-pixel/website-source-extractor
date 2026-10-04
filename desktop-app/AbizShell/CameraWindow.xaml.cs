@@ -16,8 +16,6 @@ namespace AbizShell
         private const string CameraNamePrefix = "Зал";
 
         private readonly string? _apiToken;
-        private readonly DispatcherTimer _clock;
-        private CameraStream? _stream;
         private bool _closing;
 
         public CameraWindow(string? apiToken)
@@ -40,11 +38,6 @@ namespace AbizShell
                 Title = Edition.Name + " — Камера Зал";
             }
 
-            _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-            _clock.Tick += (s, e) => ClockLabel.Text = DateTime.Now.ToString("HH:mm:ss");
-            _clock.Start();
-            ClockLabel.Text = DateTime.Now.ToString("HH:mm:ss");
-
             Loaded += async (s, e) => await StartAsync();
 
             Closing += (s, e) =>
@@ -66,32 +59,52 @@ namespace AbizShell
 
         private async Task StartAsync()
         {
-            ShowStatus("Подключение к камере...");
-            var (cameras, error) = await CamerasClient.ListAsync(_apiToken);
-            if (_closing) return;
-            if (cameras.Count == 0)
+            try
             {
-                ShowStatus(error ?? "Камеры не найдены");
-                await Task.Delay(5000);
-                if (!_closing) await StartAsync();
+                string dataDir = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AbizShell", "WebView2Cam");
+                var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(null, dataDir);
+                await Web.EnsureCoreWebView2Async(env);
+            }
+            catch (Exception ex)
+            {
+                ShowStatus("Не удалось запустить просмотр: " + ex.Message);
                 return;
             }
-            var cam = cameras.Find(c => c.Name.StartsWith(CameraNamePrefix, StringComparison.OrdinalIgnoreCase))
-                      ?? cameras.Find(c => c.IsDefault) ?? cameras[0];
-            CameraNameLabel.Text = cam.Name;
-            _stream = new CameraStream(_apiToken ?? "", cam.Id, Video, null, 1920, muted: true);
-            _stream.Status += t => Dispatcher.BeginInvoke(() => ShowStatus(t));
-            _stream.Started += () => Dispatcher.BeginInvoke(() => StatusBox.Visibility = Visibility.Collapsed);
-            await _stream.StartAsync();
+            if (_closing) return;
+            var core = Web.CoreWebView2;
+            core.Settings.AreDefaultContextMenusEnabled = false;
+            core.Settings.AreDevToolsEnabled = false;
+            core.Settings.IsStatusBarEnabled = false;
+            core.Settings.UserAgent = core.Settings.UserAgent + " ABIZ/" + RemoteControlClient.AppVersion;
+            core.NewWindowRequested += (s, a) => a.Handled = true;
+            core.NavigationCompleted += (s, a) =>
+            {
+                if (a.IsSuccess) StatusBox.Visibility = Visibility.Collapsed;
+                else ShowStatus("Нет связи с сервером. Повтор через 5 секунд...");
+                if (!a.IsSuccess) _ = RetryAsync();
+            };
+            Open();
+        }
+
+        private void Open()
+        {
+            if (_closing || Web.CoreWebView2 == null) return;
+            string token = Uri.EscapeDataString(_apiToken ?? "");
+            Web.CoreWebView2.Navigate($"https://anod.saou.ru/cam-view?name={Uri.EscapeDataString(CameraNamePrefix)}#t={token}");
+        }
+
+        private async Task RetryAsync()
+        {
+            await Task.Delay(5000);
+            Open();
         }
 
         private void Cleanup()
         {
             if (_closing) return;
             _closing = true;
-            _clock.Stop();
-            _stream?.Dispose();
-            _stream = null;
+            try { Web.Dispose(); } catch { }
         }
 
         private bool _goingToLogin;

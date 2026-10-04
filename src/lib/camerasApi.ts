@@ -28,7 +28,7 @@ export async function camerasCall<T = Record<string, unknown>>(body: Record<stri
 
 async function camerasCallOnce<T>(body: Record<string, unknown>): Promise<T & { error?: string }> {
   let token = '';
-  try { token = localStorage.getItem('anod_session_token') || ''; } catch { /* */ }
+  try { token = localStorage.getItem('anod_session_token') || sessionStorage.getItem('abiz_device_token') || ''; } catch { /* */ }
   try {
     const res = await fetch(URL, {
       method: 'POST',

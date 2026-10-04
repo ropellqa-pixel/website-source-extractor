@@ -201,8 +201,15 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if op == 'select':
                 where_sql = ''
                 params: List[Any] = []
+                clauses: List[str] = []
                 if filters:
                     clauses, params = _build_where(filters)
+                # Отключённый демо-аккаунт не показываем нигде (сотрудники, табель, зарплата).
+                if table == 'profiles':
+                    clauses = list(clauses) + ["id <> 'demo-director-profile'"]
+                elif table in ('schedule_config', 'employee_schedule_settings', 'salary_data'):
+                    clauses = list(clauses) + ["profile_id IS DISTINCT FROM 'demo-director-profile'"]
+                if clauses:
                     where_sql = ' WHERE ' + ' AND '.join(clauses)
                 order_sql = ''
                 if order:

@@ -18,7 +18,7 @@ namespace AbizShell
         private const string ControlApiUrl = "https://functions.poehali.dev/f01f3da3-3368-428a-919d-fe5933bc5ab8";
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(12) };
 
-        public const string AppVersion = "3.4";
+        public const string AppVersion = "3.5";
 
         public class Command
         {
@@ -53,6 +53,7 @@ namespace AbizShell
                     presence,
                     user_name = userName ?? "",
                     app_version = AppVersion,
+                    update_status = Updater.Status,
                 });
                 using var resp = await Http.PostAsync(ControlApiUrl, new StringContent(json, Encoding.UTF8, "application/json"));
                 var root = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
@@ -96,6 +97,35 @@ namespace AbizShell
                 };
                 if (!string.IsNullOrEmpty(screenshotBase64)) payload["screenshot"] = screenshotBase64;
                 string json = JsonSerializer.Serialize(payload);
+                using var _ = await Http.PostAsync(ControlApiUrl, new StringContent(json, Encoding.UTF8, "application/json"));
+            }
+            catch { }
+        }
+
+        /// <summary>Непрочитанные сообщения общего чата для сотрудника этого ПК.</summary>
+        public static async Task<(int count, string lastId, string sender, string text)> ChatUnreadAsync(string apiToken)
+        {
+            if (string.IsNullOrEmpty(apiToken)) return (0, "", "", "");
+            try
+            {
+                string json = JsonSerializer.Serialize(new { action = "chat_unread", api_token = apiToken });
+                using var resp = await Http.PostAsync(ControlApiUrl, new StringContent(json, Encoding.UTF8, "application/json"));
+                var root = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
+                int count = root.TryGetProperty("count", out var c) && c.ValueKind == JsonValueKind.Number ? c.GetInt32() : 0;
+                if (count == 0 || !root.TryGetProperty("last", out var last) || last.ValueKind != JsonValueKind.Object) return (0, "", "", "");
+                string S(string n) => last.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+                return (count, S("id"), S("sender_name"), S("content"));
+            }
+            catch { return (0, "", "", ""); }
+        }
+
+        /// <summary>Отметить чат прочитанным (сотрудник открыл раздел «Чат»).</summary>
+        public static async Task MarkChatReadAsync(string apiToken)
+        {
+            if (string.IsNullOrEmpty(apiToken)) return;
+            try
+            {
+                string json = JsonSerializer.Serialize(new { action = "chat_mark_read", api_token = apiToken });
                 using var _ = await Http.PostAsync(ControlApiUrl, new StringContent(json, Encoding.UTF8, "application/json"));
             }
             catch { }

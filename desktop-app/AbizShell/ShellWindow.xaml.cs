@@ -79,7 +79,7 @@ namespace AbizShell
             _remoteDesktopTimer.Tick += (s, e) => AutoAcceptRemoteDesktop();
             _remoteDesktopTimer.Start();
 
-            _notificationTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(120) };
+            _notificationTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
             _notificationTimer.Tick += async (s, e) => await CheckNotificationsAsync();
             _notificationTimer.Start();
         }
@@ -116,7 +116,6 @@ namespace AbizShell
             }
             _keyboardHook?.Dispose();
             _keyboardHook = null;
-            if (_cameras != null) { try { _cameras.Close(); } catch { } _cameras = null; }
             if (_explorer != null) { _explorer.ForceClose(); _explorer = null; }
             if (_topBar != null) { _topBar.ForceClose(); _topBar = null; }
         }
@@ -214,6 +213,21 @@ namespace AbizShell
                 // Сотрудник работает — не перебиваем: показываем уведомление, установка при выходе на экран входа.
                 OnUpdateReady = () => ShowNotification("\U0001F504", "Доступно обновление АБИЗ " + Updater.StagedVersion,
                     "Установится автоматически при выходе на экран входа (кнопка 🔒)."),
+                // Зам нажал «Обновить программу» — ставим сразу, программа перезапустится за ~10 секунд.
+                OnForceUpdate = () =>
+                {
+                    ShowNotification("\U0001F504", "Обновление АБИЗ " + Updater.StagedVersion, "Программа перезапустится через 5 секунд.");
+                    var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+                    t.Tick += (s2, e2) =>
+                    {
+                        t.Stop();
+                        if (!Updater.ApplyAndRestart()) return;
+                        TaskbarManager.Restore();
+                        ForceCloseForExit();
+                        Application.Current.Shutdown();
+                    };
+                    t.Start();
+                },
             };
             _remoteAgent.Start();
         }
@@ -281,6 +295,8 @@ namespace AbizShell
             core.Settings.IsZoomControlEnabled = true;
             core.Settings.IsStatusBarEnabled = false;
             core.Settings.AreBrowserAcceleratorKeysEnabled = true;
+            // Сайт узнаёт программу по этой метке и включает свой быстрый плеер камер.
+            core.Settings.UserAgent = core.Settings.UserAgent + " ABIZ/" + RemoteControlClient.AppVersion;
 
             // Ссылки «в новом окне» открываем в этом же браузере, а не в отдельном окне.
             core.NewWindowRequested += (s, a) =>
@@ -289,13 +305,11 @@ namespace AbizShell
                 try { core.Navigate(a.Uri); } catch { }
             };
 
-            // Раздел сайта «Камеры» внутри программы открываем родным окном камер (встроенный
-            // видеодекодер, H.265 без кодеков Windows). Сайт при этом остаётся на прежней странице.
-            core.SourceChanged += (s, a) => Dispatcher.BeginInvoke(new Action(InterceptCamerasPage));
-            core.NavigationStarting += (s, a) =>
+            // Камеры показывает сам сайт (свой декодер H.265 в браузере) — быстро и без лишних окон.
+            core.SourceChanged += (s, a) => Dispatcher.BeginInvoke(new Action(() =>
             {
-                if (IsCamerasUrl(a.Uri)) { a.Cancel = true; Dispatcher.BeginInvoke(new Action(OpenCamerasSection)); }
-            };
+                if (IsChatOpen()) _ = RemoteControlClient.MarkChatReadAsync(ApiToken);
+            }));
 
             await PasswordVault.AttachAsync(core);
 
@@ -319,20 +333,6 @@ namespace AbizShell
             {
                 MessageBox.Show(this, "Не удалось открыть: " + url, "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
-        }
-
-        private static bool IsCamerasUrl(string? url) =>
-            Uri.TryCreate(url, UriKind.Absolute, out var u)
-            && u.Host.EndsWith("anod.saou.ru", StringComparison.OrdinalIgnoreCase)
-            && u.AbsolutePath.TrimEnd('/').Equals("/cameras", StringComparison.OrdinalIgnoreCase);
-
-        // Сайт переходит между разделами без перезагрузки страницы — ловим смену адреса.
-        private void InterceptCamerasPage()
-        {
-            var core = MainBrowser.CoreWebView2;
-            if (core == null || !IsCamerasUrl(core.Source)) return;
-            if (core.CanGoBack) core.GoBack(); else NavigateBrowser(HomePage);
-            OpenCamerasSection();
         }
 
         public void GoHome() => NavigateBrowser(HomePage);
@@ -488,24 +488,25 @@ namespace AbizShell
             try { Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true }); } catch { }
         }
 
-        private CamerasWindow? _cameras;
-
-        /// <summary>Открыть раздел «Камеры» — живое видео всех камер через встроенный VLC.</summary>
+        /// <summary>Раздел «Камеры»: открываем страницу камер сайта во встроенном браузере (уже со входом).</summary>
         public void OpenCamerasSection()
         {
-            if (_cameras != null && _cameras.IsLoaded)
-            {
-                if (_cameras.WindowState == WindowState.Minimized) _cameras.WindowState = WindowState.Normal;
-                _cameras.Show();
-                _cameras.Activate();
-                return;
-            }
-            _cameras = new CamerasWindow(ApiToken) { Owner = this };
-            _cameras.Closed += (s, e) => _cameras = null;
-            _cameras.Show();
-            _cameras.Activate();
+            string cur = Browser?.Source ?? "";
+            if (cur.StartsWith("https://anod.saou.ru/", StringComparison.OrdinalIgnoreCase) && !cur.Contains("/login"))
+                NavigateBrowser("https://anod.saou.ru/cameras");
+            else
+                _ = OpenSitePageLoggedInAsync("/cameras");
         }
 
+        private async Task OpenSitePageLoggedInAsync(string path)
+        {
+            string? code = string.IsNullOrEmpty(ApiToken) ? null : await AnodBizClient.RequestLoginLinkAsync(ApiToken);
+            NavigateBrowser(!string.IsNullOrEmpty(code)
+                ? $"https://anod.saou.ru/device-login?code={code}&next={Uri.EscapeDataString(path)}"
+                : "https://anod.saou.ru" + path);
+        }
+
+        /// <summary>Загрузить пароли из файла, выгруженного из Яндекс Браузера (или Chrome/Edge).</summary>
         // --- Удалённый доступ RuDesktop ---
 
         private void AutoAcceptRemoteDesktop()
@@ -659,34 +660,17 @@ namespace AbizShell
             if (_client == null) return;
             try
             {
-                // Непрочитанные сообщения чата — показываем автора и текст последнего.
-                var chatResult = await _client.QueryAsync(new
+                // Непрочитанное считает сервер для этого сотрудника: сообщения, которые он уже
+                // открыл в чате (на сайте или в программе), больше не всплывают. Каждое — один раз.
+                var (count, lastId, sender, text) = await RemoteControlClient.ChatUnreadAsync(ApiToken);
+                if (count > 0 && lastId != _lastChatNotified && !IsChatOpen())
                 {
-                    table = "chat_messages",
-                    op = "select",
-                    filters = new[] { new { col = "read", op = "eq", value = "false" } },
-                    order = new { col = "created_at", ascending = false },
-                    limit = 1,
-                });
-                var latest = FirstRow(chatResult);
-                if (latest.HasValue)
-                {
-                    string id = GetStr(latest.Value, "id");
-                    if (id != _lastChatNotified)
-                    {
-                        _lastChatNotified = id;
-                        string sender = GetStr(latest.Value, "sender_name");
-                        string text = GetStr(latest.Value, "content");
-                        if (text.Length > 120) text = text.Substring(0, 120) + "…";
-                        ShowNotification("\U0001F4AC",
-                            string.IsNullOrEmpty(sender) ? "Новое сообщение" : "Сообщение от " + sender,
-                            string.IsNullOrEmpty(text) ? "Откройте рабочий чат" : text);
-                        return;
-                    }
-                }
-                else
-                {
-                    _lastChatNotified = "";
+                    _lastChatNotified = lastId;
+                    if (text.Length > 120) text = text.Substring(0, 120) + "…";
+                    ShowNotification("\U0001F4AC",
+                        count == 1 ? (string.IsNullOrEmpty(sender) ? "Новое сообщение" : "Сообщение от " + sender) : $"Новых сообщений: {count}",
+                        string.IsNullOrEmpty(text) ? "Откройте рабочий чат" : text);
+                    return;
                 }
 
                 // Незакрытая инкассация — напоминаем один раз, пока не закроют.
@@ -711,6 +695,12 @@ namespace AbizShell
                 }
             }
             catch { }
+        }
+
+        private bool IsChatOpen()
+        {
+            var url = Browser?.Source ?? "";
+            return url.Contains("/chat", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool HasRows(JsonElement result) =>

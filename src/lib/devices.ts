@@ -74,6 +74,7 @@ export interface DeviceStatus extends Device {
   remote_lock: boolean;
   screenshot_url: string | null;
   screenshot_at: string | null;
+  update_status: string | null;
 }
 
 export interface DeviceLogEntry {
