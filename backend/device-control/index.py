@@ -216,6 +216,46 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                  body.get('message') or '', device.get('hostname'))
             return _resp(200, {'ok': True})
 
+        if action in ('chat_unread', 'chat_mark_read'):
+            # Непрочитанное в общем чате — для конкретного человека (сайт: сессия, программа: токен ПК).
+            uid = None
+            device = _device_by_token(cur, event, body) if body.get('api_token') else None
+            if device:
+                cur.execute(f'SELECT user_id FROM {SCHEMA}.api_tokens WHERE token = %s', (body.get('api_token'),))
+                r = cur.fetchone()
+                uid = r[0] if r else None
+            else:
+                su = _site_user(cur, event)
+                uid = su['id'] if su else None
+            if not uid:
+                return _resp(401, {'error': 'Требуется вход'})
+            cur.execute(f"SELECT id FROM {SCHEMA}.chat_rooms WHERE name = 'РАБОЧИЙ' LIMIT 1")
+            room = cur.fetchone()
+            if not room:
+                return _resp(200, {'count': 0})
+            if action == 'chat_mark_read':
+                cur.execute(
+                    f'INSERT INTO {SCHEMA}.chat_reads (user_id, room_id, last_read_at) VALUES (%s, %s, now()) '
+                    f'ON CONFLICT (user_id, room_id) DO UPDATE SET last_read_at = now()', (uid, room[0]))
+                return _resp(200, {'ok': True})
+            cur.execute(f'SELECT last_read_at FROM {SCHEMA}.chat_reads WHERE user_id = %s AND room_id = %s', (uid, room[0]))
+            lr = cur.fetchone()
+            since = lr[0] if lr else None
+            cur.execute(
+                f'SELECT id, sender_name, content, created_at FROM {SCHEMA}.chat_messages '
+                f'WHERE room_id = %s AND sender_id <> %s AND (%s::timestamptz IS NULL OR created_at > %s) '
+                f'ORDER BY created_at DESC LIMIT 20', (room[0], uid, since, since))
+            rows = cur.fetchall()
+            if since is None:
+                # Первый раз: старую переписку прочитанной не показываем как новую.
+                cur.execute(
+                    f'INSERT INTO {SCHEMA}.chat_reads (user_id, room_id, last_read_at) VALUES (%s, %s, now()) '
+                    f'ON CONFLICT DO NOTHING', (uid, room[0]))
+                return _resp(200, {'count': 0})
+            last = rows[0] if rows else None
+            return _resp(200, {'count': len(rows),
+                               'last': {'id': last[0], 'sender_name': last[1], 'content': last[2]} if last else None})
+
         if action == 'check_update':
             # ПК спрашивает, есть ли новая версия для его редакции (abiz / admin).
             device = _device_by_token(cur, event, body)
