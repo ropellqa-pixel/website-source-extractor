@@ -76,16 +76,13 @@ namespace AbizShell
 
         private IntPtr Handle => new WindowInteropHelper(this).Handle;
 
+        // Панель всегда одна и всегда в самом верху экрана: место под неё задаётся напрямую
+        // (см. ScreenArea), без регистрации «панели экрана» — так отступы не накапливаются.
         private void RegisterAppBar()
         {
             try
             {
-                var src = HwndSource.FromHwnd(Handle);
-                src?.AddHook(WndProc);
-                _appBarMessage = NativeMethods.RegisterWindowMessage("AbizShellAppBar");
-                var data = NewData();
-                data.uCallbackMessage = _appBarMessage;
-                NativeMethods.SHAppBarMessage(NativeMethods.ABM_NEW, ref data);
+                HwndSource.FromHwnd(Handle)?.AddHook(WndProc);
                 _appBarRegistered = true;
                 SetPosition();
             }
@@ -98,31 +95,16 @@ namespace AbizShell
             var dpi = VisualTreeHelper.GetDpi(this);
             int widthPx = NativeMethods.GetSystemMetrics(0);
             int heightPx = (int)Math.Ceiling(Height * dpi.DpiScaleY);
-
-            var data = NewData();
-            data.uEdge = NativeMethods.ABE_TOP;
-            data.rc.left = 0;
-            data.rc.right = widthPx;
-            data.rc.top = 0;
-            data.rc.bottom = heightPx;
-            NativeMethods.SHAppBarMessage(NativeMethods.ABM_QUERYPOS, ref data);
-            data.rc.bottom = data.rc.top + heightPx;
-            NativeMethods.SHAppBarMessage(NativeMethods.ABM_SETPOS, ref data);
-            NativeMethods.MoveWindow(Handle, data.rc.left, data.rc.top, data.rc.right - data.rc.left, heightPx, true);
-
+            NativeMethods.MoveWindow(Handle, 0, 0, widthPx, heightPx, true);
+            ScreenArea.ReserveTop(heightPx);
             Dispatcher.BeginInvoke(new Action(() => WorkAreaChanged?.Invoke()), DispatcherPriority.Background);
         }
 
         private void UnregisterAppBar()
         {
             if (!_appBarRegistered) return;
-            try
-            {
-                var data = NewData();
-                NativeMethods.SHAppBarMessage(NativeMethods.ABM_REMOVE, ref data);
-            }
-            catch { }
             _appBarRegistered = false;
+            ScreenArea.Reset();
         }
 
         private NativeMethods.APPBARDATA NewData()
@@ -135,8 +117,10 @@ namespace AbizShell
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
-            if (_appBarRegistered && msg == (int)_appBarMessage && wParam.ToInt32() == NativeMethods.ABN_POSCHANGED)
-                SetPosition();
+            // Сменилось разрешение или подключили монитор — заново ставим панель и область.
+            const int WM_DISPLAYCHANGE = 0x007E;
+            if (_appBarRegistered && msg == WM_DISPLAYCHANGE)
+                Dispatcher.BeginInvoke(new Action(SetPosition), DispatcherPriority.Background);
             return IntPtr.Zero;
         }
 

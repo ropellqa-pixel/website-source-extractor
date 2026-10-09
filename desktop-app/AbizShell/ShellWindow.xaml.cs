@@ -251,12 +251,12 @@ namespace AbizShell
         public void FitToWorkArea()
         {
             if (!Edition.Kiosk) return;
-            var wa = SystemParameters.WorkArea;
+            // Ровно под панелью, до низа экрана — не зависит от того, что Windows считает рабочей областью.
             WindowState = WindowState.Normal;
-            Left = wa.Left;
-            Top = wa.Top;
-            Width = wa.Width;
-            Height = wa.Height;
+            Left = 0;
+            Top = TopBarWindow.BarHeight;
+            Width = SystemParameters.PrimaryScreenWidth;
+            Height = SystemParameters.PrimaryScreenHeight - TopBarWindow.BarHeight;
         }
 
         // --- Браузер ---

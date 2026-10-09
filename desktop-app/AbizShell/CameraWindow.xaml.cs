@@ -25,11 +25,10 @@ namespace AbizShell
 
             if (Edition.Kiosk)
             {
-                WindowStyle = WindowStyle.None;
-                ResizeMode = ResizeMode.NoResize;
-                WindowState = WindowState.Maximized;
                 ShowInTaskbar = false;
-                StateChanged += (s, e) => { if (WindowState == WindowState.Minimized) WindowState = WindowState.Maximized; };
+                ScreenArea.Reset();
+                ScreenArea.CoverScreen(this);
+                StateChanged += (s, e) => { if (WindowState != WindowState.Normal) ScreenArea.CoverScreen(this); };
             }
             else
             {

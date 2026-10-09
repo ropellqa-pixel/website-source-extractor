@@ -34,10 +34,13 @@ namespace AbizShell
 
             if (Edition.Kiosk)
             {
+                // Экран входа — точно на весь монитор; заодно сбрасываем область экрана
+                // (на случай, если прошлый сеанс оставил отступ).
+                ScreenArea.Reset();
+                ScreenArea.CoverScreen(this);
                 StateChanged += (s, e) =>
                 {
-                    if (WindowState == WindowState.Minimized)
-                        WindowState = WindowState.Maximized;
+                    if (WindowState != WindowState.Normal) ScreenArea.CoverScreen(this);
                 };
             }
             else

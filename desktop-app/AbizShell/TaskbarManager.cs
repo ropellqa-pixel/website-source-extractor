@@ -29,6 +29,7 @@ namespace AbizShell
 
         public static void Restore()
         {
+            ScreenArea.Reset();
             if (!_hidden) return;
             try
             {

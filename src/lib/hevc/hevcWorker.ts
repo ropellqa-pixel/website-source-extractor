@@ -32,7 +32,11 @@ async function loop(url: string, gen: number, live: boolean) {
   let lastNew = Date.now();
   while (running && gen === generation) {
     try {
-      const r = await fetchWithTimeout(url, 8000);
+      // Плейлист облако обычно отдаёт за 10–50 мс; если запрос «повис» — бросаем его через 2,5 с
+      // и сразу спрашиваем снова (а не ждём 8 с): видео в запасе продолжает идти.
+      const r = await fetchWithTimeout(url, 2500);
+      // Ссылка устарела (облако отвечает ошибкой) — сразу просим новую, не ждём повторов.
+      if (!r.ok && first) { post({ type: 'error', message: 'playlist ' + r.status }); running = false; return; }
       if (!r.ok) throw new Error('playlist ' + r.status);
       const text = await r.text();
       const base = url.slice(0, url.lastIndexOf('/') + 1);
@@ -43,16 +47,20 @@ async function loop(url: string, gen: number, live: boolean) {
         if (l.startsWith('#EXTINF:')) dur = parseFloat(l.slice(8)) || 1;
         else if (l && !l.startsWith('#')) segs.push({ url: l.startsWith('http') ? l : base + l, dur });
       }
-      // На старте берём только самый свежий кусок — картинка «вживую», без отставания.
-      // Архив — все куски по порядку; эфир — только самый свежий на старте.
-      const todo = first && live ? segs.slice(-1) : segs.filter(s => !seen.has(s.url));
+      // Эфир: на старте два последних куска — картинка появляется сразу и есть запас на загрузку
+      // следующего. Архив — все куски по порядку.
+      const todo = first && live ? segs.slice(-3) : segs.filter(s => !seen.has(s.url));
       if (first && live) segs.forEach(s => seen.add(s.url));
       const ended = !live && text.includes('#EXT-X-ENDLIST');
       for (const s of todo) {
         if (!running || gen !== generation) return;
         seen.add(s.url);
         lastNew = Date.now();
-        const sr = await fetchWithTimeout(s.url, 10000);
+        let sr: Response | null = null;
+        for (let a = 0; a < 3 && !sr; a++) {
+          try { sr = await fetchWithTimeout(s.url, 4000); } catch { /* повтор */ }
+        }
+        if (!sr) continue;
         if (!sr.ok || !decoder) continue;
         const es = extractHevcFromTs(new Uint8Array(await sr.arrayBuffer()));
         if (!es.length) continue;
@@ -70,18 +78,21 @@ async function loop(url: string, gen: number, live: boolean) {
       }
       if (ended && todo.length === 0) { post({ type: 'ended' }); return; }
       // Эфир «замёрз» (облако перестало давать новые куски) — просим страницу взять свежую ссылку.
-      if (live && Date.now() - lastNew > 25000) { post({ type: 'error', message: 'stalled' }); running = false; return; }
+      if (live && Date.now() - lastNew > (first ? 10000 : 20000)) { post({ type: 'error', message: 'stalled' }); running = false; return; }
       if (!live) {
         // Архив качаем с опережением, но не забиваем память: ждём, пока страница покажет кадры.
         while (backlog > 120 && running && gen === generation) await sleep(200);
       }
       if (seen.size > 400) { const keep = new Set(segs.map(s => s.url)); seen.clear(); keep.forEach(k => seen.add(k)); }
       errors = 0;
-      await sleep(600);
+      // Новый кусок появляется раз в 1–3 с — спрашиваем почаще, чтобы забрать его сразу.
+      await sleep(todo.length ? 300 : 450);
     } catch (e) {
+      // Обрывы и «зависания» облака — частые и короткие. Переподключаемся с новой ссылкой
+      // только если связи нет ~15 с подряд; до этого просто повторяем, картинка идёт из запаса.
       errors++;
-      if (errors >= 3) { post({ type: 'error', message: String(e) }); running = false; return; }
-      await sleep(1200);
+      if (errors >= 8) { post({ type: 'error', message: String(e) }); running = false; return; }
+      await sleep(errors < 3 ? 200 : 1000);
     }
   }
 }

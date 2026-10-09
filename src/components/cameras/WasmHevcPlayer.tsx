@@ -11,6 +11,10 @@ interface Props {
   onTime?: (sec: number) => void;
 }
 
+// Замер плавности (только при ?camdiag в адресе) — для проверки после изменений.
+const DIAG: number[] | null = typeof location !== 'undefined' && location.search.includes('camdiag')
+  ? ((window as unknown as { __camDraws: number[] }).__camDraws = []) : null;
+
 interface FrameMsg { type: 'frame'; w: number; h: number; cw: number; ch: number; y: Uint8Array; u: Uint8Array; v: Uint8Array; pace: number }
 
 /**
@@ -38,23 +42,46 @@ export default function WasmHevcPlayer({ src, loading, error, onFatal, live = tr
     let shown = 0;
     let played = 0;
 
-    // Плавная подача кадров с частотой камеры; если накопилось много — догоняем, чтобы не отставать.
+    // Плавная подача кадров, как у обычного видеоплеера: держим запас ~1 кусок видео.
+    // Камера отдаёт куски по 1–3 с, и следующий приходит только после того, как снят целиком,
+    // поэтому без запаса картинка «ехала» и замирала на время загрузки следующего куска.
+    let waiting = true;
+    let waitStart = 0;
     const tick = (now: number) => {
       if (stopped) return;
-      if (queue.length && now >= nextAt) {
-        if (live) while (queue.length > 24) queue.shift();
+      const pace = queue.length ? queue[0].pace : 83;
+      const bufferedMs = queue.length * pace;
+      if (waiting && !waitStart && queue.length) waitStart = now;
+      if (waiting) {
+        // Пока копится запас ~2 с, показываем первый кадр как картинку — экран не чёрный.
+        // Запас нужен, потому что облако выдаёт видео кусками по 3 с и иногда задерживает кусок.
+        if (shown === 0 && queue.length) { painter.draw(queue[0]); shown = 1; setBuffering(false); }
+        if (bufferedMs >= 2000 || (!live && queue.length > 0) || (waitStart && now - waitStart > 2500 && queue.length > 0)) { waiting = false; nextAt = now; }
+      }
+      if (!waiting && queue.length && now >= nextAt) {
         const f = queue.shift()!;
         painter.draw(f);
         shown++;
+        if (DIAG) DIAG.push(now);
         if (!live) {
           worker.postMessage({ type: 'shown', n: 1 });
           played += f.pace / 1000;
           if (shown % 6 === 0) timeRef.current?.(played);
         }
-        const speedUp = live && queue.length > 12 ? 0.6 : 1;
-        nextAt = Math.max(now, nextAt) + f.pace * speedUp;
-        if (nextAt < now - 500) nextAt = now;
+        // Мягкая подстройка скорости: запаса много — чуть быстрее (догоняем эфир), мало — чуть медленнее.
+        let k = 1;
+        if (live) {
+          const left = queue.length * f.pace;
+          // Цель — держать ~3–4 с запаса: облако иногда задерживает кусок видео до 5 с.
+          if (left > 8000) k = 0.85;
+          else if (left > 5000) k = 0.95;
+          else if (left < 1500) k = 1.25;
+          else if (left < 3000) k = 1.1;
+        }
+        nextAt = Math.max(nextAt + f.pace * k, now - 100);
       }
+      if (!waiting && live && queue.length === 0) { waiting = true; waitStart = 0; }
+      if (live && queue.length > 400) queue.splice(0, queue.length - 120);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -67,7 +94,6 @@ export default function WasmHevcPlayer({ src, loading, error, onFatal, live = tr
     worker.onmessage = (e: MessageEvent) => {
       const m = e.data;
       if (m.type === 'frame') { lastFrame = Date.now(); queue.push(m as FrameMsg); }
-      else if (m.type === 'playing') setBuffering(false);
       else if (m.type === 'error') fatalRef.current?.();
     };
     worker.onerror = () => fatalRef.current?.();

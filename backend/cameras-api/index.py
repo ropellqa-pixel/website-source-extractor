@@ -81,7 +81,7 @@ def _camera_token(cur, cam: Dict[str, Any], force: bool = False) -> Optional[str
     token = _cloud_token(cam['serial'])
     if token and cam.get('id'):
         cur.execute(f'UPDATE {SCHEMA}.cameras SET cloud_token = %s, cloud_token_expires = %s WHERE id = %s',
-                    (token, now + timedelta(hours=12), cam['id']))
+                    (token, now + timedelta(hours=3), cam['id']))
     return token
 
 
@@ -127,34 +127,46 @@ def _budget(reserve: float = 0.4) -> float:
     return max(1.0, left)
 
 
-def _fetch_live(cam: Dict[str, Any], token: str, stream: str) -> Dict[str, Any]:
+def _fetch_live(cam: Dict[str, Any], token: str, stream: str, timeout: Optional[float] = None) -> Dict[str, Any]:
     """Один запрос ссылки к облаку. Ждём столько, сколько позволяет лимит функции."""
     return _rds(token, 'livestream', {
         'mediaType': 'hls', 'protocol': 'ts', 'channel': '0', 'stream': stream,
         'username': cam['username'], 'password': cam['password'], 'expireTime': _expire_ms(),
-    }, timeout=_budget())
+    }, timeout=timeout or _budget())
+
+
+def _url_alive(url: str, timeout: float = 1.2) -> bool:
+    """Ссылка облака ещё работает? Облако иногда «забывает» ссылки раньше срока — тогда отвечает 400."""
+    try:
+        r = requests.get(url, timeout=timeout)
+        return r.status_code == 200 and '#EXTM3U' in r.text[:20]
+    except Exception:
+        return False
 
 
 def _live_url(cur, cam: Dict[str, Any], quality: str, fresh: bool = False) -> Dict[str, Any]:
-    """Ссылка на живое видео. Готовая ссылка облака живёт долго, поэтому кэшируем её на 20 минут —
-    повторные открытия камеры мгновенные. fresh=True — принудительно новая (если старая перестала играть)."""
+    """Ссылка на живое видео. Готовая ссылка облака кэшируется: перед выдачей быстро проверяем,
+    что она ещё жива (≈0,1 с), иначе сразу берём новую — плеер не ждёт впустую на мёртвой ссылке."""
     q = 'hd' if quality == 'hd' else 'sd'
     stream = '0' if q == 'hd' else '1'
     cur.execute(f'SELECT live_url_{q}, live_url_{q}_at FROM {SCHEMA}.cameras WHERE id = %s', (cam['id'],))
     row = cur.fetchone()
     now = datetime.now(timezone.utc)
-    if not fresh and row and row[0] and row[1] and now - row[1] < timedelta(minutes=LIVE_CACHE_MINUTES):
+    if not fresh and row and row[0] and row[1] and now - row[1] < timedelta(minutes=LIVE_CACHE_MINUTES) and _url_alive(row[0]):
         return {'url': row[0], 'cached': True}
 
     token = _camera_token(cur, cam)
     if not token:
         return {'error': 'Камера не найдена в облаке. Проверьте, что камера в сети'}
-    data = _fetch_live(cam, token, stream)
+    # Облако привязывает токен к своему узлу; если узел «завис», ответа нет 15+ секунд.
+    # Поэтому со старым токеном ждём недолго и сразу берём новый — с ним ответ ~1 с.
+    data = _fetch_live(cam, token, stream, timeout=1.6)
+    if _ret_error(data):
+        token = _camera_token(cur, cam, force=True)
+        if token:
+            data = _fetch_live(cam, token, stream)
     err = _ret_error(data)
     if err:
-        # Старая ссылка всё равно лучше, чем ничего: облако часто держит её дольше кэша.
-        if row and row[0]:
-            return {'url': row[0], 'cached': True}
         return {'error': err}
     url = data['data']['url']
     cur.execute(f'UPDATE {SCHEMA}.cameras SET live_url_{q} = %s, live_url_{q}_at = now() WHERE id = %s', (url, cam['id']))
@@ -175,7 +187,7 @@ def _live_all(cur, quality: str) -> Dict[str, Any]:
         if url and at and now - at < timedelta(minutes=LIVE_CACHE_MINUTES):
             result[cam['id']] = {'url': url}
         else:
-            need.append((cam, url))
+            need.append((cam, None))
 
     if need:
         nowt = datetime.now(timezone.utc)
@@ -191,7 +203,12 @@ def _live_all(cur, quality: str) -> Dict[str, Any]:
             new_tok = tok if tok and not cached_tok else None
             if not tok:
                 return cam['id'], ({'url': old} if old else {'error': 'Камера не в сети'}), None, None
-            data = _fetch_live(cam, tok, stream)
+            data = _fetch_live(cam, tok, stream, timeout=1.6 if cached_tok else None)
+            if _ret_error(data) and cached_tok:
+                tok = _cloud_token(cam['serial'])
+                new_tok = tok
+                if tok:
+                    data = _fetch_live(cam, tok, stream)
             err = _ret_error(data)
             if err:
                 return cam['id'], ({'url': old} if old else {'error': err}), None, new_tok
@@ -205,7 +222,7 @@ def _live_all(cur, quality: str) -> Dict[str, Any]:
                                 (new_url, cam_id))
                 if new_tok:
                     cur.execute(f'UPDATE {SCHEMA}.cameras SET cloud_token = %s, cloud_token_expires = %s WHERE id = %s',
-                                (new_tok, datetime.now(timezone.utc) + timedelta(hours=12), cam_id))
+                                (new_tok, datetime.now(timezone.utc) + timedelta(hours=3), cam_id))
     return {'streams': result}
 
 

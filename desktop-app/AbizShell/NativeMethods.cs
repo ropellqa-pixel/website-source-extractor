@@ -63,6 +63,11 @@ namespace AbizShell
 
         [DllImport("shell32.dll")] public static extern UIntPtr SHAppBarMessage(uint msg, ref APPBARDATA data);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool SystemParametersInfo(uint action, uint param, ref RECT rect, uint winIni);
+        public const uint SPI_GETWORKAREA = 0x0030, SPI_SETWORKAREA = 0x002F;
+        public const uint SPIF_SENDCHANGE = 0x02;
+
         public static string GetText(IntPtr hWnd)
         {
             int len = GetWindowTextLength(hWnd);

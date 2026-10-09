@@ -14,7 +14,8 @@ namespace AbizShell
         public RemoteOverlayWindow()
         {
             InitializeComponent();
-            StateChanged += (s, e) => { if (WindowState == WindowState.Minimized) WindowState = WindowState.Maximized; };
+            ScreenArea.CoverScreen(this);
+            StateChanged += (s, e) => { if (WindowState != WindowState.Normal) ScreenArea.CoverScreen(this); };
             Closing += (s, e) => { if (_isLock && !_allowClose) e.Cancel = true; };
         }
 

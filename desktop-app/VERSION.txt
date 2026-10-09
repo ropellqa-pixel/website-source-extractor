@@ -1,2 +1,2 @@
-ABIZ project version 17 (program 3.5)
-Cameras via site player (WASM H.265), no VLC. Chat read-tracking. Reliable auto-update with rollback.
+ABIZ project version 18 (program 3.6)
+Fix: screens no longer shift down (work area set directly). Faster, smoother cameras.

@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="АБИЗ"
         WindowStyle="None" Topmost="False"
-        WindowState="Maximized"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterScreen" Background="#0D0D14">
 
@@ -99,7 +98,7 @@
 
         <TextBlock VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="20,0,0,16"
                    Foreground="#22FFFFFF" FontSize="11"
-                   x:Name="VersionLabel" Text="АБИЗ Shell v3.5"/>
+                   x:Name="VersionLabel" Text="АБИЗ Shell v3.6"/>
 
         <!-- Кнопка выхода в Windows: спрашивает пароль администратора. Нужна, чтобы из
              программы всегда был выход, даже если рабочий стол АБИЗ не открывается. -->
