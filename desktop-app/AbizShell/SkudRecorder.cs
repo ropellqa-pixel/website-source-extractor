@@ -46,7 +46,8 @@ namespace AbizShell
         private readonly CancellationTokenSource _cts = new();
         private readonly ConcurrentDictionary<string, CameraRecording> _recordings = new();
         private string? _ffmpeg;
-        private int _keepHours = 3;
+        private int _keepHours = 72;
+        private long _maxDiskBytes = 15L * 1024 * 1024 * 1024;
         private int _partBytes = 1024 * 1024;
         private string _status = "запуск";
 
@@ -109,6 +110,7 @@ namespace AbizShell
                     else
                     {
                         if (poll.TryGetProperty("keep_hours", out var kh) && kh.ValueKind == JsonValueKind.Number) _keepHours = kh.GetInt32();
+                        if (poll.TryGetProperty("max_disk_gb", out var md) && md.ValueKind == JsonValueKind.Number) _maxDiskBytes = (long)(md.GetDouble() * 1024 * 1024 * 1024);
                         if (poll.TryGetProperty("part_bytes", out var pb) && pb.ValueKind == JsonValueKind.Number) _partBytes = pb.GetInt32();
                         if (_ffmpeg == null)
                         {
@@ -151,7 +153,8 @@ namespace AbizShell
         {
             if (_recordings.IsEmpty) return "нет камер для записи";
             var parts = _recordings.Values.Select(r => $"{r.Name}: {(r.IsHealthy ? "пишет" : "переподключение")}");
-            return string.Join("; ", parts);
+            double gb = _diskUsed / (1024.0 * 1024 * 1024);
+            return string.Join("; ", parts) + string.Format(CultureInfo.GetCultureInfo("ru-RU"), " · на диске {0:0.0} из {1} ГБ", gb, _maxDiskBytes / (1024 * 1024 * 1024));
         }
 
         private void SyncCameras(JsonElement poll)
@@ -185,22 +188,47 @@ namespace AbizShell
             }
         }
 
+        /// <summary>
+        /// Запись на диске ПК не больше предела (15 ГБ): при превышении удаляются самые старые куски.
+        /// Дополнительно — если на диске осталось меньше 2 ГБ, тоже освобождаем место.
+        /// </summary>
         private void CleanupOld()
         {
             try
             {
                 if (!Directory.Exists(BaseDir)) return;
-                var border = DateTime.UtcNow.AddHours(-_keepHours - 0.5);
-                foreach (var f in Directory.EnumerateFiles(BaseDir, "*.ts", SearchOption.AllDirectories))
+                var files = Directory.EnumerateFiles(BaseDir, "*.ts", SearchOption.AllDirectories)
+                    .Select(f => (path: f, start: SegmentTime(f), info: new FileInfo(f)))
+                    .Where(x => x.start != null)
+                    .OrderBy(x => x.start)
+                    .ToList();
+                long total = files.Sum(x => x.info.Length);
+                long free = long.MaxValue;
+                try { free = new DriveInfo(Path.GetPathRoot(BaseDir)!).AvailableFreeSpace; } catch { }
+                const long minFree = 2L * 1024 * 1024 * 1024;
+                var border = DateTime.UtcNow.AddHours(-_keepHours);
+                var keepAlways = DateTime.UtcNow.AddMinutes(-3);
+                foreach (var x in files)
                 {
-                    var t = SegmentTime(f);
-                    if (t != null && t < border) TryDelete(f);
+                    bool over = total > _maxDiskBytes || free < minFree;
+                    if (!over && x.start >= border) break;
+                    if (x.start > keepAlways) break;
+                    long len = x.info.Length;
+                    TryDelete(x.path);
+                    if (!File.Exists(x.path))
+                    {
+                        total -= len;
+                        if (free != long.MaxValue) free += len;
+                    }
                 }
+                _diskUsed = total;
                 foreach (var f in Directory.EnumerateFiles(BaseDir, "clip_*.mp4", SearchOption.AllDirectories))
                     if (File.GetLastWriteTimeUtc(f) < DateTime.UtcNow.AddHours(-1)) TryDelete(f);
             }
             catch { }
         }
+
+        private long _diskUsed;
 
         // ---------------- задания на отрывки ----------------
 
@@ -226,10 +254,11 @@ namespace AbizShell
             }
             if (segments.Count == 0)
             {
-                bool tooOld = from < DateTime.UtcNow.AddHours(-_keepHours);
+                var oldest = ListSegments(dir).Select(x => (DateTime?)x.start).Min();
+                bool tooOld = oldest != null && from < oldest;
                 bool recording = _recordings.ContainsKey(cameraId);
                 string reason = !recording ? "Камера не записывалась на ПК (не выбрана или недоступна)"
-                    : tooOld ? "Запись уже удалена с ПК (хранится " + _keepHours + " ч)"
+                    : tooOld ? $"Запись уже удалена с ПК (на диске храним не больше {_maxDiskBytes / (1024 * 1024 * 1024)} ГБ)"
                     : "Нет записи за это время — камера была недоступна";
                 await PostAsync(new { action = "rec_done", id, error = reason, missing = true }, ct);
                 return;

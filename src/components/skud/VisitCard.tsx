@@ -15,7 +15,7 @@ function ClipPlayer({ clip }: { clip: SkudClip }) {
   if (clip.status === 'done' && clip.url) {
     return <video src={clip.url} controls preload="metadata" playsInline className="aspect-video w-full rounded-lg bg-black" />;
   }
-  const failed = clip.status === 'failed' || clip.status === 'missing';
+  const failed = clip.status === 'failed' || clip.status === 'missing' || clip.status === 'deleted';
   return (
     <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-lg bg-secondary px-4 text-center text-xs text-muted-foreground">
       <Icon name={failed ? 'VideoOff' : 'Loader2'} size={20} className={failed ? '' : 'animate-spin'} />

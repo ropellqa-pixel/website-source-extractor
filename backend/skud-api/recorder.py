@@ -10,7 +10,10 @@ from visits import READY_DELAY, process
 
 STUCK = timedelta(minutes=10)
 MAX_ATTEMPTS = 6
-KEEP_HOURS = 3
+KEEP_HOURS = 720
+PENDING_HOURS = 24
+PC_MAX_GB = 15
+SITE_MAX_BYTES = 6 * 1024 ** 3
 PART_BYTES = 1024 * 1024
 
 
@@ -61,7 +64,7 @@ def poll(cur, schema: str, dev: Dict[str, Any], body: Dict[str, Any]) -> Dict[st
     cur.execute(
         f"UPDATE {schema}.skud_clips SET status = 'failed', error = COALESCE(error, 'Не удалось сохранить отрывок') "
         f"WHERE status IN ('pending', 'taken') AND (attempts >= %s OR clip_to < %s)",
-        (MAX_ATTEMPTS, now - timedelta(hours=KEEP_HOURS)))
+        (MAX_ATTEMPTS, now - timedelta(hours=PENDING_HOURS)))
     cur.execute(
         f"SELECT c.id, c.camera_id, c.clip_from, c.clip_to, c.mode FROM {schema}.skud_clips c "
         f"JOIN {schema}.skud_visits v ON v.id = c.visit_id WHERE v.controller_id IN %s AND c.status = 'pending' "
@@ -78,7 +81,31 @@ def poll(cur, schema: str, dev: Dict[str, Any], body: Dict[str, Any]) -> Dict[st
         cur.execute(f'SELECT id, name FROM {schema}.cameras WHERE id IN %s', (tuple(cams),))
         names = dict(cur.fetchall())
     return {'recorder': True, 'cameras': [{'id': k, 'quality': v, 'name': names.get(k, 'камера')} for k, v in cams.items()],
-            'keep_hours': KEEP_HOURS, 'part_bytes': PART_BYTES, 'jobs': jobs}
+            'keep_hours': KEEP_HOURS, 'max_disk_gb': PC_MAX_GB, 'part_bytes': PART_BYTES, 'jobs': jobs}
+
+
+def site_cleanup(cur, schema: str) -> None:
+    """Видео на сайте — не больше 6 ГБ: при превышении удаляются самые старые отрывки."""
+    cur.execute(f"SELECT COALESCE(SUM(size_bytes), 0) FROM {schema}.skud_clips WHERE status = 'done'")
+    total = int(cur.fetchone()[0])
+    if total <= SITE_MAX_BYTES:
+        return
+    cur.execute(f"SELECT id, url, COALESCE(size_bytes, 0) FROM {schema}.skud_clips WHERE status = 'done' "
+                f"ORDER BY clip_from LIMIT 200")
+    s3 = None
+    prefix = cdn('')
+    for cid, url, size in cur.fetchall():
+        if total <= SITE_MAX_BYTES:
+            break
+        if url and url.startswith(prefix):
+            s3 = s3 or _s3()
+            try:
+                s3.delete_object(Bucket='files', Key=url[len(prefix):])
+            except Exception as ex:
+                print('site_cleanup delete error', url, repr(ex))
+        cur.execute(f"UPDATE {schema}.skud_clips SET status = 'deleted', url = NULL, "
+                    f"error = 'Видео удалено: на сайте храним не больше 6 ГБ' WHERE id = %s", (cid,))
+        total -= int(size)
 
 
 def upload_part(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -126,4 +153,5 @@ def done(cur, schema: str, body: Dict[str, Any]) -> Dict[str, Any]:
         return {'error': 'Файл не найден в хранилище'}
     cur.execute(f"UPDATE {schema}.skud_clips SET status = 'done', url = %s, size_bytes = %s, duration_sec = %s, "
                 f"done_at = now(), error = NULL WHERE id = %s", (cdn(key), size, body.get('duration'), cid))
+    site_cleanup(cur, schema)
     return {'ok': True}

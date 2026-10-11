@@ -64,7 +64,7 @@ export interface SkudClip {
   mode: 'door' | 'inside';
   from: string;
   to: string;
-  status: 'pending' | 'taken' | 'done' | 'failed' | 'missing';
+  status: 'pending' | 'taken' | 'done' | 'failed' | 'missing' | 'deleted';
   url: string | null;
   size: number | null;
   error: string | null;
