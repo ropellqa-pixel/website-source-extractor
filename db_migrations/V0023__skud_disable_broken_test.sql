@@ -1,0 +1,1 @@
+UPDATE skud_controllers SET active = false, name = 'ТЕСТ-старый' WHERE id = 'e103ee3ebe3f40e65cdde359f24e3fee';

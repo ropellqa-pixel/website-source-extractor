@@ -46,7 +46,59 @@ export interface SkudController {
   fw: string | null;
   door_open: boolean | null;
   key: string;
+  inside_camera_id: string | null;
+  pre_seconds: number;
+  post_seconds: number;
+  recorder_device: string | null;
+  recorder_quality: 'sd' | 'hd';
+  recorder_online: boolean;
+  recorder_status: string | null;
+  recorder_host: string | null;
 }
+
+export interface SkudClip {
+  id: number;
+  opening_id: number | null;
+  camera_id: string;
+  camera: string | null;
+  mode: 'door' | 'inside';
+  from: string;
+  to: string;
+  status: 'pending' | 'taken' | 'done' | 'failed' | 'missing';
+  url: string | null;
+  size: number | null;
+  error: string | null;
+}
+
+export interface SkudMark { t: string; kind: string; name: string | null }
+
+export interface SkudOpening {
+  id: number;
+  opened_at: string;
+  last_open_at: string;
+  closed_at: string | null;
+  assumed: boolean;
+  held: boolean;
+  marks: SkudMark[];
+  status: 'open' | 'closed';
+}
+
+export interface SkudVisit {
+  id: number;
+  status: 'open' | 'closed';
+  started_at: string;
+  ended_at: string | null;
+  inside: number;
+  entries: number;
+  exits: number;
+  alarm: boolean;
+  note: string | null;
+  door: string | null;
+  openings: SkudOpening[];
+  clips: SkudClip[];
+}
+
+export interface PcDevice { code: string; host: string; name: string | null; heartbeat_at: string | null }
 
 export interface Employee { id: string; name: string; department: string }
 

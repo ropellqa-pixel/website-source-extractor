@@ -4,7 +4,11 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+import boto3
 import psycopg2
+
+from visits import process as process_visits
+import recorder
 
 SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 'public')
 CORS = {
@@ -141,6 +145,7 @@ def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event:
                 (ip, body.get('serial'), body.get('model'), body.get('fw'), body.get('door_open'), ctrl['id']))
     if action == 'bridge_push':
         saved = sum(1 for e in (body.get('events') or [])[:500] if isinstance(e, dict) and _save_event(cur, ctrl['id'], e))
+        process_visits(cur, SCHEMA, ctrl['id'])
         return _resp(200, {'ok': True, 'saved': saved})
     if action == 'bridge_poll':
         cur.execute(f'SELECT id, operation, payload FROM {SCHEMA}.skud_commands WHERE controller_id = %s AND sent_at IS NULL '
@@ -166,19 +171,25 @@ def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event:
 
 def _controllers(cur) -> List[Dict[str, Any]]:
     cur.execute(f'SELECT c.id, c.name, c.serial, c.model, c.camera_id, cam.name, c.open_seconds, c.last_seen_at, '
-                f'c.last_ip, c.fw_version, c.door_open, c.secret FROM {SCHEMA}.skud_controllers c '
+                f'c.last_ip, c.fw_version, c.door_open, c.secret, c.inside_camera_id, c.pre_seconds, c.post_seconds, '
+                f'c.recorder_device, c.recorder_quality, c.recorder_seen_at, c.recorder_status, d.hostname '
+                f'FROM {SCHEMA}.skud_controllers c LEFT JOIN {SCHEMA}.devices d ON d.device_code = c.recorder_device '
                 f'LEFT JOIN {SCHEMA}.cameras cam ON cam.id = c.camera_id WHERE c.active ORDER BY c.created_at')
     now = datetime.now(timezone.utc)
     out = []
     for r in cur.fetchall():
         out.append({'id': r[0], 'name': r[1], 'serial': r[2], 'model': r[3], 'camera_id': r[4], 'camera_name': r[5],
                     'open_seconds': r[6], 'last_seen_at': r[7], 'online': bool(r[7] and now - r[7] < timedelta(seconds=90)),
-                    'last_ip': r[8], 'fw': r[9], 'door_open': r[10], 'key': r[11]})
+                    'last_ip': r[8], 'fw': r[9], 'door_open': r[10], 'key': r[11], 'inside_camera_id': r[12],
+                    'pre_seconds': r[13], 'post_seconds': r[14], 'recorder_device': r[15], 'recorder_quality': r[16],
+                    'recorder_online': bool(r[17] and now - r[17] < timedelta(seconds=60)), 'recorder_status': r[18],
+                    'recorder_host': r[19]})
     return out
 
 
 def _events(cur, body: Dict[str, Any]) -> Dict[str, Any]:
     where, args = ['true'], []
+    where.append('(c.active OR c.id IS NULL)')
     msk = timezone(timedelta(hours=3))
     if body.get('date_from'):
         where.append('e.event_time >= %s')
@@ -206,6 +217,40 @@ def _events(cur, body: Dict[str, Any]) -> Dict[str, Any]:
     return {'events': rows}
 
 
+def _visits(cur, body: Dict[str, Any]) -> Dict[str, Any]:
+    msk = timezone(timedelta(hours=3))
+    where, args = ['c.active'], []
+    if body.get('date_from'):
+        where.append('v.started_at >= %s')
+        args.append(datetime.strptime(body['date_from'], '%Y-%m-%d').replace(tzinfo=msk))
+    if body.get('date_to'):
+        where.append('v.started_at < %s')
+        args.append(datetime.strptime(body['date_to'], '%Y-%m-%d').replace(tzinfo=msk) + timedelta(days=1))
+    if body.get('alarm'):
+        where.append('v.alarm')
+    cur.execute(f"SELECT v.id, v.status, v.started_at, v.ended_at, v.inside, v.entries, v.exits, v.alarm, v.note, c.name "
+                f"FROM {SCHEMA}.skud_visits v JOIN {SCHEMA}.skud_controllers c ON c.id = v.controller_id "
+                f"WHERE {' AND '.join(where)} ORDER BY v.started_at DESC LIMIT 300", tuple(args))
+    visits = [{'id': r[0], 'status': r[1], 'started_at': r[2], 'ended_at': r[3], 'inside': r[4], 'entries': r[5],
+               'exits': r[6], 'alarm': r[7], 'note': r[8], 'door': r[9], 'openings': [], 'clips': []} for r in cur.fetchall()]
+    if not visits:
+        return {'visits': []}
+    by_id = {v['id']: v for v in visits}
+    ids = list(by_id)
+    cur.execute(f'SELECT id, visit_id, opened_at, last_open_at, closed_at, closed_assumed, held, marks, status '
+                f'FROM {SCHEMA}.skud_openings WHERE visit_id = ANY(%s) ORDER BY opened_at', (ids,))
+    for r in cur.fetchall():
+        by_id[r[1]]['openings'].append({'id': r[0], 'opened_at': r[2], 'last_open_at': r[3], 'closed_at': r[4],
+                                        'assumed': r[5], 'held': r[6], 'marks': json.loads(r[7] or '[]'), 'status': r[8]})
+    cur.execute(f'SELECT k.id, k.visit_id, k.opening_id, k.camera_id, cam.name, k.mode, k.clip_from, k.clip_to, k.status, '
+                f'k.url, k.size_bytes, k.error FROM {SCHEMA}.skud_clips k LEFT JOIN {SCHEMA}.cameras cam ON cam.id = k.camera_id '
+                f'WHERE k.visit_id = ANY(%s) ORDER BY k.mode, k.clip_from', (ids,))
+    for r in cur.fetchall():
+        by_id[r[1]]['clips'].append({'id': r[0], 'opening_id': r[2], 'camera_id': r[3], 'camera': r[4], 'mode': r[5],
+                                     'from': r[6], 'to': r[7], 'status': r[8], 'url': r[9], 'size': r[10], 'error': r[11]})
+    return {'visits': visits}
+
+
 def _cards(cur) -> List[Dict[str, Any]]:
     cur.execute(f'SELECT c.id, c.card_number, c.profile_id, p.full_name, c.label, c.status, c.valid_from, c.valid_to, '
                 f'c.synced, c.created_at, (SELECT max(event_time) FROM {SCHEMA}.skud_events e WHERE e.card_number = c.card_number) '
@@ -230,6 +275,19 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         return _resp(200, _events(cur, body))
     if action == 'cards':
         return _resp(200, {'cards': _cards(cur)})
+    if action == 'visits':
+        cur.execute(f'SELECT id FROM {SCHEMA}.skud_controllers WHERE active')
+        for (cid,) in cur.fetchall():
+            process_visits(cur, SCHEMA, cid)
+        return _resp(200, _visits(cur, body))
+    if action == 'devices':
+        cur.execute(f"SELECT d.device_code, d.hostname, p.full_name, d.heartbeat_at FROM {SCHEMA}.devices d "
+                    f"LEFT JOIN {SCHEMA}.profiles p ON p.id = d.profile_id WHERE d.status = 'linked' ORDER BY p.full_name NULLS LAST")
+        return _resp(200, {'devices': [{'code': r[0], 'host': r[1], 'name': r[2], 'heartbeat_at': r[3]} for r in cur.fetchall()]})
+    if action == 'clip_retry':
+        cur.execute(f"UPDATE {SCHEMA}.skud_clips SET status = 'pending', attempts = 0, error = NULL WHERE visit_id = %s "
+                    f"AND status IN ('failed', 'missing')", (body.get('visit_id'),))
+        return _resp(200, {'ok': True})
 
     if action == 'card_save':
         card = norm_card(str(body.get('card') or ''))
@@ -278,14 +336,21 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
     if action == 'controller_save':
         name = (body.get('name') or 'Склад').strip()[:80]
         secs = max(1, min(int(body.get('open_seconds') or 3), 30))
+        pre = max(0, min(int(body.get('pre_seconds') if body.get('pre_seconds') is not None else 10), 120))
+        post = max(0, min(int(body.get('post_seconds') if body.get('post_seconds') is not None else 10), 120))
+        quality = 'hd' if body.get('recorder_quality') == 'hd' else 'sd'
         if body.get('id'):
-            cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET name=%s, camera_id=%s, open_seconds=%s WHERE id=%s',
-                        (name, body.get('camera_id') or None, secs, body['id']))
+            cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET name=%s, camera_id=%s, open_seconds=%s, inside_camera_id=%s, '
+                        f'pre_seconds=%s, post_seconds=%s, recorder_device=%s, recorder_quality=%s WHERE id=%s',
+                        (name, body.get('camera_id') or None, secs, body.get('inside_camera_id') or None, pre, post,
+                         body.get('recorder_device') or None, quality, body['id']))
             cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, payload, created_by) VALUES (%s,%s,%s,%s)',
                         (body['id'], 'set_open_time', json.dumps({'seconds': secs}), user['name']))
         else:
-            cur.execute(f'INSERT INTO {SCHEMA}.skud_controllers (name, camera_id, open_seconds, model) VALUES (%s,%s,%s,%s)',
-                        (name, body.get('camera_id') or None, secs, 'Gate-4000-Ethernet'))
+            cur.execute(f'INSERT INTO {SCHEMA}.skud_controllers (name, camera_id, open_seconds, model, inside_camera_id, '
+                        f'pre_seconds, post_seconds, recorder_device, recorder_quality) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)',
+                        (name, body.get('camera_id') or None, secs, 'Gate-4000-Ethernet', body.get('inside_camera_id') or None,
+                         pre, post, body.get('recorder_device') or None, quality))
         return _resp(200, {'ok': True, 'controllers': _controllers(cur)})
     if action == 'open_door':
         cur.execute(f'SELECT last_seen_at FROM {SCHEMA}.skud_controllers WHERE id=%s', (body.get('id'),))
@@ -295,6 +360,7 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
                     (body['id'], 'open_door', user['name']))
         _save_event(cur, body['id'], {'kind': 'remote_open', 'time': datetime.now(timezone.utc).isoformat(),
                                       'person': user['name'], 'note': 'Открыто кнопкой на сайте'}, 'site')
+        process_visits(cur, SCHEMA, body['id'])
         return _resp(200, {'ok': True})
     if action == 'sync_cards':
         cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
@@ -322,6 +388,19 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if not ctrl:
                 return _resp(401, {'error': 'Неверный ключ контроллера'})
             return _bridge(cur, ctrl, action, body, event)
+        if action.startswith('rec_'):
+            headers = event.get('headers') or {}
+            token = (headers.get('X-Authorization') or headers.get('x-authorization') or '').replace('Bearer ', '').strip()
+            dev = recorder.device_by_token(cur, SCHEMA, token)
+            if not dev:
+                return _resp(401, {'error': 'Компьютер не привязан'})
+            if action == 'rec_poll':
+                return _resp(200, recorder.poll(cur, SCHEMA, dev, body))
+            if action == 'rec_part':
+                return _resp(200, recorder.upload_part(body))
+            if action == 'rec_done':
+                return _resp(200, recorder.done(cur, SCHEMA, body))
+            return _resp(400, {'error': 'Неизвестное действие'})
         user = _site_user(cur, event)
         if not user:
             return _resp(401, {'error': 'Нужно войти в систему'})

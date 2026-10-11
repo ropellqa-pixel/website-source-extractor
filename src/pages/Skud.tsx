@@ -4,7 +4,8 @@ import { Input } from '@/components/ui/input';
 import EventsTable from '@/components/skud/EventsTable';
 import CardsPanel from '@/components/skud/CardsPanel';
 import ControllerPanel from '@/components/skud/ControllerPanel';
-import { fmtDate, fmtTime, mskDay, skudCall, type Employee, type SkudCard, type SkudController, type SkudEvent } from '@/lib/skudApi';
+import VisitCard from '@/components/skud/VisitCard';
+import { fmtDate, fmtTime, mskDay, skudCall, type Employee, type SkudCard, type SkudController, type SkudEvent, type SkudVisit } from '@/lib/skudApi';
 
 type Kind = 'all' | 'pass' | 'alarm';
 
@@ -34,6 +35,8 @@ export default function Skud() {
   const [cardsOpen, setCardsOpen] = useState(false);
   const [ctrlOpen, setCtrlOpen] = useState(false);
   const [opening, setOpening] = useState(false);
+  const [tab, setTab] = useState<'visits' | 'journal'>('visits');
+  const [visits, setVisits] = useState<SkudVisit[]>([]);
 
   const ctrl = controllers[0] || null;
   const warehouseCam = ctrl?.camera_id || cameras.find((c) => /склад/i.test(c.name))?.id || null;
@@ -50,13 +53,19 @@ export default function Skud() {
     setLoading(false);
   }, [from, to, person, kind]);
 
+  const loadVisits = useCallback(async () => {
+    const r = await skudCall<{ visits: SkudVisit[] }>({ action: 'visits', date_from: from, date_to: to, alarm: kind === 'alarm' });
+    if (!r.error) setVisits(person ? r.visits.filter((v) => v.openings.some((o) => o.marks.some((m) => m.name === employees.find((e) => e.id === person)?.name))) : r.visits);
+  }, [from, to, kind, person, employees]);
+
   useEffect(() => { loadOverview(); }, [loadOverview]);
   useEffect(() => { loadEvents(); }, [loadEvents]);
-  // Новые проходы появляются сами — журнал обновляется каждые 10 секунд.
+  useEffect(() => { loadVisits(); }, [loadVisits]);
+  // Новые проходы и видео появляются сами — обновление каждые 10 секунд.
   useEffect(() => {
-    const t = setInterval(() => { if (!document.hidden) { loadEvents(); loadOverview(); } }, 10000);
+    const t = setInterval(() => { if (!document.hidden) { loadEvents(); loadOverview(); loadVisits(); } }, 10000);
     return () => clearInterval(t);
-  }, [loadEvents, loadOverview]);
+  }, [loadEvents, loadOverview, loadVisits]);
 
   const stats = useMemo(() => {
     const todayEv = events.filter((e) => mskDay(new Date(e.time)) === today);
@@ -125,6 +134,12 @@ export default function Skud() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <div className="mr-2 flex rounded-lg bg-secondary p-0.5">
+          {([['visits', 'Посещения с видео'], ['journal', 'Журнал']] as const).map(([k, l]) => (
+            <button key={k} onClick={() => setTab(k)}
+              className={`rounded-md px-3 py-1 text-sm font-medium ${tab === k ? 'bg-card shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{l}</button>
+          ))}
+        </div>
         <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-auto" />
         <span className="text-muted-foreground">—</span>
         <Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-auto" />
@@ -144,6 +159,23 @@ export default function Skud() {
         </button>
       </div>
 
+      {tab === 'visits' ? (
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto">
+          {ctrl && !ctrl.recorder_device && (
+            <div className="flex items-center gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+              <Icon name="VideoOff" size={18} className="text-amber-600" />
+              <span className="flex-1">Видео посещений не сохраняется: не выбран компьютер для записи.</span>
+              <button onClick={() => setCtrlOpen(true)} className="font-medium text-primary hover:underline">Выбрать</button>
+            </div>
+          )}
+          {visits.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border bg-card py-20 text-center text-muted-foreground">
+              <Icon name="DoorClosed" size={32} />
+              <p className="text-sm">Посещений за этот период нет</p>
+            </div>
+          ) : visits.map((v) => <VisitCard key={v.id} visit={v} onRetry={loadVisits} />)}
+        </div>
+      ) : (
       <div className="min-h-0 flex-1 overflow-auto rounded-2xl border bg-card">
         {loading ? (
           <div className="flex justify-center py-20"><Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" /></div>
@@ -151,6 +183,7 @@ export default function Skud() {
           <EventsTable events={events} warehouseCameraId={warehouseCam} />
         )}
       </div>
+      )}
 
       <CardsPanel open={cardsOpen} onOpenChange={setCardsOpen} cards={cards} employees={employees} onChanged={setCards} />
       {ctrlOpen && (

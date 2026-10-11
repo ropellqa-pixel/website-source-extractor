@@ -1,0 +1,1 @@
+UPDATE skud_clips SET status = 'pending', url = NULL, attempts = 0 WHERE id IN (37, 38);

@@ -45,6 +45,7 @@ namespace AbizShell
 
         protected override void OnExit(ExitEventArgs e)
         {
+            SkudRecorder.StopAll();
             TaskbarManager.Restore();
             base.OnExit(e);
         }

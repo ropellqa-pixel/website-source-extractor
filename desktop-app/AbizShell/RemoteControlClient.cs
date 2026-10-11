@@ -18,7 +18,7 @@ namespace AbizShell
         private const string ControlApiUrl = "https://functions.poehali.dev/f01f3da3-3368-428a-919d-fe5933bc5ab8";
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(12) };
 
-        public const string AppVersion = "3.6";
+        public const string AppVersion = "3.7";
 
         public class Command
         {

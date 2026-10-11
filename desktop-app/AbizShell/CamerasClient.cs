@@ -98,14 +98,14 @@ namespace AbizShell
         }
 
         /// <summary>Живое видео камеры по её id. Сервер отдаёт готовую ссылку из кэша мгновенно.</summary>
-        public static async Task<Result> LiveAsync(string apiToken, string cameraId, bool fresh = false)
+        public static async Task<Result> LiveAsync(string apiToken, string cameraId, bool fresh = false, string quality = "sd")
         {
             string? lastError = null;
             for (int i = 0; i < 2; i++)
             {
                 try
                 {
-                    var (_, body) = await PostAsync(apiToken, new { action = "live", id = cameraId, quality = "sd", fresh });
+                    var (_, body) = await PostAsync(apiToken, new { action = "live", id = cameraId, quality, fresh });
                     string? url = Str(body, "url");
                     if (!string.IsNullOrEmpty(url)) return new Result(url, null);
                     lastError = Str(body, "error") ?? "Камера не ответила";

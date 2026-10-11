@@ -2,5 +2,6 @@
   {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
   {"name": "GET not allowed", "method": "GET", "path": "/", "expectedStatus": 405},
   {"name": "Site action without login rejected", "method": "POST", "path": "/", "body": {"action": "events"}, "expectedStatus": 401},
-  {"name": "Bridge without key rejected", "method": "POST", "path": "/", "body": {"action": "bridge_push", "events": []}, "expectedStatus": 401}
+  {"name": "Bridge without key rejected", "method": "POST", "path": "/", "body": {"action": "bridge_push", "events": []}, "expectedStatus": 401},
+  {"name": "Recorder without PC token rejected", "method": "POST", "path": "/", "body": {"action": "rec_poll"}, "expectedStatus": 401}
 ]}
