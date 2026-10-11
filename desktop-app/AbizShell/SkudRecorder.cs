@@ -106,7 +106,11 @@ namespace AbizShell
                     {
                         if (poll.TryGetProperty("keep_hours", out var kh) && kh.ValueKind == JsonValueKind.Number) _keepHours = kh.GetInt32();
                         if (poll.TryGetProperty("part_bytes", out var pb) && pb.ValueKind == JsonValueKind.Number) _partBytes = pb.GetInt32();
-                        _ffmpeg ??= await EnsureFfmpegAsync(ct);
+                        if (_ffmpeg == null)
+                        {
+                            _ffmpeg = await EnsureFfmpegAsync(ct);
+                            if (_ffmpeg != null) KillOrphans(_ffmpeg);
+                        }
                         if (_ffmpeg == null)
                         {
                             _status = "нет ffmpeg — не удалось скачать, повтор через минуту";
@@ -149,12 +153,17 @@ namespace AbizShell
         private void SyncCameras(JsonElement poll)
         {
             var wanted = new Dictionary<string, string>();
+            var names = new Dictionary<string, string>();
             if (poll.TryGetProperty("cameras", out var cams) && cams.ValueKind == JsonValueKind.Array)
                 foreach (var c in cams.EnumerateArray())
                 {
                     string id = c.GetProperty("id").GetString() ?? "";
-                    if (id.Length > 0) wanted[id] = c.TryGetProperty("quality", out var q) ? q.GetString() ?? "sd" : "sd";
+                    if (id.Length == 0) continue;
+                    wanted[id] = c.TryGetProperty("quality", out var q) ? q.GetString() ?? "sd" : "sd";
+                    names[id] = c.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? "камера" : "камера";
                 }
+            foreach (var r in _recordings.Values)
+                if (names.TryGetValue(r.CameraId, out var nm)) r.Name = nm;
 
             foreach (var id in _recordings.Keys.ToList())
                 if (!wanted.ContainsKey(id) && _recordings.TryRemove(id, out var old)) old.Stop();
@@ -163,7 +172,10 @@ namespace AbizShell
             {
                 if (_recordings.TryGetValue(id, out var existing) && existing.Quality == quality) continue;
                 if (existing != null && _recordings.TryRemove(id, out var prev)) prev.Stop();
-                var rec = new CameraRecording(_apiToken, id, quality, _ffmpeg!, Path.Combine(BaseDir, id));
+                var rec = new CameraRecording(_apiToken, id, quality, _ffmpeg!, Path.Combine(BaseDir, id))
+                {
+                    Name = names.TryGetValue(id, out var cn) ? cn : "камера",
+                };
                 _recordings[id] = rec;
                 rec.Start();
             }
@@ -335,6 +347,29 @@ namespace AbizShell
             }
         }
 
+        /// <summary>
+        /// Если программа закрылась аварийно, её записи ffmpeg могли остаться работать —
+        /// закрываем их, чтобы две записи не писали в одни и те же файлы.
+        /// </summary>
+        private static void KillOrphans(string ffmpegPath)
+        {
+            try
+            {
+                foreach (var p in Process.GetProcessesByName("ffmpeg"))
+                {
+                    try
+                    {
+                        string? path = p.MainModule?.FileName;
+                        if (path != null && string.Equals(Path.GetFullPath(path), Path.GetFullPath(ffmpegPath), StringComparison.OrdinalIgnoreCase))
+                            p.Kill(true);
+                    }
+                    catch { }
+                    finally { p.Dispose(); }
+                }
+            }
+            catch { }
+        }
+
         private async Task<(int code, string err)> RunFfmpegAsync(string args, TimeSpan timeout, CancellationToken ct)
         {
             var psi = new ProcessStartInfo(_ffmpeg!, args)
@@ -396,7 +431,7 @@ namespace AbizShell
 
             public string CameraId { get; }
             public string Quality { get; }
-            public string Name { get; private set; }
+            public string Name { get; set; }
             public bool IsHealthy => _proc is { HasExited: false } &&
                                      Directory.Exists(_dir) &&
                                      Directory.EnumerateFiles(_dir, "*.ts").Any(f => File.GetLastWriteTimeUtc(f) > DateTime.UtcNow.AddSeconds(-30));

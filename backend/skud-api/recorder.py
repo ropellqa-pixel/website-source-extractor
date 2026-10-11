@@ -73,7 +73,11 @@ def poll(cur, schema: str, dev: Dict[str, Any], body: Dict[str, Any]) -> Dict[st
                     (r[0],))
         jobs.append({'id': r[0], 'camera_id': r[1], 'from': r[2].isoformat(), 'to': r[3].isoformat(), 'mode': r[4],
                      'key': key})
-    return {'recorder': True, 'cameras': [{'id': k, 'quality': v} for k, v in cams.items()],
+    names = {}
+    if cams:
+        cur.execute(f'SELECT id, name FROM {schema}.cameras WHERE id IN %s', (tuple(cams),))
+        names = dict(cur.fetchall())
+    return {'recorder': True, 'cameras': [{'id': k, 'quality': v, 'name': names.get(k, 'камера')} for k, v in cams.items()],
             'keep_hours': KEEP_HOURS, 'part_bytes': PART_BYTES, 'jobs': jobs}
 
 
