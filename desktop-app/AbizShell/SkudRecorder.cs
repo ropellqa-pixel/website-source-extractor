@@ -31,6 +31,9 @@ namespace AbizShell
     {
         private const string SkudApiUrl = "https://functions.poehali.dev/150e30dd-bd2d-45c5-8db8-a4055bf55fd9";
         private const string FfmpegZipUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
+        private const string FfmpegPartsUrl = "https://cdn.poehali.dev/projects/451dcdd9-845e-4f12-82d1-0501056cd61b/bucket/skud/tools/ffmpeg-9.0.2.zip";
+        private const int FfmpegParts = 37;
+        private const string FfmpegSha256 = "348378108f679b7484aa2d5eeee5f647efcf949452a520c829fb2c9956a6c641";
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
         private static readonly TimeSpan SegmentLength = TimeSpan.FromSeconds(60);
         /// <summary>На сколько живой поток из облака отстаёт от реального времени.</summary>
@@ -109,13 +112,13 @@ namespace AbizShell
                         if (poll.TryGetProperty("part_bytes", out var pb) && pb.ValueKind == JsonValueKind.Number) _partBytes = pb.GetInt32();
                         if (_ffmpeg == null)
                         {
-                            _ffmpeg = await EnsureFfmpegAsync(ct);
+                            _ffmpeg = FindOrStartFfmpeg(ct);
                             if (_ffmpeg != null) KillOrphans(_ffmpeg);
                         }
                         if (_ffmpeg == null)
                         {
-                            _status = "нет ffmpeg — не удалось скачать, повтор через минуту";
-                            wait = TimeSpan.FromSeconds(60);
+                            // Скачивание идёт в фоне, статус («скачивается ffmpeg: 40%») уходит на сайт.
+                            wait = TimeSpan.FromSeconds(_ffmpegTask is { IsCompleted: true } ? 60 : 5);
                         }
                         else
                         {
@@ -315,37 +318,108 @@ namespace AbizShell
 
         // ---------------- ffmpeg ----------------
 
-        private static async Task<string?> EnsureFfmpegAsync(CancellationToken ct)
+        private static string FfmpegDir => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "AnodBiz", "ffmpeg");
+
+        private Task<string?>? _ffmpegTask;
+
+        /// <summary>
+        /// ffmpeg ищется рядом с программой и в C:\ProgramData\AnodBiz\ffmpeg. Если его нет — скачивается
+        /// в фоне (сначала с нашего хранилища частями по 1 МБ, при неудаче — с сайта ffmpeg),
+        /// а прогресс виден на сайте в статусе регистратора.
+        /// </summary>
+        private string? FindOrStartFfmpeg(CancellationToken ct)
         {
             string local = Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe");
             if (File.Exists(local)) return local;
-            string toolDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "AnodBiz", "ffmpeg");
-            string exe = Path.Combine(toolDir, "ffmpeg.exe");
-            if (File.Exists(exe)) return exe;
+            string exe = Path.Combine(FfmpegDir, "ffmpeg.exe");
+            if (File.Exists(exe) && new FileInfo(exe).Length > 1_000_000) return exe;
+            if (_ffmpegTask == null || _ffmpegTask.IsCompleted)
+            {
+                if (_ffmpegTask is { IsCompletedSuccessfully: true } && _ffmpegTask.Result != null) return _ffmpegTask.Result;
+                _ffmpegTask = Task.Run(() => DownloadFfmpegAsync(ct));
+            }
+            return null;
+        }
+
+        private async Task<string?> DownloadFfmpegAsync(CancellationToken ct)
+        {
+            Directory.CreateDirectory(FfmpegDir);
+            string exe = Path.Combine(FfmpegDir, "ffmpeg.exe");
+            string zip = Path.Combine(FfmpegDir, "ffmpeg.zip");
+            string? lastError = null;
             try
             {
-                Directory.CreateDirectory(toolDir);
-                string zip = Path.Combine(toolDir, "ffmpeg.zip");
-                using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+                _status = "скачивается ffmpeg: 0%";
+                var data = new byte[FfmpegParts][];
+                int done = 0;
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+                await Parallel.ForEachAsync(Enumerable.Range(0, FfmpegParts),
+                    new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct },
+                    async (i, token) =>
+                    {
+                        string url = $"{FfmpegPartsUrl}.part{i:D4}";
+                        for (int attempt = 0; ; attempt++)
+                        {
+                            try
+                            {
+                                data[i] = await http.GetByteArrayAsync(url, token);
+                                break;
+                            }
+                            catch when (attempt < 4 && !token.IsCancellationRequested)
+                            {
+                                await Task.Delay(2000 * (attempt + 1), token);
+                            }
+                        }
+                        int n = Interlocked.Increment(ref done);
+                        _status = $"скачивается ffmpeg: {n * 100 / FfmpegParts}%";
+                    });
+                await using (var fs = File.Create(zip))
+                    foreach (var part in data) await fs.WriteAsync(part, ct);
+                await using (var fs = File.OpenRead(zip))
+                {
+                    string hash = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(fs, ct)).ToLowerInvariant();
+                    if (hash != FfmpegSha256) throw new InvalidDataException("архив ffmpeg повреждён");
+                }
+                if (ExtractFfmpeg(zip, exe)) return exe;
+                lastError = "в архиве нет ffmpeg.exe";
+            }
+            catch (OperationCanceledException) { return null; }
+            catch (Exception ex) { lastError = ex.Message; }
+            finally { TryDelete(zip); }
+
+            try
+            {
+                _status = "скачивается ffmpeg (запасной сайт)…";
+                using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(15) };
                 using (var resp = await http.GetAsync(FfmpegZipUrl, HttpCompletionOption.ResponseHeadersRead, ct))
                 {
                     resp.EnsureSuccessStatusCode();
                     await using var fs = File.Create(zip);
                     await resp.Content.CopyToAsync(fs, ct);
                 }
-                using (var archive = ZipFile.OpenRead(zip))
-                {
-                    var entry = archive.Entries.FirstOrDefault(e => e.FullName.EndsWith("bin/ffmpeg.exe", StringComparison.OrdinalIgnoreCase));
-                    if (entry == null) return null;
-                    entry.ExtractToFile(exe, true);
-                }
-                TryDelete(zip);
-                return File.Exists(exe) ? exe : null;
+                if (ExtractFfmpeg(zip, exe)) return exe;
+                lastError = "в архиве нет ffmpeg.exe";
             }
-            catch
-            {
-                return null;
-            }
+            catch (OperationCanceledException) { return null; }
+            catch (Exception ex) { lastError = (lastError != null ? lastError + "; " : "") + ex.Message; }
+            finally { TryDelete(zip); }
+
+            _status = "не удалось скачать ffmpeg: " + Short(lastError ?? "") + ". Повтор через минуту";
+            return null;
+        }
+
+        private static bool ExtractFfmpeg(string zip, string exe)
+        {
+            using var archive = ZipFile.OpenRead(zip);
+            var entry = archive.Entries.FirstOrDefault(e =>
+                e.FullName.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase) ||
+                e.FullName.EndsWith("/ffmpeg.exe", StringComparison.OrdinalIgnoreCase));
+            if (entry == null) return false;
+            string tmp = exe + ".tmp";
+            entry.ExtractToFile(tmp, true);
+            File.Move(tmp, exe, true);
+            return true;
         }
 
         /// <summary>

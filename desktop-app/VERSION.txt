@@ -1,2 +1,2 @@
-ABIZ project version 19 (program 3.7)
+ABIZ project version 19 (program 3.7.1)
 New: warehouse video recorder for SKUD (cameras Sklad / Sklad-VN, clips per visit).
