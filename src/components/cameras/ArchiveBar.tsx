@@ -8,12 +8,13 @@ interface Props {
   position: number | null;
   onSeek: (day: string, sec: number) => void;
   onLive: () => void;
+  initialDay?: string;
 }
 
 const CHUNKS: [number, number][] = [[0, 5], [6, 11], [12, 17], [18, 23]];
 
-export default function ArchiveBar({ cameraId, playingFrom, position, onSeek, onLive }: Props) {
-  const [day, setDay] = useState(toDayStr(new Date()));
+export default function ArchiveBar({ cameraId, playingFrom, position, onSeek, onLive, initialDay }: Props) {
+  const [day, setDay] = useState(initialDay || toDayStr(new Date()));
   const [records, setRecords] = useState<RecordRange[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

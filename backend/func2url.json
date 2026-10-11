@@ -1,4 +1,5 @@
 {
+  "skud-api": "https://functions.poehali.dev/150e30dd-bd2d-45c5-8db8-a4055bf55fd9",
   "device-control": "https://functions.poehali.dev/f01f3da3-3368-428a-919d-fe5933bc5ab8",
   "cameras-api": "https://functions.poehali.dev/246cb9d5-b997-40d1-8f46-082cafe7879e",
   "auth-api": "https://functions.poehali.dev/0cc75331-123f-465b-a6da-01ba5f142bfa",

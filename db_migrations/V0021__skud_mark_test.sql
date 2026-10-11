@@ -1,0 +1,2 @@
+UPDATE skud_events SET event_kind = 'other', note = 'Тестовая запись (проверка раздела)', profile_id = NULL, person_name = 'Тест' WHERE card_number IN ('012,22999', '099,11111') AND source = 'controller';
+UPDATE skud_controllers SET serial = NULL, last_seen_at = NULL, last_ip = NULL WHERE serial = 'TEST';

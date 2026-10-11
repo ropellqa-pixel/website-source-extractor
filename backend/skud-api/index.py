@@ -1,0 +1,331 @@
+import json
+import os
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+import psycopg2
+
+SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 'public')
+CORS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Authorization, X-Skud-Key',
+    'Access-Control-Max-Age': '86400',
+}
+MANAGER_ROLES = {'director', 'deputy_director'}
+KINDS = {
+    'entry': 'Вход по карте', 'exit': 'Выход по карте', 'exit_button': 'Выход по кнопке',
+    'denied': 'Отказ в доступе', 'denied_blocked': 'Заблокированная карта', 'remote_open': 'Открыта с сайта',
+    'forced': 'Дверь взломана', 'held_open': 'Дверь не закрыта', 'door_closed': 'Дверь закрыта',
+    'power': 'Питание / перезапуск', 'other': 'Событие контроллера',
+}
+CARD_STATUSES = {'active', 'blocked'}
+
+
+def _resp(status: int, payload: Any) -> Dict[str, Any]:
+    return {'statusCode': status, 'headers': {**CORS, 'Content-Type': 'application/json'},
+            'body': json.dumps(payload, ensure_ascii=False, default=str)}
+
+
+def norm_card(raw: str) -> str:
+    """Номер Em-Marin в едином виде. Настольный USB-считыватель и контроллер могут показывать его
+    по-разному: «012,34567», «0001234567» (10 цифр) или HEX. Приводим к «ггг,ннннн» — так
+    напечатано на большинстве карт и так одинаково сравниваются карты с сайта и с двери."""
+    s = (raw or '').strip().upper().replace(' ', '').replace('.', ',').replace('/', ',')
+    m = re.fullmatch(r'(\d{1,3}),(\d{1,5})', s)
+    if m:
+        return f'{int(m.group(1)):03d},{int(m.group(2)):05d}'
+    if re.fullmatch(r'\d{6,10}', s):
+        v = int(s)
+        return f'{(v >> 16) & 0xFF:03d},{v & 0xFFFF:05d}'
+    if re.fullmatch(r'[0-9A-F]{6,12}', s):
+        v = int(s, 16)
+        return f'{(v >> 16) & 0xFF:03d},{v & 0xFFFF:05d}'
+    return s
+
+
+def _site_user(cur, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    headers = event.get('headers') or {}
+    token = (headers.get('X-Authorization') or headers.get('x-authorization') or '').replace('Bearer ', '').strip()
+    if not token:
+        return None
+    cur.execute(f'SELECT u.id, u.email, u.is_admin FROM {SCHEMA}.auth_sessions s JOIN {SCHEMA}.auth_users u '
+                f'ON u.id = s.user_id WHERE s.token = %s AND s.expires_at > now()', (token,))
+    row = cur.fetchone()
+    if not row:
+        cur.execute(f'SELECT u.id, u.email, u.is_admin FROM {SCHEMA}.api_tokens t JOIN {SCHEMA}.auth_users u '
+                    f'ON u.id = t.user_id WHERE t.token = %s AND t.revoked_at IS NULL', (token,))
+        row = cur.fetchone()
+    if not row:
+        return None
+    cur.execute(f'SELECT id, role, full_name FROM {SCHEMA}.profiles WHERE user_id = %s OR lower(email) = lower(%s) '
+                f'ORDER BY (user_id = %s) DESC LIMIT 1', (row[0], row[1] or '', row[0]))
+    prof = cur.fetchone()
+    role = 'director' if row[2] else (prof[1] if prof else 'employee')
+    return {'id': row[0], 'role': role, 'name': prof[2] if prof else (row[1] or '')}
+
+
+def _controller_by_key(cur, event: Dict[str, Any], body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    headers = event.get('headers') or {}
+    key = (headers.get('X-Skud-Key') or headers.get('x-skud-key') or body.get('key') or '').strip()
+    if not key:
+        return None
+    cur.execute(f'SELECT id, name FROM {SCHEMA}.skud_controllers WHERE secret = %s AND active', (key,))
+    r = cur.fetchone()
+    return {'id': r[0], 'name': r[1]} if r else None
+
+
+def _parse_time(v: Any) -> datetime:
+    if isinstance(v, (int, float)):
+        return datetime.fromtimestamp(v / 1000 if v > 1e11 else v, tz=timezone.utc)
+    s = str(v or '').strip().replace('T', ' ').replace('Z', '+00:00')
+    for fmt in ('%Y-%m-%d %H:%M:%S%z', '%Y-%m-%d %H:%M:%S.%f%z', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M'):
+        try:
+            d = datetime.strptime(s, fmt)
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone(timedelta(hours=3)))
+            return d
+        except ValueError:
+            continue
+    return datetime.now(timezone.utc)
+
+
+def _card_owner(cur, card: str):
+    cur.execute(f'SELECT c.profile_id, c.status, p.full_name FROM {SCHEMA}.skud_cards c '
+                f'LEFT JOIN {SCHEMA}.profiles p ON p.id = c.profile_id WHERE c.card_number = %s', (card,))
+    return cur.fetchone()
+
+
+def _save_event(cur, ctrl_id: str, e: Dict[str, Any], source: str = 'controller') -> bool:
+    kind = e.get('kind') if e.get('kind') in KINDS else 'other'
+    card = norm_card(str(e.get('card') or '')) if e.get('card') else None
+    profile_id, name = None, None
+    if card:
+        owner = _card_owner(cur, card)
+        if owner:
+            profile_id, name = owner[0], owner[2]
+            if owner[1] == 'blocked' and kind in ('denied', 'other'):
+                kind = 'denied_blocked'
+        else:
+            cur.execute(f'UPDATE {SCHEMA}.skud_enroll SET card_number = %s, captured_at = now() '
+                        f'WHERE id = 1 AND until_at > now()', (card,))
+    if e.get('person'):
+        name = str(e['person'])[:200]
+    granted = e.get('granted')
+    if granted is None:
+        granted = kind in ('entry', 'exit', 'exit_button', 'remote_open')
+    direction = e.get('direction') or ('in' if kind == 'entry' else 'out' if kind in ('exit', 'exit_button') else None)
+    cur.execute(
+        f'INSERT INTO {SCHEMA}.skud_events (controller_id, event_time, event_code, event_kind, direction, granted, '
+        f'card_number, profile_id, person_name, note, source, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) '
+        f'ON CONFLICT (controller_id, event_time, event_code, card_number) DO NOTHING',
+        (ctrl_id, _parse_time(e.get('time')), e.get('code'), kind, direction, bool(granted), card, profile_id, name,
+         (str(e.get('note'))[:300] if e.get('note') else None), source,
+         json.dumps(e.get('raw'), ensure_ascii=False)[:2000] if e.get('raw') is not None else None))
+    return cur.rowcount > 0
+
+
+def _cards_for_controller(cur) -> List[Dict[str, Any]]:
+    cur.execute(f'SELECT card_number FROM {SCHEMA}.skud_cards WHERE status = %s '
+                f'AND (valid_from IS NULL OR valid_from <= current_date) AND (valid_to IS NULL OR valid_to >= current_date) '
+                f'ORDER BY card_number', ('active',))
+    return [{'card': r[0]} for r in cur.fetchall()]
+
+
+def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
+    ip = ((event.get('requestContext') or {}).get('identity') or {}).get('sourceIp')
+    cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET last_seen_at = now(), last_ip = %s, '
+                f'serial = COALESCE(%s, serial), model = COALESCE(%s, model), fw_version = COALESCE(%s, fw_version), '
+                f'door_open = COALESCE(%s, door_open) WHERE id = %s',
+                (ip, body.get('serial'), body.get('model'), body.get('fw'), body.get('door_open'), ctrl['id']))
+    if action == 'bridge_push':
+        saved = sum(1 for e in (body.get('events') or [])[:500] if isinstance(e, dict) and _save_event(cur, ctrl['id'], e))
+        return _resp(200, {'ok': True, 'saved': saved})
+    if action == 'bridge_poll':
+        cur.execute(f'SELECT id, operation, payload FROM {SCHEMA}.skud_commands WHERE controller_id = %s AND sent_at IS NULL '
+                    f'ORDER BY id LIMIT 20', (ctrl['id'],))
+        cmds = [{'id': r[0], 'operation': r[1], 'payload': json.loads(r[2]) if r[2] else None} for r in cur.fetchall()]
+        if cmds:
+            cur.execute(f'UPDATE {SCHEMA}.skud_commands SET sent_at = now() WHERE id = ANY(%s)', ([c['id'] for c in cmds],))
+        cur.execute(f'SELECT count(*) FROM {SCHEMA}.skud_cards WHERE NOT synced')
+        dirty = cur.fetchone()[0] > 0
+        out = {'commands': cmds, 'cards_changed': dirty}
+        if dirty or body.get('want_cards'):
+            out['cards'] = _cards_for_controller(cur)
+        return _resp(200, out)
+    if action == 'bridge_ack':
+        for c in (body.get('done') or [])[:50]:
+            cur.execute(f'UPDATE {SCHEMA}.skud_commands SET done_at = now(), result = %s WHERE id = %s AND controller_id = %s',
+                        (str(c.get('result') or 'ok')[:300], c.get('id'), ctrl['id']))
+        if body.get('cards_synced'):
+            cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced = true WHERE NOT synced')
+        return _resp(200, {'ok': True})
+    return _resp(400, {'error': 'Неизвестное действие'})
+
+
+def _controllers(cur) -> List[Dict[str, Any]]:
+    cur.execute(f'SELECT c.id, c.name, c.serial, c.model, c.camera_id, cam.name, c.open_seconds, c.last_seen_at, '
+                f'c.last_ip, c.fw_version, c.door_open, c.secret FROM {SCHEMA}.skud_controllers c '
+                f'LEFT JOIN {SCHEMA}.cameras cam ON cam.id = c.camera_id WHERE c.active ORDER BY c.created_at')
+    now = datetime.now(timezone.utc)
+    out = []
+    for r in cur.fetchall():
+        out.append({'id': r[0], 'name': r[1], 'serial': r[2], 'model': r[3], 'camera_id': r[4], 'camera_name': r[5],
+                    'open_seconds': r[6], 'last_seen_at': r[7], 'online': bool(r[7] and now - r[7] < timedelta(seconds=90)),
+                    'last_ip': r[8], 'fw': r[9], 'door_open': r[10], 'key': r[11]})
+    return out
+
+
+def _events(cur, body: Dict[str, Any]) -> Dict[str, Any]:
+    where, args = ['true'], []
+    msk = timezone(timedelta(hours=3))
+    if body.get('date_from'):
+        where.append('e.event_time >= %s')
+        args.append(datetime.strptime(body['date_from'], '%Y-%m-%d').replace(tzinfo=msk))
+    if body.get('date_to'):
+        where.append('e.event_time < %s')
+        args.append(datetime.strptime(body['date_to'], '%Y-%m-%d').replace(tzinfo=msk) + timedelta(days=1))
+    if body.get('profile_id'):
+        where.append('e.profile_id = %s')
+        args.append(body['profile_id'])
+    if body.get('kind') == 'pass':
+        where.append("e.event_kind IN ('entry','exit','exit_button','remote_open')")
+    elif body.get('kind') == 'alarm':
+        where.append("e.event_kind IN ('denied','denied_blocked','forced','held_open')")
+    limit = min(int(body.get('limit') or 500), 3000)
+    cur.execute(
+        f"SELECT e.id, e.event_time, e.event_kind, e.direction, e.granted, e.card_number, e.profile_id, "
+        f"COALESCE(p.full_name, e.person_name), p.department, p.role, e.note, e.source, c.name, c.camera_id "
+        f"FROM {SCHEMA}.skud_events e LEFT JOIN {SCHEMA}.profiles p ON p.id = e.profile_id "
+        f"LEFT JOIN {SCHEMA}.skud_controllers c ON c.id = e.controller_id "
+        f"WHERE {' AND '.join(where)} ORDER BY e.event_time DESC, e.id DESC LIMIT {limit}", tuple(args))
+    rows = [{'id': r[0], 'time': r[1], 'kind': r[2], 'kind_label': KINDS.get(r[2], r[2]), 'direction': r[3],
+             'granted': r[4], 'card': r[5], 'profile_id': r[6], 'name': r[7], 'department': r[8], 'role': r[9],
+             'note': r[10], 'source': r[11], 'door': r[12], 'camera_id': r[13]} for r in cur.fetchall()]
+    return {'events': rows}
+
+
+def _cards(cur) -> List[Dict[str, Any]]:
+    cur.execute(f'SELECT c.id, c.card_number, c.profile_id, p.full_name, c.label, c.status, c.valid_from, c.valid_to, '
+                f'c.synced, c.created_at, (SELECT max(event_time) FROM {SCHEMA}.skud_events e WHERE e.card_number = c.card_number) '
+                f'FROM {SCHEMA}.skud_cards c LEFT JOIN {SCHEMA}.profiles p ON p.id = c.profile_id '
+                f'ORDER BY c.status, p.full_name NULLS LAST')
+    return [{'id': r[0], 'card': r[1], 'profile_id': r[2], 'name': r[3], 'label': r[4], 'status': r[5],
+             'valid_from': r[6], 'valid_to': r[7], 'synced': r[8], 'created_at': r[9], 'last_used': r[10]}
+            for r in cur.fetchall()]
+
+
+def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    if user['role'] not in MANAGER_ROLES:
+        return _resp(403, {'error': 'Раздел СКУД доступен директору и заместителю директора'})
+
+    if action == 'overview':
+        cur.execute(f"SELECT id, full_name, department FROM {SCHEMA}.profiles WHERE status = 'active' ORDER BY full_name")
+        emps = [{'id': r[0], 'name': r[1], 'department': r[2]} for r in cur.fetchall()]
+        cur.execute(f"SELECT id, name FROM {SCHEMA}.cameras ORDER BY order_index")
+        cams = [{'id': r[0], 'name': r[1]} for r in cur.fetchall()]
+        return _resp(200, {'controllers': _controllers(cur), 'cards': _cards(cur), 'employees': emps, 'cameras': cams})
+    if action == 'events':
+        return _resp(200, _events(cur, body))
+    if action == 'cards':
+        return _resp(200, {'cards': _cards(cur)})
+
+    if action == 'card_save':
+        card = norm_card(str(body.get('card') or ''))
+        if not re.fullmatch(r'\d{3},\d{5}', card):
+            return _resp(400, {'error': 'Не похоже на номер карты Em-Marin. Поднесите карту к считывателю ещё раз'})
+        cur.execute(f'SELECT id, profile_id FROM {SCHEMA}.skud_cards WHERE card_number = %s', (card,))
+        ex = cur.fetchone()
+        if ex and ex[0] != body.get('id'):
+            cur.execute(f'SELECT full_name FROM {SCHEMA}.profiles WHERE id = %s', (ex[1],))
+            p = cur.fetchone()
+            return _resp(400, {'error': f'Эта карта уже записана{" на " + p[0] if p else ""}'})
+        vals = (card, body.get('profile_id') or None, (body.get('label') or '')[:100] or None,
+                body.get('valid_from') or None, body.get('valid_to') or None)
+        if body.get('id'):
+            cur.execute(f'UPDATE {SCHEMA}.skud_cards SET card_number=%s, profile_id=%s, label=%s, valid_from=%s, valid_to=%s, '
+                        f'synced=false, updated_at=now() WHERE id=%s', vals + (body['id'],))
+        else:
+            cur.execute(f'INSERT INTO {SCHEMA}.skud_cards (card_number, profile_id, label, valid_from, valid_to, created_by) '
+                        f'VALUES (%s,%s,%s,%s,%s,%s)', vals + (user['name'],))
+        cur.execute(f'UPDATE {SCHEMA}.skud_enroll SET until_at = NULL, card_number = NULL WHERE id = 1')
+        return _resp(200, {'ok': True, 'card': card, 'cards': _cards(cur)})
+    if action == 'card_status':
+        st = body.get('status')
+        if st not in CARD_STATUSES:
+            return _resp(400, {'error': 'Неверный статус'})
+        cur.execute(f'UPDATE {SCHEMA}.skud_cards SET status=%s, synced=false, updated_at=now() WHERE id=%s', (st, body.get('id')))
+        return _resp(200, {'ok': True, 'cards': _cards(cur)})
+    if action == 'card_delete':
+        cur.execute(f'DELETE FROM {SCHEMA}.skud_cards WHERE id=%s', (body.get('id'),))
+        cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
+        return _resp(200, {'ok': True, 'cards': _cards(cur)})
+    if action == 'card_check':
+        card = norm_card(str(body.get('card') or ''))
+        owner = _card_owner(cur, card)
+        return _resp(200, {'card': card, 'valid': bool(re.fullmatch(r'\d{3},\d{5}', card)),
+                           'owner': owner[2] if owner else None, 'status': owner[1] if owner else None})
+
+    if action == 'enroll_start':
+        cur.execute(f"UPDATE {SCHEMA}.skud_enroll SET until_at = now() + interval '2 minutes', card_number = NULL WHERE id = 1")
+        return _resp(200, {'ok': True})
+    if action == 'enroll_poll':
+        cur.execute(f'SELECT card_number, until_at > now() FROM {SCHEMA}.skud_enroll WHERE id = 1')
+        r = cur.fetchone()
+        return _resp(200, {'card': r[0] if r else None, 'waiting': bool(r and r[1])})
+
+    if action == 'controller_save':
+        name = (body.get('name') or 'Склад').strip()[:80]
+        secs = max(1, min(int(body.get('open_seconds') or 3), 30))
+        if body.get('id'):
+            cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET name=%s, camera_id=%s, open_seconds=%s WHERE id=%s',
+                        (name, body.get('camera_id') or None, secs, body['id']))
+            cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, payload, created_by) VALUES (%s,%s,%s,%s)',
+                        (body['id'], 'set_open_time', json.dumps({'seconds': secs}), user['name']))
+        else:
+            cur.execute(f'INSERT INTO {SCHEMA}.skud_controllers (name, camera_id, open_seconds, model) VALUES (%s,%s,%s,%s)',
+                        (name, body.get('camera_id') or None, secs, 'Gate-4000-Ethernet'))
+        return _resp(200, {'ok': True, 'controllers': _controllers(cur)})
+    if action == 'open_door':
+        cur.execute(f'SELECT last_seen_at FROM {SCHEMA}.skud_controllers WHERE id=%s', (body.get('id'),))
+        if not cur.fetchone():
+            return _resp(404, {'error': 'Контроллер не найден'})
+        cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, created_by) VALUES (%s,%s,%s)',
+                    (body['id'], 'open_door', user['name']))
+        _save_event(cur, body['id'], {'kind': 'remote_open', 'time': datetime.now(timezone.utc).isoformat(),
+                                      'person': user['name'], 'note': 'Открыто кнопкой на сайте'}, 'site')
+        return _resp(200, {'ok': True})
+    if action == 'sync_cards':
+        cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
+        return _resp(200, {'ok': True})
+    return _resp(400, {'error': 'Неизвестное действие'})
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''СКУД (дверь склада): журнал проходов, ключ-карты сотрудников (запись, привязка, блокировка,
+    удаление), открытие двери с сайта. Контроллер Gate-4000-Ethernet связывается через «мост»
+    (программа в локальной сети), который присылает события и забирает карты/команды по ключу X-Skud-Key.'''
+    if event.get('httpMethod') == 'OPTIONS':
+        return {'statusCode': 200, 'headers': CORS, 'body': ''}
+    if event.get('httpMethod') != 'POST':
+        return _resp(405, {'error': 'Метод не поддерживается'})
+    body = json.loads(event.get('body') or '{}')
+    action = body.get('action') or ''
+
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    conn.autocommit = True
+    cur = conn.cursor()
+    try:
+        if action.startswith('bridge_'):
+            ctrl = _controller_by_key(cur, event, body)
+            if not ctrl:
+                return _resp(401, {'error': 'Неверный ключ контроллера'})
+            return _bridge(cur, ctrl, action, body, event)
+        user = _site_user(cur, event)
+        if not user:
+            return _resp(401, {'error': 'Нужно войти в систему'})
+        return _site(cur, user, action, body)
+    finally:
+        cur.close()
+        conn.close()

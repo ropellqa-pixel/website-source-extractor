@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import HlsPlayer from '@/components/cameras/HlsPlayer';
 import ArchiveBar from '@/components/cameras/ArchiveBar';
@@ -21,6 +22,9 @@ const HEVC_OK = !PREFER_WASM && typeof window !== 'undefined' && (
 type Mode = { kind: 'live' } | { kind: 'archive'; day: string; sec: number };
 
 export default function Cameras() {
+  // Переход из СКУД: ?cam=<id>&day=YYYY-MM-DD&sec=<секунды от начала дня> — сразу открываем архив на это время.
+  const [params] = useSearchParams();
+  const [jump] = useState(() => ({ cam: params.get('cam'), day: params.get('day'), sec: Number(params.get('sec')) }));
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -48,14 +52,19 @@ export default function Cameras() {
       setCameras(list);
       setCanManage(!!r.can_manage);
       const def = list.findIndex((c) => c.is_default);
-      setIndex(def >= 0 ? def : 0);
+      const wanted = list.findIndex((c) => c.id === jump.cam);
+      setIndex(wanted >= 0 ? wanted : def >= 0 ? def : 0);
+      if (wanted >= 0 && jump.day && Number.isFinite(jump.sec)) {
+        setMode({ kind: 'archive', day: jump.day, sec: jump.sec });
+        setShowArchive(true);
+      }
       if (r.error) setError(r.error);
       setLoading(false);
     });
     camerasCall<{ streams?: Record<string, { url?: string }> }>({ action: 'live_all' }).then((r) => {
       Object.entries(r.streams || {}).forEach(([id, v]) => { if (v.url) liveCache.current[id] = v.url; });
     });
-  }, []);
+  }, [jump]);
 
   const connect = useCallback(async () => {
     if (!cam) return;
@@ -226,6 +235,7 @@ export default function Cameras() {
               position={playPos}
               onSeek={(day, sec) => setMode({ kind: 'archive', day, sec: Math.max(0, sec) })}
               onLive={() => setMode({ kind: 'live' })}
+              initialDay={mode.kind === 'archive' ? mode.day : undefined}
             />
           </div>
         )}
