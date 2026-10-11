@@ -39,6 +39,12 @@ try {
         throw "В сборке нет Microsoft.Windows.SDK.NET.dll — программа не запустится. Проверь TargetFramework в AbizShell.csproj"
     }
 
+    Write-Host "Публикация службы видеорегистратора (AbizRecorder)..." -ForegroundColor Cyan
+    $recorderDir = Join-Path $root "AbizRecorder\bin\publish"
+    if (Test-Path $recorderDir) { Remove-Item $recorderDir -Recurse -Force }
+    dotnet publish (Join-Path $root "AbizRecorder\AbizRecorder.csproj") -c Release -r win-x64 --self-contained false -o $recorderDir
+    if ($LASTEXITCODE -ne 0) { throw "Публикация службы AbizRecorder не удалась" }
+
     Write-Step 2 "сборка MSI-пакета"
     dotnet build (Join-Path $root "installer\msi\AbizInstaller.wixproj") -c Release
     if ($LASTEXITCODE -ne 0) { throw "Сборка MSI не удалась" }

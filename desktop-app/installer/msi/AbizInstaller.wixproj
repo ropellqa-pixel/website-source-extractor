@@ -6,7 +6,8 @@
     <Cultures>ru-RU</Cultures>
     <OutputPath>$(MSBuildThisFileDirectory)..\out\</OutputPath>
     <PublishDir>$(MSBuildThisFileDirectory)..\..\AbizShell\bin\publish</PublishDir>
-    <DefineConstants>PublishDir=$(PublishDir)</DefineConstants>
+    <RecorderDir>$(MSBuildThisFileDirectory)..\..\AbizRecorder\bin\publish</RecorderDir>
+    <DefineConstants>PublishDir=$(PublishDir);RecorderDir=$(RecorderDir)</DefineConstants>
     <!-- Проверки ярлыков для установки "для всех пользователей" дают ложные ошибки. -->
     <SuppressIces>ICE38;ICE43;ICE57;ICE64;ICE91</SuppressIces>
   </PropertyGroup>

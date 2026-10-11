@@ -293,6 +293,10 @@ def _auth(cur, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     token = (headers.get('X-Authorization') or headers.get('x-authorization') or '').replace('Bearer ', '').strip()
     if not token:
         return None
+    if token.startswith('rec_'):
+        cur.execute(f'SELECT device_code FROM {SCHEMA}.recorder_keys WHERE key = %s AND revoked_at IS NULL', (token,))
+        r = cur.fetchone()
+        return {'recorder': r[0], 'can_manage': False} if r else None
     cur.execute(f'SELECT u.id, u.email, u.is_admin FROM {SCHEMA}.auth_sessions s JOIN {SCHEMA}.auth_users u '
                 f'ON u.id = s.user_id WHERE s.token = %s AND s.expires_at > now()', (token,))
     row = cur.fetchone()
@@ -319,6 +323,17 @@ def _get_camera(cur, cam_id: str) -> Optional[Dict[str, Any]]:
     cur.execute(f'SELECT {", ".join(COLS)} FROM {SCHEMA}.cameras WHERE id = %s', (cam_id,))
     row = cur.fetchone()
     return dict(zip(COLS, row)) if row else None
+
+
+def _recorder_camera(cur, device_code: str, cam_id: str) -> bool:
+    cur.execute(f'SELECT 1 FROM {SCHEMA}.skud_controllers WHERE active AND recorder_device = %s '
+                f'AND (camera_id = %s OR inside_camera_id = %s) LIMIT 1', (device_code, cam_id, cam_id))
+    if cur.fetchone():
+        return True
+    cur.execute(f"SELECT 1 FROM {SCHEMA}.cameras c WHERE c.id = %s AND lower(replace(c.name, ' ', '')) IN ('склад-вн', 'складвн') "
+                f"AND EXISTS (SELECT 1 FROM {SCHEMA}.skud_controllers k WHERE k.active AND k.recorder_device = %s)",
+                (cam_id, device_code))
+    return cur.fetchone() is not None
 
 
 def _list(cur, can_manage: bool):
@@ -361,6 +376,11 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         user = _auth(cur, event)
         if not user:
             return _resp(401, {'error': 'Требуется вход в систему'})
+
+        if user.get('recorder'):
+            # Служба-регистратор склада: только живое видео камер, которые этот ПК записывает.
+            if action != 'live' or not _recorder_camera(cur, user['recorder'], body.get('id') or ''):
+                return _resp(403, {'error': 'Нет доступа'})
 
         if action == 'list':
             return _resp(200, {'cameras': _list(cur, user['can_manage']), 'can_manage': user['can_manage']})

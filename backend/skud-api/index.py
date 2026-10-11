@@ -391,6 +391,11 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if action.startswith('rec_'):
             headers = event.get('headers') or {}
             token = (headers.get('X-Authorization') or headers.get('x-authorization') or '').replace('Bearer ', '').strip()
+            if action == 'rec_key':
+                dev = recorder.device_by_api_token(cur, SCHEMA, token)
+                if not dev:
+                    return _resp(401, {'error': 'Компьютер не привязан'})
+                return _resp(200, recorder.issue_key(cur, SCHEMA, dev))
             dev = recorder.device_by_token(cur, SCHEMA, token)
             if not dev:
                 return _resp(401, {'error': 'Компьютер не привязан'})

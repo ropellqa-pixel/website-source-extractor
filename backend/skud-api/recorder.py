@@ -27,13 +27,40 @@ def cdn(key: str) -> str:
     return f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{key}"
 
 
-def device_by_token(cur, schema: str, token: str):
+def device_by_api_token(cur, schema: str, token: str):
     if not token:
         return None
     cur.execute(f'SELECT d.device_code, d.hostname FROM {schema}.api_tokens t JOIN {schema}.devices d '
                 f'ON d.device_code = t.device_code WHERE t.token = %s AND t.revoked_at IS NULL', (token,))
     r = cur.fetchone()
     return {'code': r[0], 'host': r[1]} if r else None
+
+
+def device_by_token(cur, schema: str, token: str):
+    """Ключ службы-регистратора (только видео) или ключ самой программы АБИЗ."""
+    if not token:
+        return None
+    if token.startswith('rec_'):
+        cur.execute(f'SELECT d.device_code, d.hostname FROM {schema}.recorder_keys k JOIN {schema}.devices d '
+                    f"ON d.device_code = k.device_code WHERE k.key = %s AND k.revoked_at IS NULL AND d.status = 'linked'",
+                    (token,))
+        r = cur.fetchone()
+        if r:
+            cur.execute(f'UPDATE {schema}.recorder_keys SET last_used_at = now() WHERE key = %s', (token,))
+        return {'code': r[0], 'host': r[1], 'service': True} if r else None
+    return device_by_api_token(cur, schema, token)
+
+
+def issue_key(cur, schema: str, dev: Dict[str, Any]) -> Dict[str, Any]:
+    """Ключ для службы-регистратора. Даёт доступ только к записи камер склада — не к управлению ПК."""
+    cur.execute(f'SELECT key FROM {schema}.recorder_keys WHERE device_code = %s AND revoked_at IS NULL '
+                f'ORDER BY created_at DESC LIMIT 1', (dev['code'],))
+    r = cur.fetchone()
+    if r:
+        return {'key': r[0]}
+    key = 'rec_' + uuid.uuid4().hex + uuid.uuid4().hex
+    cur.execute(f'INSERT INTO {schema}.recorder_keys (key, device_code) VALUES (%s, %s)', (key, dev['code']))
+    return {'key': key}
 
 
 def poll(cur, schema: str, dev: Dict[str, Any], body: Dict[str, Any]) -> Dict[str, Any]:

@@ -5,7 +5,7 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
      xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx">
 
-  <Bundle Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="1.0.0.0"
+  <Bundle Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="1.1.0.0"
           UpgradeCode="c1f4e2a7-9b3d-4c8e-a6f1-7d2b5e8c3a94"
           IconSourceFile="abiz.ico">
 

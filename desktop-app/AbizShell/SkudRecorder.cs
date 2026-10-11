@@ -30,6 +30,10 @@ namespace AbizShell
     public sealed class SkudRecorder
     {
         private const string SkudApiUrl = "https://functions.poehali.dev/150e30dd-bd2d-45c5-8db8-a4055bf55fd9";
+        private const string CamerasApiUrl = "https://functions.poehali.dev/246cb9d5-b997-40d1-8f46-082cafe7879e";
+
+        /// <summary>Подпись в статусе на сайте: «служба» — работает фоновая служба AbizRecorder.</summary>
+        public static string StatusPrefix { get; set; } = "";
         private const string FfmpegZipUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
         private const string FfmpegPartsUrl = "https://cdn.poehali.dev/projects/451dcdd9-845e-4f12-82d1-0501056cd61b/bucket/skud/tools/ffmpeg-9.0.2.zip";
         private const int FfmpegParts = 37;
@@ -95,9 +99,14 @@ namespace AbizShell
                 TimeSpan wait = TimeSpan.FromSeconds(10);
                 try
                 {
-                    var poll = await PostAsync(new { action = "rec_poll", status = _status }, ct);
+                    var poll = await PostAsync(new { action = "rec_poll", status = StatusPrefix + _status }, ct);
                     bool isRecorder = poll.TryGetProperty("recorder", out var rf) && rf.ValueKind == JsonValueKind.True;
-                    if (!isRecorder)
+                    if (poll.TryGetProperty("error", out var pe) && !poll.TryGetProperty("recorder", out _))
+                    {
+                        _status = "сервер: " + pe.GetString();
+                        wait = TimeSpan.FromSeconds(60);
+                    }
+                    else if (!isRecorder)
                     {
                         if (!_recordings.IsEmpty)
                         {
@@ -512,6 +521,31 @@ namespace AbizShell
             catch { return JsonDocument.Parse("{}").RootElement.Clone(); }
         }
 
+        /// <summary>Ссылка на живое видео камеры (выдаёт сервер камер; логины камер на ПК не попадают).</summary>
+        private static async Task<string?> LiveUrlAsync(string token, string cameraId, bool fresh, string quality, CancellationToken ct)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Post, CamerasApiUrl)
+                    {
+                        Content = new StringContent(JsonSerializer.Serialize(new { action = "live", id = cameraId, quality, fresh }),
+                            Encoding.UTF8, "application/json"),
+                    };
+                    req.Headers.Add("X-Authorization", token);
+                    using var resp = await Http.SendAsync(req, ct);
+                    var root = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct)).RootElement;
+                    if (root.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(u.GetString()))
+                        return u.GetString();
+                }
+                catch (OperationCanceledException) { throw; }
+                catch { }
+                await Task.Delay(1200, ct);
+            }
+            return null;
+        }
+
         private static string Short(string s)
         {
             s = (s ?? "").Trim().Replace("\r", " ").Replace("\n", " ");
@@ -567,8 +601,8 @@ namespace AbizShell
                 {
                     try
                     {
-                        var live = await CamerasClient.LiveAsync(_apiToken, CameraId, fresh, Quality);
-                        if (string.IsNullOrEmpty(live.Url))
+                        var liveUrl = await LiveUrlAsync(_apiToken, CameraId, fresh, Quality, ct);
+                        if (string.IsNullOrEmpty(liveUrl))
                         {
                             await Task.Delay(TimeSpan.FromSeconds(15), ct);
                             fresh = true;
@@ -577,7 +611,7 @@ namespace AbizShell
                         string pattern = Path.Combine(_dir, "seg_%Y%m%dT%H%M%S.ts");
                         // Без перекодирования: поток камеры режется на минутные куски, в имени — время ПК начала куска.
                         string args = "-hide_banner -loglevel error " +
-                                      $"-i \"{live.Url}\" -map 0:v:0 -map 0:a:0? -c copy " +
+                                      $"-i \"{liveUrl}\" -map 0:v:0 -map 0:a:0? -c copy " +
                                       $"-f segment -segment_time {(int)SegmentLength.TotalSeconds} -segment_atclocktime 1 " +
                                       "-reset_timestamps 1 -strftime 1 " +
                                       $"\"{pattern}\"";

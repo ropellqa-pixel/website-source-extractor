@@ -190,6 +190,7 @@ function Log($m) {{ ""$(Get-Date -Format s) $m"" | Out-File -Append -Encoding ut
 Log 'старт установки {StagedVersion}'
 try {{ Wait-Process -Id {pid} -Timeout 40 -ErrorAction SilentlyContinue }} catch {{}}
 Get-Process -Name {Q(exeName)} -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne $PID }} | Stop-Process -Force -ErrorAction SilentlyContinue
+& sc.exe stop AbizRecorder 2>$null | Out-Null
 Start-Sleep -Milliseconds 800
 if (Test-Path {Q(backup)}) {{ Remove-Item {Q(backup)} -Recurse -Force -ErrorAction SilentlyContinue }}
 robocopy {Q(appDir)} {Q(backup)} /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
@@ -199,11 +200,15 @@ for ($i = 0; $i -lt 8 -and -not $ok; $i++) {{
   if ($LASTEXITCODE -lt 8) {{ $ok = $true }} else {{ Log ""копирование, код $LASTEXITCODE""; Start-Sleep 2 }}
 }}
 Log ""файлы скопированы: $ok""
+& sc.exe start AbizRecorder 2>$null | Out-Null
 $p = Start-Process -FilePath {Q(exePath)} -WorkingDirectory {Q(appDir)} -PassThru
 Start-Sleep 40
 if (-not $p -or $p.HasExited) {{
   Log 'новая версия не запустилась — возвращаю прежнюю'
+  & sc.exe stop AbizRecorder 2>$null | Out-Null
+  Start-Sleep 2
   robocopy {Q(backup)} {Q(appDir)} /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+  & sc.exe start AbizRecorder 2>$null | Out-Null
   Start-Process -FilePath {Q(exePath)} -WorkingDirectory {Q(appDir)}
 }} else {{ Log 'новая версия работает' }}
 ";

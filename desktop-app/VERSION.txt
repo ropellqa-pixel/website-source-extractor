@@ -1,2 +1,3 @@
-ABIZ project version 19 (program 3.7.2)
+ABIZ project version 20 (program 3.8)
 New: warehouse video recorder for SKUD (cameras Sklad / Sklad-VN, clips per visit).
+New: background Windows service AbizRecorder - records warehouse cameras always, no login needed (video-only key).

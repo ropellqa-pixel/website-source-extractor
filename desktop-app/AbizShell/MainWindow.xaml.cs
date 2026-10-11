@@ -129,7 +129,7 @@ namespace AbizShell
             if (!_isLinked) await PollDeviceAsync();
 
             StartRemoteAgent();
-            SkudRecorder.EnsureStarted(_apiToken);
+            RecorderService.Start(_apiToken);
 
             // Сотрудник вышел, а обновление уже скачано — ставим его сейчас.
             if (Updater.StagedDir != null) ApplyUpdateNow();
@@ -240,7 +240,7 @@ namespace AbizShell
                     case "linked":
                         _isLinked = true;
                         _apiToken = DeviceManager.GetApiToken();
-                        SkudRecorder.EnsureStarted(_apiToken);
+                        RecorderService.Start(_apiToken);
                         _devicePollTimer?.Stop();
                         UpdateLinkUi();
                         SetStatus("Устройство привязано. Введите пароль", Colors.LightGreen);
