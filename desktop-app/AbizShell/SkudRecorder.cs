@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -332,7 +333,7 @@ namespace AbizShell
                     await using var fs = File.Create(zip);
                     await resp.Content.CopyToAsync(fs, ct);
                 }
-                using (var archive = System.IO.Compression.ZipFile.OpenRead(zip))
+                using (var archive = ZipFile.OpenRead(zip))
                 {
                     var entry = archive.Entries.FirstOrDefault(e => e.FullName.EndsWith("bin/ffmpeg.exe", StringComparison.OrdinalIgnoreCase));
                     if (entry == null) return null;
