@@ -2,32 +2,12 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
 import { db, auth } from '@/lib/sdk';
 import { createVkBindCode, getVkStatus, unbindVk } from '../lib/vkBinding';
-import RotationSettings from '../components/RotationSettings';
-import {
-  Settings as SettingsIcon, User, Building2, Bell, Shield,
-  Save, Lock, Mail, Phone, Globe, KeyRound, Eye, EyeOff,
-  RefreshCw, Copy, Check, Unlock, Banknote, Calendar,
-  Link, Monitor, AlertTriangle
-} from 'lucide-react';
-
-interface PinCode {
-  id: string;
-  user_id: string;
-  pin: string;
-  email: string;
-  shortcut_code: string;
-}
-
-interface Profile {
-  id: string;
-  full_name: string;
-  email: string;
-  role: string;
-  department: string;
-  status: string;
-  vk_link: string | null;
-  vk_id: string | null;
-}
+import { User, Building2, Bell, Shield, KeyRound, Banknote, Calendar } from 'lucide-react';
+import SettingsAccountTabs from '../components/settings/SettingsAccountTabs';
+import SettingsWorkTabs from '../components/settings/SettingsWorkTabs';
+import SettingsSystemTabs from '../components/settings/SettingsSystemTabs';
+import SettingsDialogs from '../components/settings/SettingsDialogs';
+import type { PinCode, Profile } from '../components/settings/types';
 
 const SECRET_CODE = '2535';
 const DIRECTOR_PIN = '2152';
@@ -413,468 +393,92 @@ export default function Settings() {
           </div>
 
           <div className="flex-1">
-            {activeTab === 'profile' && (
-              <div className="space-y-6">
-                <div className="bg-card rounded-xl border border-border p-6">
-                  <h2 className="text-lg font-semibold text-foreground mb-6">Настройки профиля</h2>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-foreground/80 mb-2">ФИО</label>
-                      <div className="relative">
-                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                        <input type="text" value={profileData.fullName}
-                          onChange={(e) => setProfileData({ ...profileData, fullName: e.target.value })}
-                          className="w-full bg-secondary border border-border rounded-lg pl-10 pr-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-foreground/80 mb-2">Email</label>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                        <input type="email" value={profileData.email}
-                          onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
-                          className="w-full bg-secondary border border-border rounded-lg pl-10 pr-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-foreground/80 mb-2">Телефон</label>
-                      <div className="relative">
-                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                        <input type="tel" value={profileData.phone}
-                          onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
-                          className="w-full bg-secondary border border-border rounded-lg pl-10 pr-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base"
-                          placeholder="+7 (999) 123-45-67" />
-                      </div>
-                    </div>
-                  </div>
-                  <button onClick={handleSaveProfile} className="mt-6 bg-blue-500 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-600 transition-all flex items-center gap-2">
-                    <Save className="w-5 h-5" />
-                    {saved ? 'Сохранено!' : 'Сохранить'}
-                  </button>
-                </div>
+            <SettingsAccountTabs
+              activeTab={activeTab}
+              profileData={profileData}
+              setProfileData={setProfileData}
+              companyData={companyData}
+              setCompanyData={setCompanyData}
+              saved={saved}
+              handleSaveProfile={handleSaveProfile}
+              vkError={vkError}
+              vkLinked={vkLinked}
+              vkLink={vkLink}
+              vkBindCode={vkBindCode}
+              vkBindingLoading={vkBindingLoading}
+              handleGenerateVkCode={handleGenerateVkCode}
+              handleUnbindOwnVk={handleUnbindOwnVk}
+              pins={pins}
+              isDirector={isDirector}
+              pinLoading={pinLoading}
+              handleCreateDirectorPin={handleCreateDirectorPin}
+              showPin={showPin}
+              setShowPin={setShowPin}
+              copiedId={copiedId}
+              copyToClipboard={copyToClipboard}
+              DIRECTOR_PIN={DIRECTOR_PIN}
+            />
 
-                <div className="bg-card rounded-xl border border-border p-6">
-                  <h2 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
-                    <Link className="w-5 h-5 text-blue-600" />
-                    Привязка VK
-                  </h2>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Привяжите VK, чтобы получать табель и расчёт зарплаты сообщением от бота.
-                  </p>
-                  {vkError && (
-                    <div className="mb-3 p-2 bg-red-500/10 border border-red-500/30 rounded-lg">
-                      <p className="text-xs text-red-600">{vkError}</p>
-                    </div>
-                  )}
-                  {vkLinked ? (
-                    <div className="space-y-3">
-                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg flex items-center gap-2">
-                        <Check className="w-5 h-5 text-emerald-600 shrink-0" />
-                        <p className="text-sm text-emerald-600 font-medium">VK привязан{vkLink ? ` (${vkLink})` : ''}</p>
-                      </div>
-                      <button onClick={handleUnbindOwnVk}
-                        className="w-full py-2 border border-red-500/30 rounded-lg text-sm text-red-600 hover:bg-red-500/10 transition-all">
-                        Отвязать VK
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {vkBindCode ? (
-                        <div className="p-4 bg-secondary rounded-lg border border-blue-500/30 text-center">
-                          <p className="text-xs text-muted-foreground mb-2">Код привязки</p>
-                          <p className="font-mono text-3xl text-blue-600 tracking-widest font-bold">{vkBindCode}</p>
-                          <p className="text-xs text-muted-foreground mt-2">Отправьте этот код боту АнодБИЗ ВКонтакте</p>
-                        </div>
-                      ) : (
-                        <div className="p-3 bg-secondary rounded-lg border border-border text-center">
-                          <p className="text-xs text-muted-foreground">Нажмите «Получить код» — придёт 6-значный код для отправки боту</p>
-                        </div>
-                      )}
-                      <button onClick={handleGenerateVkCode} disabled={vkBindingLoading}
-                        className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50">
-                        <RefreshCw className="w-4 h-4" />
-                        {vkBindingLoading ? 'Создание...' : vkBindCode ? 'Новый код' : 'Получить код'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+            <SettingsWorkTabs
+              activeTab={activeTab}
+              isDeputy={isDeputy}
+              userId={user?.id}
+              profiles={profiles}
+              salLoading={salLoading}
+              percentValue={percentValue}
+              setPercentValue={setPercentValue}
+              percentLocked={percentLocked}
+              handleUnlockPercent={handleUnlockPercent}
+              setShowPercentLock={setShowPercentLock}
+              responsibleId={responsibleId}
+              setResponsibleId={setResponsibleId}
+              managerPercent={managerPercent}
+              setManagerPercent={setManagerPercent}
+              managerResponsibleId={managerResponsibleId}
+              setManagerResponsibleId={setManagerResponsibleId}
+              handleSaveSalary={handleSaveSalary}
+              salSaving={salSaving}
+              salSaved={salSaved}
+              schLoading={schLoading}
+              scheduleResponsibleId={scheduleResponsibleId}
+              setScheduleResponsibleId={setScheduleResponsibleId}
+              canEditScheduleSettings={canEditScheduleSettings}
+              scheduleProfiles={scheduleProfiles}
+              excludedIds={excludedIds}
+              setExcludedIds={setExcludedIds}
+              handleSaveSchedule={handleSaveSchedule}
+              schSaving={schSaving}
+              schSaved={schSaved}
+            />
 
-            {activeTab === 'company' && (
-              <div className="bg-card rounded-xl border border-border p-6">
-                <h2 className="text-lg font-semibold text-foreground mb-6">Данные компании</h2>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-foreground/80 mb-2">Название организации</label>
-                    <div className="relative">
-                      <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                      <input type="text" value={companyData.name}
-                        onChange={(e) => setCompanyData({ ...companyData, name: e.target.value })}
-                        className="w-full bg-secondary border border-border rounded-lg pl-10 pr-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-foreground/80 mb-2">ИНН</label>
-                      <input type="text" value={companyData.inn}
-                        onChange={(e) => setCompanyData({ ...companyData, inn: e.target.value })}
-                        className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-foreground/80 mb-2">ОГРН</label>
-                      <input type="text" value={companyData.ogrn}
-                        onChange={(e) => setCompanyData({ ...companyData, ogrn: e.target.value })}
-                        className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base" />
-                    </div>
-                  </div>
-                </div>
-                <button onClick={handleSaveProfile} className="mt-6 bg-blue-500 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-600 transition-all flex items-center gap-2">
-                  <Save className="w-5 h-5" />
-                  {saved ? 'Сохранено!' : 'Сохранить'}
-                </button>
-              </div>
-            )}
-
-            {activeTab === 'quicklogin' && (
-              <div className="bg-card rounded-xl border border-border p-6">
-                <h2 className="text-lg font-semibold text-foreground mb-2">Быстрый вход по пин-коду</h2>
-                <p className="text-sm text-muted-foreground mb-6">Ваш пин-код для быстрого входа.</p>
-                {pins.length === 0 ? (
-                  <div className="text-center py-8">
-                    <KeyRound className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-muted-foreground mb-4">Пин-код не назначен</p>
-                    {isDirector ? (
-                      <button onClick={handleCreateDirectorPin} disabled={pinLoading}
-                        className="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-6 py-3 rounded-lg font-medium hover:from-amber-600 hover:to-orange-700 transition-all flex items-center gap-2 mx-auto disabled:opacity-50">
-                        <KeyRound className="w-5 h-5" />
-                        {pinLoading ? 'Создание...' : `Создать мой пин (${DIRECTOR_PIN})`}
-                      </button>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">Обратитесь к руководителю для назначения пин-кода</p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {pins.map(pinEntry => (
-                      <div key={pinEntry.id} className="bg-secondary rounded-lg p-4 border border-border">
-                        <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                          <div className="flex items-center gap-3">
-                            <KeyRound className="w-4 h-4 text-amber-600" />
-                            <span className="font-mono text-xl text-foreground tracking-widest">
-                              {showPin === pinEntry.id ? pinEntry.pin : '••••'}
-                            </span>
-                            <button onClick={() => setShowPin(showPin === pinEntry.id ? null : pinEntry.id)}
-                              className="text-muted-foreground hover:text-foreground transition-colors">
-                              {showPin === pinEntry.id ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                            <button onClick={() => copyToClipboard(pinEntry.pin, `setting-pin-${pinEntry.id}`)}
-                              className="text-muted-foreground hover:text-foreground transition-colors" title="Копировать">
-                              {copiedId === `setting-pin-${pinEntry.id}` ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    {isDirector && (
-                      <button onClick={handleCreateDirectorPin} disabled={pinLoading}
-                        className="w-full py-2 border border-dashed border-border rounded-lg text-sm text-muted-foreground hover:text-amber-600 hover:border-amber-500 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
-                        <RefreshCw className="w-4 h-4" />
-                        {pinLoading ? 'Обновление...' : `Обновить пин на ${DIRECTOR_PIN}`}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'salary' && (
-              <div className="space-y-6">
-                {!isDeputy ? (
-                  <div className="bg-card rounded-xl border border-border p-6 text-center">
-                    <Banknote className="w-12 h-12 text-muted-foreground/70 mx-auto mb-3" />
-                    <h2 className="text-lg font-semibold text-muted-foreground">Доступно заместителю директора</h2>
-                  </div>
-                ) : salLoading ? (
-                  <div className="bg-card rounded-xl border border-border p-6 text-center">
-                    <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                    <p className="text-muted-foreground text-sm">Загрузка...</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="bg-card rounded-xl border border-border p-6">
-                      <h2 className="text-lg font-semibold text-foreground mb-6 flex items-center gap-2">
-                        <Banknote className="w-5 h-5 text-emerald-600" />
-                        Настройки зарплаты
-                      </h2>
-                      <p className="text-sm text-muted-foreground mb-6">Глобальные настройки, действуют для всех периодов</p>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="bg-secondary rounded-lg p-4 border border-border">
-                          <label className="block text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">Процент от выручки (%)</label>
-                          <div className="flex gap-2">
-                            <input type="number" step="0.1" value={percentValue} disabled={percentLocked}
-                              onChange={(e) => setPercentValue(Number(e.target.value))}
-                              className="flex-1 bg-secondary border border-border rounded-lg px-4 py-3 text-foreground text-lg font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50" />
-                            {percentLocked ? (
-                              <button onClick={handleUnlockPercent}
-                                className="px-4 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-all flex items-center gap-1 text-sm font-medium">
-                                <Unlock className="w-4 h-4" /> Разблокировать
-                              </button>
-                            ) : (
-                              <button onClick={() => setShowPercentLock(true)}
-                                className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all flex items-center gap-1 text-sm font-medium">
-                                <Lock className="w-4 h-4" /> Заблокировать
-                              </button>
-                            )}
-                          </div>
-                          {percentLocked && <p className="text-xs text-amber-600 mt-2">🔒 Процент заблокирован кодом.</p>}
-                        </div>
-                        <div className="bg-secondary rounded-lg p-4 border border-border">
-                          <label className="block text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">Ответственный за расчёт ЗП</label>
-                          <select value={responsibleId || ''} onChange={(e) => setResponsibleId(e.target.value || null)}
-                            className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                            <option value="">— Не назначен —</option>
-                            {profiles.filter(p => p.role !== 'director').map(p => (
-                              <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="bg-secondary rounded-lg p-4 border border-indigo-500/30">
-                          <label className="block text-xs text-indigo-700 mb-2 font-medium uppercase tracking-wider">Процент заведующего (%)</label>
-                          <input type="number" step="0.1" value={managerPercent}
-                            onChange={(e) => setManagerPercent(Number(e.target.value))}
-                            className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground text-lg font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-                        </div>
-                        <div className="bg-secondary rounded-lg p-4 border border-indigo-500/30">
-                          <label className="block text-xs text-indigo-700 mb-2 font-medium uppercase tracking-wider">Ответственный за заведующих</label>
-                          <select value={managerResponsibleId || ''} onChange={(e) => setManagerResponsibleId(e.target.value || null)}
-                            className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                            <option value="">— Не назначен —</option>
-                            {profiles.filter(p => p.role !== 'director').map(p => (
-                              <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                      <div className="mt-6 flex justify-end">
-                        <button onClick={handleSaveSalary} disabled={salSaving}
-                          className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all disabled:opacity-50">
-                          <Save className="w-4 h-4" />
-                          {salSaving ? 'Сохранение...' : salSaved ? 'Сохранено!' : 'Сохранить'}
-                        </button>
-                      </div>
-                    </div>
-                    <RotationSettings isDeputy={isDeputy} profiles={profiles} responsibleId={responsibleId} userId={user?.id || '00000000-0000-0000-0000-000000000000'} />
-                  </>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'schedule' && (
-              <div className="space-y-6">
-                {schLoading ? (
-                  <div className="bg-card rounded-xl border border-border p-6 text-center">
-                    <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                    <p className="text-muted-foreground text-sm">Загрузка...</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="bg-card rounded-xl border border-border p-6">
-                      <h2 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
-                        <Calendar className="w-5 h-5 text-blue-600" />
-                        Настройки табеля
-                      </h2>
-                      <div className="bg-secondary rounded-lg p-4 border border-border mt-4">
-                        <label className="block text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wider">Ответственный за табель</label>
-                        <select value={scheduleResponsibleId || ''} onChange={(e) => setScheduleResponsibleId(e.target.value || null)}
-                          disabled={!canEditScheduleSettings}
-                          className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50">
-                          <option value="">— Не назначен —</option>
-                          {scheduleProfiles.map(p => (
-                            <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <div className="bg-card rounded-xl border border-border p-6">
-                      <h3 className="text-base font-semibold text-foreground mb-4">Удаление сотрудников из табеля</h3>
-                      <div className="space-y-2 max-h-96 overflow-y-auto">
-                        {scheduleProfiles.map(p => {
-                          const isExcluded = excludedIds.has(p.id);
-                          return (
-                            <div key={p.id} className={`flex items-center justify-between p-3 rounded-lg border transition-all ${isExcluded ? 'bg-red-500/5 border-red-500/20 opacity-60' : 'bg-secondary border-border'}`}>
-                              <div className="flex items-center gap-3">
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${isExcluded ? 'bg-red-500/20 text-red-600' : 'bg-muted text-foreground/80'}`}>
-                                  {(p.full_name || p.email || '?')[0]}
-                                </div>
-                                <div>
-                                  <p className={`text-sm font-medium ${isExcluded ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{p.full_name || 'Без имени'}</p>
-                                  <p className="text-xs text-muted-foreground">{p.email}</p>
-                                </div>
-                              </div>
-                              {canEditScheduleSettings && (
-                                <button onClick={() => setExcludedIds(prev => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else next.add(p.id); return next; })}
-                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isExcluded ? 'bg-emerald-600/20 text-emerald-600 hover:bg-emerald-600/30 border border-emerald-500/30' : 'bg-red-600/20 text-red-600 hover:bg-red-600/30 border border-red-500/30'}`}>
-                                  {isExcluded ? 'Вернуть' : 'Убрать'}
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    {canEditScheduleSettings && (
-                      <div className="flex justify-end">
-                        <button onClick={handleSaveSchedule} disabled={schSaving}
-                          className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all disabled:opacity-50">
-                          <Save className="w-4 h-4" />
-                          {schSaving ? 'Сохранение...' : schSaved ? 'Сохранено!' : 'Сохранить'}
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'notifications' && (
-              <div className="bg-card rounded-xl border border-border p-6">
-                <h2 className="text-lg font-semibold text-foreground mb-6">Настройки уведомлений</h2>
-                <div className="space-y-4">
-                  {Object.entries(notifications).map(([key, value]) => (
-                    <div key={key} className="flex items-center justify-between p-4 bg-secondary rounded-lg">
-                      <div>
-                        <p className="font-medium text-foreground">{key === 'email' ? 'Email' : key === 'push' ? 'Push' : key === 'chat' ? 'Чат' : 'Документы'}</p>
-                      </div>
-                      <button onClick={() => setNotifications({ ...notifications, [key]: !value })}
-                        className={`w-12 h-6 rounded-full transition-all ${value ? 'bg-blue-500' : 'bg-muted'}`}>
-                        <div className={`w-5 h-5 bg-white rounded-full transition-all ${value ? 'translate-x-6' : 'translate-x-0.5'}`} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'security' && (
-              <div className="bg-card rounded-xl border border-border p-6">
-                <h2 className="text-lg font-semibold text-foreground mb-6">Безопасность</h2>
-                <div className="p-4 bg-secondary rounded-lg">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Lock className="w-5 h-5 text-amber-600" />
-                    <h3 className="font-medium text-foreground">Изменить пароль</h3>
-                  </div>
-                  <p className="text-sm text-muted-foreground mb-4">Рекомендуем регулярно менять пароль.</p>
-                  <div className="space-y-3">
-                    <input type="password" className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base" placeholder="Текущий пароль" />
-                    <input type="password" className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base" placeholder="Новый пароль" />
-                    <input type="password" className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-base" placeholder="Подтвердите" />
-                  </div>
-                </div>
-
-                <div className="p-4 bg-secondary rounded-lg mt-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Monitor className="w-5 h-5 text-blue-600" />
-                    <h3 className="font-medium text-foreground">Доступ для десктоп-приложения</h3>
-                  </div>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Постоянный личный ключ для подключения твоей программы (C#/WPF) напрямую к серверу —
-                    без входа через браузер. Вставь его в настройки приложения один раз.
-                  </p>
-
-                  {apiTokenLoading ? (
-                    <p className="text-sm text-muted-foreground">Загрузка...</p>
-                  ) : apiToken ? (
-                    <>
-                      <div className="flex items-center gap-2 mb-3">
-                        <input
-                          readOnly
-                          type={apiTokenVisible ? 'text' : 'password'}
-                          value={apiToken}
-                          className="flex-1 bg-card border border-border rounded-lg px-4 py-3 text-foreground font-mono text-sm focus:outline-none"
-                        />
-                        <button
-                          onClick={() => setApiTokenVisible(v => !v)}
-                          className="p-3 bg-card border border-border rounded-lg text-muted-foreground hover:text-foreground transition-all"
-                          title={apiTokenVisible ? 'Скрыть' : 'Показать'}
-                        >
-                          {apiTokenVisible ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                        </button>
-                        <button
-                          onClick={() => copyToClipboard(apiToken, 'api-token')}
-                          className="p-3 bg-card border border-border rounded-lg text-muted-foreground hover:text-foreground transition-all"
-                          title="Скопировать"
-                        >
-                          {copiedId === 'api-token' ? <Check className="w-5 h-5 text-emerald-600" /> : <Copy className="w-5 h-5" />}
-                        </button>
-                      </div>
-                      <button
-                        onClick={() => setShowRevokeConfirm(true)}
-                        className="flex items-center gap-2 text-sm text-red-600 hover:text-red-700 font-medium"
-                      >
-                        <RefreshCw className="w-4 h-4" />
-                        Отозвать и выпустить новый ключ
-                      </button>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Отзывай ключ, только если он попал не в те руки — старые подключения программы сразу перестанут работать.
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Не удалось получить ключ. Обновите страницу.</p>
-                  )}
-                </div>
-              </div>
-            )}
+            <SettingsSystemTabs
+              activeTab={activeTab}
+              notifications={notifications}
+              setNotifications={setNotifications}
+              apiTokenLoading={apiTokenLoading}
+              apiToken={apiToken}
+              apiTokenVisible={apiTokenVisible}
+              setApiTokenVisible={setApiTokenVisible}
+              copiedId={copiedId}
+              copyToClipboard={copyToClipboard}
+              setShowRevokeConfirm={setShowRevokeConfirm}
+            />
           </div>
         </div>
       </main>
 
-      {showPercentLock && (
-        <div className="fixed inset-0 bg-foreground/30 flex items-center justify-center z-[100]" onClick={() => setShowPercentLock(false)}>
-          <div className="bg-card rounded-2xl p-6 w-80 border border-border shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 mb-4">
-              <Lock className="w-5 h-5 text-emerald-600" />
-              <h3 className="text-foreground font-semibold">Блокировка процента</h3>
-            </div>
-            <input type="password" value={percentCode}
-              onChange={(e) => { setPercentCode(e.target.value); setPercentError(''); }}
-              onKeyDown={(e) => e.key === 'Enter' && handleLockPercent()}
-              className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground text-center text-lg tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-emerald-500 mb-3"
-              placeholder="••••" autoFocus />
-            {percentError && <p className="text-red-600 text-sm mb-3">{percentError}</p>}
-            <div className="flex gap-2">
-              <button onClick={() => { setShowPercentLock(false); setPercentCode(''); setPercentError(''); }}
-                className="flex-1 bg-secondary hover:bg-border text-foreground py-2 rounded-lg transition-all text-sm">Отмена</button>
-              <button onClick={handleLockPercent}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg transition-all flex items-center justify-center gap-1 text-sm">
-                <Check className="w-4 h-4" /> Подтвердить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showRevokeConfirm && (
-        <div className="fixed inset-0 bg-foreground/30 flex items-center justify-center z-[100]" onClick={() => setShowRevokeConfirm(false)}>
-          <div className="bg-card rounded-2xl p-6 w-96 border border-border shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 mb-3">
-              <AlertTriangle className="w-5 h-5 text-red-600" />
-              <h3 className="text-foreground font-semibold">Отозвать ключ доступа?</h3>
-            </div>
-            <p className="text-sm text-muted-foreground mb-5">
-              Текущий ключ перестанет работать немедленно. Десктоп-приложение потеряет доступ, пока не введёшь новый ключ в его настройках.
-            </p>
-            <div className="flex gap-2">
-              <button onClick={() => setShowRevokeConfirm(false)}
-                className="flex-1 bg-secondary hover:bg-border text-foreground py-2 rounded-lg transition-all text-sm">Отмена</button>
-              <button onClick={handleRevokeApiToken}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg transition-all flex items-center justify-center gap-1 text-sm">
-                <RefreshCw className="w-4 h-4" /> Отозвать
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SettingsDialogs
+        showPercentLock={showPercentLock}
+        setShowPercentLock={setShowPercentLock}
+        percentCode={percentCode}
+        setPercentCode={setPercentCode}
+        percentError={percentError}
+        setPercentError={setPercentError}
+        handleLockPercent={handleLockPercent}
+        showRevokeConfirm={showRevokeConfirm}
+        setShowRevokeConfirm={setShowRevokeConfirm}
+        handleRevokeApiToken={handleRevokeApiToken}
+      />
     </div>
   );
 }

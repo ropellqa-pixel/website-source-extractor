@@ -103,6 +103,24 @@ def decrypt(token: str) -> Optional[str]:
 _cert_files: Optional[Tuple[str, str]] = None
 
 
+def tls_check() -> List[Dict[str, Any]]:
+    """Проверка, что серверы банка подтверждаются встроенными сертификатами (без ключей организации)."""
+    import socket
+    import ssl
+    out = []
+    for host in ('fintech.sberbank.ru', 'sbi.sberbank.ru'):
+        try:
+            ctx = ssl.create_default_context(cafile=_verify())
+            if hasattr(ssl, 'VERIFY_X509_STRICT'):
+                ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+            with socket.create_connection((host, 9443), timeout=8) as sock:
+                with ctx.wrap_socket(sock, server_hostname=host) as t:
+                    out.append({'host': host, 'ok': True, 'issuer': dict(x[0] for x in t.getpeercert()['issuer']).get('commonName')})
+        except Exception as e:
+            out.append({'host': host, 'ok': False, 'error': str(e)[:200]})
+    return out
+
+
 def diagnose() -> List[Dict[str, Any]]:
     """Пошаговая проверка: сертификат → TLS к банку → ответ банка на наш сертификат."""
     import socket
@@ -116,7 +134,9 @@ def diagnose() -> List[Dict[str, Any]]:
         return [{'step': 'Сертификат организации', 'ok': False, 'text': str(e)}]
     host = api_base().split('//')[1].split(':')[0]
     try:
-        ctx = ssl.create_default_context(cafile=_verify() if isinstance(_verify(), str) else None)
+        ctx = ssl.create_default_context(cafile=_verify())
+        if hasattr(ssl, 'VERIFY_X509_STRICT'):
+            ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
         ctx.load_cert_chain(cp, kp)
         with socket.create_connection((host, 9443), timeout=10) as sock:
             with ctx.wrap_socket(sock, server_hostname=host) as t:
@@ -169,9 +189,23 @@ def cert_files() -> Tuple[str, str]:
     return _cert_files
 
 
-def _verify() -> Any:
-    ca = os.path.join(os.path.dirname(__file__), 'russian_trusted_ca.pem')
-    return ca if os.path.exists(ca) else True
+_ca_path: Optional[str] = None
+
+
+def _verify() -> str:
+    """Файл доверенных сертификатов: общий список (certifi) + корни Минцифры и Сбербанка из ca_bundle.py."""
+    global _ca_path
+    if _ca_path and os.path.exists(_ca_path):
+        return _ca_path
+    import certifi
+    from ca_bundle import SBER_CA_PEM
+    path = os.path.join(tempfile.gettempdir(), 'sber_trusted_ca.pem')
+    with open(certifi.where(), 'r', encoding='utf-8') as f:
+        base = f.read()
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(base + '\n' + SBER_CA_PEM)
+    _ca_path = path
+    return path
 
 
 def _request(method: str, url: str, **kw) -> requests.Response:

@@ -429,6 +429,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         _load_cert(cur)
         if method == 'GET' and qs.get('state') and (qs.get('code') or qs.get('error')):
             return _oauth_callback(cur, qs)
+        if method == 'GET' and qs.get('tls') == 'check':
+            return _resp(200, {'tls': sber.tls_check()})
         if method == 'GET' and qs.get('cron') is not None:
             return _cron(cur, qs.get('cron') or '')
         if method != 'POST':
