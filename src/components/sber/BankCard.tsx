@@ -10,9 +10,9 @@ const KEYS: [string, string][] = [
   ['certificate', 'Сертификат .p12 (Админ-панель → СберБизнес)'],
 ];
 
-interface Props { bank: SberBank; isDeputy: boolean; canSync: boolean; onChanged: () => void }
+interface Props { bank: SberBank; isDeputy: boolean; canSync: boolean; onChanged: () => void; connections?: number }
 
-export default function BankCard({ bank, isDeputy, canSync, onChanged }: Props) {
+export default function BankCard({ bank, isDeputy, canSync, onChanged, connections = 1 }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [settings, setSettings] = useState<{ account: string; limit_payment: string; limit_day: string } | null>(null);
@@ -56,7 +56,7 @@ export default function BankCard({ bank, isDeputy, canSync, onChanged }: Props) 
                 <Button onClick={() => run('connect', { origin: window.location.origin })} disabled={!bank.ready || !!busy} className="bg-emerald-600 hover:bg-emerald-700">
                   <Icon name="Link" size={16} />{busy ? 'Открываю СберБизнес…' : 'Подключить СберБизнес'}
                 </Button>
-                <p className="text-xs text-muted-foreground">Или вставьте Access/Refresh Token в Админ-панели → СберБизнес — банк подключится без этой кнопки.</p>
+                <p className="text-xs text-muted-foreground">Или добавьте подключения по Access/Refresh Token в Админ-панели → СберБизнес — можно несколько.</p>
               </>
             ) : <p className="text-sm text-amber-700">Подключение выполняет заместитель директора.</p>}
             {msg && <p className={`text-sm ${msg.ok ? 'text-emerald-600' : 'text-red-600'}`}>{msg.text}</p>}
@@ -76,7 +76,7 @@ export default function BankCard({ bank, isDeputy, canSync, onChanged }: Props) 
             <Icon name="ShieldCheck" size={16} />СберБизнес подключён{bank.test && ' · тестовый контур'}
           </div>
           <div className="mt-1 text-xl font-semibold">{bank.org?.name}</div>
-          <div className="text-sm text-emerald-100">ИНН {bank.org?.inn} · счёт •••• {bank.account?.slice(-4)}</div>
+          <div className="text-sm text-emerald-100">ИНН {bank.org?.inn} · счёт •••• {bank.account?.slice(-4)}{connections > 1 && ` · подключений: ${connections}`}</div>
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>

@@ -26,7 +26,14 @@ export interface SberBank {
   last_sync_error: string | null; limit_payment: number; limit_day: number; paid_today: number; cron_key: string | null;
 }
 
+export interface SberConnection {
+  id: number; title: string; org: { name: string; inn: string; kpp: string; accounts: { number: string; currency: string }[] } | null;
+  account: string | null; is_default: boolean; active: boolean; last_sync: string | null; last_error: string | null; has_tokens?: boolean;
+}
+
 export interface SberOverview {
+  connections: SberConnection[];
+  notify: { on_send: boolean; on_paid: boolean; on_reject: boolean } | null;
   week: string; requests: SberRequest[]; pending: { week: string; count: number; amount: number }[];
   counterparties: SberCp[]; categories: { id: number; name: string }[]; can: string[]; is_deputy: boolean; bank: SberBank;
 }

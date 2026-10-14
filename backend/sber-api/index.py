@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
 import psycopg2
+import requests
 
 import sber
 from access import current_user
@@ -90,25 +91,109 @@ def _load_cert(cur) -> None:
     sber.set_cert(base64.b64decode(raw) if raw else None, pw or '')
 
 
-def _token(cur) -> str:
-    """Действующий токен банка; при истечении — обновление по refresh_token."""
-    access = _vault_get(cur, 'access_token')
-    exp = _vault_get(cur, 'access_exp')
+def _token(cur, conn_id: int) -> str:
+    """Действующий токен подключения; при истечении — обновление по refresh_token."""
+    access = _vault_get(cur, f'c{conn_id}:access_token')
+    exp = _vault_get(cur, f'c{conn_id}:access_exp')
     if access and exp and int(exp) > sber.now() + 60:
         return access
-    rt = _vault_get(cur, 'refresh_token')
+    rt = _vault_get(cur, f'c{conn_id}:refresh_token')
     if not rt:
-        raise sber.SberError('СберБизнес не подключён. Замдиректора: раздел СБЕР → «Подключить»')
+        raise sber.SberError('У подключения нет ключей — замдиректора: Админ-панель → СберБизнес')
     t = sber.refresh(rt)
-    _store_tokens(cur, t)
+    _store_tokens(cur, conn_id, t)
     return t['access_token']
 
 
-def _store_tokens(cur, t: Dict[str, Any]) -> None:
-    _vault_set(cur, 'access_token', t['access_token'])
-    _vault_set(cur, 'access_exp', str(sber.now() + int(t.get('expires_in') or 3600)))
+def _store_tokens(cur, conn_id: int, t: Dict[str, Any]) -> None:
+    _vault_set(cur, f'c{conn_id}:access_token', t['access_token'])
+    _vault_set(cur, f'c{conn_id}:access_exp', str(sber.now() + int(t.get('expires_in') or 3600)))
     if t.get('refresh_token'):
-        _vault_set(cur, 'refresh_token', t['refresh_token'])
+        _vault_set(cur, f'c{conn_id}:refresh_token', t['refresh_token'])
+
+
+def _connections(cur, only_active: bool = False) -> List[Dict[str, Any]]:
+    cur.execute(f'SELECT id, title, org, account, is_default, active, last_sync, last_sync_result, last_error, created_by, created_at '
+                f'FROM {SCHEMA}.sber_connections' + (' WHERE active' if only_active else '') + ' ORDER BY is_default DESC, id')
+    out = []
+    for r in cur.fetchall():
+        org = r[2] if isinstance(r[2], dict) else json.loads(r[2]) if r[2] else None
+        out.append({'id': r[0], 'title': r[1], 'org': org, 'account': r[3], 'is_default': r[4], 'active': r[5], 'last_sync': r[6],
+                    'last_sync_result': r[7], 'last_error': r[8], 'created_by': r[9], 'created_at': r[10]})
+    return out
+
+
+def _connection(cur, conn_id: Optional[int] = None) -> Dict[str, Any]:
+    conns = [c for c in _connections(cur, True) if c['org'] and c['account']]
+    if not conns:
+        raise sber.SberError('СберБизнес не подключён')
+    if conn_id:
+        c = next((c for c in conns if c['id'] == int(conn_id)), None)
+        if not c:
+            raise sber.SberError('Подключение не найдено или отключено')
+        return c
+    return next((c for c in conns if c['is_default']), conns[0])
+
+
+def _vk_send(cur, profile_ids: List[str], text: str) -> int:
+    token = os.environ.get('VK_GROUP_TOKEN')
+    if not token or not profile_ids:
+        return 0
+    cur.execute(f"SELECT DISTINCT vk_user_id FROM {SCHEMA}.vk_bindings WHERE status = 'confirmed' AND vk_user_id IS NOT NULL "
+                f'AND profile_id = ANY(%s)', (profile_ids,))
+    sent = 0
+    for (vk_id,) in cur.fetchall():
+        try:
+            r = requests.post('https://api.vk.com/method/messages.send', timeout=8, data={
+                'access_token': token, 'v': '5.199', 'user_id': vk_id, 'random_id': secrets.randbelow(2 ** 31), 'message': text[:3500]})
+            if 'error' not in r.json():
+                sent += 1
+        except Exception:
+            continue
+    return sent
+
+
+def _profiles_with(cur, action: str) -> List[str]:
+    """Профили, у которых есть право (по должности или по роли)."""
+    cur.execute(f"SELECT p.id, p.role, pos.actions FROM {SCHEMA}.profiles p LEFT JOIN {SCHEMA}.positions pos ON pos.id = p.position_id "
+                f"WHERE p.status = 'active'")
+    out = []
+    for pid, role, acts in cur.fetchall():
+        acts = acts if isinstance(acts, list) else json.loads(acts) if acts else None
+        if role == 'deputy_director' or (acts is not None and action in acts) or (acts is None and role == 'director' and action == 'sber.pay'):
+            out.append(pid)
+    return out
+
+
+def _notify_settings(cur) -> Dict[str, bool]:
+    cur.execute(f"SELECT value FROM {SCHEMA}.app_settings WHERE key = 'sber_notify'")
+    r = cur.fetchone()
+    v = r[0] if r and isinstance(r[0], dict) else {}
+    return {'on_send': v.get('on_send', True), 'on_paid': v.get('on_paid', True), 'on_reject': v.get('on_reject', True)}
+
+
+def _fmt_rub(x: float) -> str:
+    return f'{x:,.2f}'.replace(',', ' ').replace('.', ',') + ' ₽'
+
+
+def _notify_request(cur, rid: int, status: str) -> None:
+    ns = _notify_settings(cur)
+    if (status == 'rejected' and not ns['on_reject']) or (status in ('paid', 'failed') and not ns['on_paid']):
+        return
+    cur.execute(f'SELECT r.amount, cp.name, r.created_by_user, r.reject_reason, r.bank_comment FROM {SCHEMA}.sber_requests r '
+                f'LEFT JOIN {SCHEMA}.acc_counterparties cp ON cp.id = r.counterparty_id WHERE r.id = %s', (rid,))
+    r = cur.fetchone()
+    if not r:
+        return
+    cur.execute(f'SELECT id FROM {SCHEMA}.profiles WHERE user_id = %s', (r[2],))
+    authors = [x[0] for x in cur.fetchall()]
+    head = {'paid': '✅ Оплачено', 'failed': '⚠️ Банк не провёл платёж', 'rejected': '❌ Заявка отклонена'}[status]
+    text = f'{head}\n{r[1]} — {_fmt_rub(_num(r[0]))}'
+    if status == 'rejected' and r[3]:
+        text += f'\nПричина: {r[3]}'
+    if status == 'failed' and r[4]:
+        text += f'\n{r[4]}'
+    _vk_send(cur, authors, text + '\n\nАнодБИЗ → раздел СБЕР')
 
 
 def _week_start(d: date) -> date:
@@ -200,13 +285,26 @@ def _cat_id(cur, kind: str, name: str) -> Optional[int]:
     return r[0] if r else None
 
 
-def sync_statement(cur, days: int = 3, who: str = 'Автозагрузка') -> Dict[str, Any]:
-    """Выписка по расчётному счёту за последние дни → доходы/расходы бухгалтерии (без дублей)."""
-    s = _settings(cur)
-    account = s.get('account')
-    if not account:
-        raise sber.SberError('Не выбран расчётный счёт')
-    token = _token(cur)
+def sync_all(cur, days: int = 3, who: str = 'Автозагрузка') -> Dict[str, Any]:
+    added = skipped = 0
+    errors = []
+    for c in _connections(cur, True):
+        if not c['account']:
+            continue
+        try:
+            r = sync_statement(cur, c, days, who)
+            added += r['added']
+            skipped += r['skipped']
+        except sber.SberError as e:
+            errors.append(f"{c['title']}: {e}")
+            cur.execute(f'UPDATE {SCHEMA}.sber_connections SET last_error = %s WHERE id = %s', (str(e)[:300], c['id']))
+    return {'added': added, 'skipped': skipped, 'errors': errors}
+
+
+def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автозагрузка') -> Dict[str, Any]:
+    """Выписка по расчётному счёту подключения за последние дни → доходы/расходы бухгалтерии (без дублей)."""
+    account = c['account']
+    token = _token(cur, c['id'])
     cur.execute(f"SELECT value FROM {SCHEMA}.app_settings WHERE key = 'accounting'")
     r = cur.fetchone()
     start_period = ((r[0] if r and isinstance(r[0], dict) else {}) or {}).get('start_period') or '2000-01'
@@ -251,6 +349,8 @@ def sync_statement(cur, days: int = 3, who: str = 'Автозагрузка') ->
                     continue
                 cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'paid', bank_status = 'EXECUTED', bank_checked_at = now() "
                             f"WHERE status IN ('paying', 'signing') AND external_id = %s RETURNING id", (t.get('externalId') or '',))
+                for (paid_id,) in cur.fetchall():
+                    _notify_request(cur, paid_id, 'paid')
                 low = name.lower()
                 cp = next((c for c in cps if inn and c['inn'] == inn), None) or next((c for c in cps if low and c['name'].lower() == low), None)
                 if not cp and name:
@@ -263,30 +363,33 @@ def sync_statement(cur, days: int = 3, who: str = 'Автозагрузка') ->
                     g = guess_category({'kind': kind, 'purpose': purpose, 'name': name})
                     cat = _cat_id(cur, kind, g) if g else None
                 cur.execute(f"INSERT INTO {SCHEMA}.acc_entries (kind, entry_date, amount, category_id, comment, counterparty_id, period, "
-                            f"source, source_key, bank_purpose, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s, 'bank', %s, %s, %s) "
+                            f"source, source_key, bank_purpose, created_by, bank_connection_id) VALUES (%s, %s, %s, %s, %s, %s, %s, 'bank', %s, %s, %s, %s) "
                             f'ON CONFLICT (source, source_key) WHERE source IS NOT NULL DO NOTHING',
                             (kind, op_date, round(amount, 2), cat, f"Банк №{t.get('number') or ''}: {purpose[:400]}",
-                             cp['id'] if cp else None, op_date[:7], uid, purpose[:1000], who))
+                             cp['id'] if cp else None, op_date[:7], uid, purpose[:1000], who, c['id']))
                 added += 1
             links = data.get('_links') or []
             if not any((l.get('rel') == 'next') for l in links if isinstance(l, dict)):
                 break
             page += 1
-    s['last_sync'] = datetime.now().isoformat(timespec='seconds')
-    s['last_sync_result'] = {'added': added, 'skipped': skipped}
-    _save_settings(cur, s, who)
+    cur.execute(f'UPDATE {SCHEMA}.sber_connections SET last_sync = now(), last_sync_result = %s, last_error = NULL WHERE id = %s',
+                (json.dumps({'added': added, 'skipped': skipped}), c['id']))
     return {'added': added, 'skipped': skipped}
 
 
 def _refresh_statuses(cur) -> None:
-    cur.execute(f"SELECT id, external_id FROM {SCHEMA}.sber_requests WHERE status IN ('paying', 'signing') "
+    cur.execute(f"SELECT id, external_id, connection_id FROM {SCHEMA}.sber_requests WHERE status IN ('paying', 'signing') "
                 f"AND (bank_checked_at IS NULL OR bank_checked_at < now() - interval '2 minutes') LIMIT 20")
     rows = cur.fetchall()
-    if not rows:
-        return
-    token = _token(cur)
-    for rid, ext in rows:
-        resp = sber.api('GET', f'/v1/payments/{ext}/state', token)
+    tokens: Dict[int, str] = {}
+    for rid, ext, cid in rows:
+        try:
+            cid = cid or _connection(cur)['id']
+            if cid not in tokens:
+                tokens[cid] = _token(cur, cid)
+        except sber.SberError:
+            continue
+        resp = sber.api('GET', f'/v1/payments/{ext}/state', tokens[cid])
         if resp.status_code != 200:
             cur.execute(f'UPDATE {SCHEMA}.sber_requests SET bank_checked_at = now() WHERE id = %s', (rid,))
             continue
@@ -295,8 +398,10 @@ def _refresh_statuses(cur) -> None:
         new = 'paid' if bs in ('EXECUTED', 'ACCEPTED_BY_ABS', 'ACCEPTED') else 'failed' if bs in ('REFUSED', 'DECLINED', 'DELETED', 'INVALIDEDS', 'CANCELED', 'REFUSEDBYABS') \
             else 'signing' if bs in ('CREATED', 'NEW', 'IMPLEMENTED', 'PARTSIGNED', 'SIGNED', 'DELIVERED') else None
         cur.execute(f'UPDATE {SCHEMA}.sber_requests SET bank_status = %s, bank_comment = %s, bank_checked_at = now()'
-                    f'{", status = %s" if new else ""} WHERE id = %s',
+                    f'{", status = %s" if new else ""} WHERE id = %s RETURNING status, counterparty_id, amount',
                     (bs, (st.get('bankComment') or '')[:500], *([new] if new else []), rid))
+        if new in ('paid', 'failed'):
+            _notify_request(cur, rid, new)
 
 
 # ---------------------------------------------------------------- обработчик
@@ -335,21 +440,35 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         conn.close()
 
 
+def _upsert_connection(cur, org: Dict[str, Any], who: str, title: Optional[str], conn_id: Optional[int] = None) -> int:
+    rub = [a['number'] for a in org['accounts'] if (a.get('currency') or '643') in ('643', 'RUB', 'RUR')]
+    if conn_id:
+        cur.execute(f'SELECT account FROM {SCHEMA}.sber_connections WHERE id = %s', (conn_id,))
+        r = cur.fetchone()
+        acc = r[0] if r and r[0] in [a['number'] for a in org['accounts']] else (rub[0] if rub else None)
+        cur.execute(f'UPDATE {SCHEMA}.sber_connections SET org = %s, account = %s, active = true, last_error = NULL'
+                    + (', title = %s' if title else '') + ' WHERE id = %s',
+                    (json.dumps(org, ensure_ascii=False), acc, *([title] if title else []), conn_id))
+        return conn_id
+    cur.execute(f"SELECT id FROM {SCHEMA}.sber_connections WHERE org->>'inn' = %s AND active LIMIT 1", (org.get('inn') or '',))
+    r = cur.fetchone()
+    if r and not title:
+        return _upsert_connection(cur, org, who, None, r[0])
+    cur.execute(f'SELECT count(*) FROM {SCHEMA}.sber_connections WHERE active AND is_default')
+    first = cur.fetchone()[0] == 0
+    cur.execute(f'INSERT INTO {SCHEMA}.sber_connections (title, org, account, is_default, created_by) VALUES (%s, %s, %s, %s, %s) RETURNING id',
+                ((title or org.get('name') or 'СберБизнес')[:100], json.dumps(org, ensure_ascii=False), rub[0] if rub else None, first, who))
+    return cur.fetchone()[0]
+
+
 def _cron(cur, key: str) -> Dict[str, Any]:
     s = _settings(cur)
     expected = s.get('cron_key')
     if not expected or key != expected:
         return _err('Нет доступа', 403)
-    if not s.get('connected'):
-        return _resp(200, {'ok': False, 'reason': 'not_connected'})
-    try:
-        res = sync_statement(cur, days=3)
-        _refresh_statuses(cur)
-        return _resp(200, {'ok': True, **res})
-    except sber.SberError as e:
-        s['last_sync_error'] = str(e)
-        _save_settings(cur, s, 'Автозагрузка')
-        return _resp(200, {'ok': False, 'error': str(e)})
+    res = sync_all(cur, days=3)
+    _refresh_statuses(cur)
+    return _resp(200, {'ok': not res['errors'], **res})
 
 
 def _oauth_callback(cur, qs: Dict[str, str]) -> Dict[str, Any]:
@@ -361,18 +480,13 @@ def _oauth_callback(cur, qs: Dict[str, str]) -> Dict[str, Any]:
         return {'statusCode': 302, 'headers': {'Location': back + '?connect=expired'}, 'body': ''}
     try:
         t = sber.exchange_code(qs['code'])
-        _store_tokens(cur, t)
         s = _settings(cur)
         org = _org(cur, t['access_token'], s)
-        s.update({'connected': True, 'org': org, 'connected_at': datetime.now().isoformat(timespec='seconds'),
-                  'connected_by': r[0]})
-        rub = [a for a in org['accounts'] if (a.get('currency') or '643') in ('643', 'RUB', 'RUR')]
-        if not s.get('account') and rub:
-            s['account'] = rub[0]['number']
+        cid = _upsert_connection(cur, org, 'Подключение', None)
+        _store_tokens(cur, cid, t)
         if not s.get('cron_key'):
             s['cron_key'] = sber.new_state()[0]
-        s.pop('last_sync_error', None)
-        _save_settings(cur, s, 'Подключение')
+            _save_settings(cur, s, 'Подключение')
         cur.execute(f"INSERT INTO {SCHEMA}.acc_log (user_name, action, details) VALUES ('Система', 'СБЕР: подключён', %s)",
                     (org.get('name') or '',))
         return {'statusCode': 302, 'headers': {'Location': back + '?connect=ok'}, 'body': ''}
@@ -386,11 +500,18 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
     s = _settings(cur)
 
     if action == 'overview':
-        if s.get('connected'):
-            try:
-                _refresh_statuses(cur)
-            except sber.SberError:
-                pass
+        try:
+            _refresh_statuses(cur)
+        except sber.SberError:
+            pass
+        conns = _connections(cur)
+        live = [c for c in conns if c['active'] and c['org'] and c['account']]
+        default = next((c for c in live if c['is_default']), live[0] if live else None)
+        if deputy:
+            for c in conns:
+                c['has_tokens'] = bool(_vault_get(cur, f"c{c['id']}:refresh_token"))
+        else:
+            conns = [{k: c[k] for k in ('id', 'title', 'org', 'account', 'is_default', 'active', 'last_sync', 'last_error')} for c in live]
         week = date.fromisoformat(body['week']) if body.get('week') else _week_start(date.today())
         week = _week_start(week)
         if not ({'sber.view', 'sber.request', 'sber.pay'} & can):
@@ -406,13 +527,16 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         return _resp(200, {
             'week': week, 'requests': reqs, 'pending': pending, 'counterparties': _counterparties(cur), 'categories': cats,
             'statuses': STATUS, 'can': sorted(a for a in can if a.startswith('sber.')), 'is_deputy': deputy,
-            'bank': {'connected': bool(s.get('connected')), 'configured': cfg, 'ready': all(cfg.values()), 'test': sber.is_test(),
-                     'org': s.get('org'), 'account': s.get('account'), 'last_sync': s.get('last_sync'),
-                     'last_sync_result': s.get('last_sync_result'), 'last_sync_error': s.get('last_sync_error'),
+            'connections': conns, 'notify': _notify_settings(cur) if deputy else None,
+            'bank': {'connected': bool(live), 'configured': cfg, 'ready': all(cfg.values()), 'test': sber.is_test(),
+                     'org': default['org'] if default else None, 'account': default['account'] if default else None,
+                     'last_sync': max([str(c['last_sync']) for c in live if c['last_sync']], default=None),
+                     'last_sync_result': default['last_sync_result'] if default else None,
+                     'last_sync_error': '; '.join(f"{c['title']}: {c['last_error']}" for c in live if c['last_error']) or None,
                      'limit_payment': s.get('limit_payment'), 'limit_day': s.get('limit_day'), 'paid_today': _paid_today(cur),
                      'cron_url_ready': bool(s.get('cron_key')) and deputy, 'cert': s.get('cert'),
                      'scope_v1': s.get('scope_v1') if deputy else None, 'scope_v2': s.get('scope_v2') if deputy else None,
-                     'has_tokens': bool(_vault_get(cur, 'refresh_token')) if deputy else None,
+                     'has_tokens': any(c.get('has_tokens') for c in conns) if deputy else None,
                      'sign_url_template': s.get('sign_url_template') if deputy else None,
                      'cron_key': s.get('cron_key') if deputy else None},
         })
@@ -433,31 +557,75 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
             _log(cur, user, 'Scope', f"v1: {s['scope_v1'][:200]}; v2: {s['scope_v2'][:200]}")
             return _resp(200, {'ok': True})
         access, refresh_t = str(body.get('access_token') or '').strip(), str(body.get('refresh_token') or '').strip()
+        conn_id = int(body.get('connection_id') or 0) or None
+        title = str(body.get('title') or '').strip()[:100] or None
         if not refresh_t and not access:
             return _err('Вставьте Access Token и Refresh Token')
+        if not refresh_t:
+            return _err('Нужен Refresh Token — без него ключи перестанут работать через час')
         if not sber.configured()['certificate']:
             return _err('Сначала загрузите сертификат организации')
-        if refresh_t:
-            _vault_set(cur, 'refresh_token', refresh_t)
-        if access:
-            _vault_set(cur, 'access_token', access)
-            _vault_set(cur, 'access_exp', str(sber.now() + 3000))
-        else:
-            _vault_set(cur, 'access_exp', '0')
+        token = access
+        if not token:
+            try:
+                t = sber.refresh(refresh_t)
+            except sber.SberError as e:
+                return _err(f'Банк не принял Refresh Token: {e}')
+            token, refresh_t = t['access_token'], t.get('refresh_token') or refresh_t
         try:
-            org = _org(cur, _token(cur), s)
+            org = _org(cur, token, s)
         except sber.SberError as e:
-            return _err(f'Ключи сохранены, но банк их не принял: {e}')
-        s.update({'connected': True, 'org': org, 'connected_at': datetime.now().isoformat(timespec='seconds'), 'connected_by': user['id']})
-        rub = [a for a in org['accounts'] if (a.get('currency') or '643') in ('643', 'RUB', 'RUR')]
-        if not s.get('account') and rub:
-            s['account'] = rub[0]['number']
+            return _err(f'Банк не принял ключи: {e}. Ничего не сохранено.')
+        cid = _upsert_connection(cur, org, user['name'], title, conn_id)
+        _vault_set(cur, f'c{cid}:refresh_token', refresh_t)
+        _vault_set(cur, f'c{cid}:access_token', token)
+        _vault_set(cur, f'c{cid}:access_exp', str(sber.now() + 3000))
         if not s.get('cron_key'):
             s['cron_key'] = sber.new_state()[0]
-        s.pop('last_sync_error', None)
-        _save_settings(cur, s, user['name'])
-        _log(cur, user, 'Подключён по токенам', org.get('name') or '')
-        return _resp(200, {'ok': True, 'org': org})
+            _save_settings(cur, s, user['name'])
+        _log(cur, user, 'Подключение по токенам', f"#{cid} {org.get('name') or ''}")
+        return _resp(200, {'ok': True, 'org': org, 'connection_id': cid})
+
+    if action == 'notify_save':
+        if not deputy:
+            return _err('Только заместитель директора', 403)
+        v = {k: bool(body.get(k)) for k in ('on_send', 'on_paid', 'on_reject')}
+        cur.execute(f"INSERT INTO {SCHEMA}.app_settings (key, value, updated_by) VALUES ('sber_notify', %s, %s) "
+                    f'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()',
+                    (json.dumps(v), user['name']))
+        return _resp(200, {'ok': True})
+
+    if action == 'notify_test':
+        n = _vk_send(cur, [user['profile_id']] if user['profile_id'] else [], '🔔 Проверка уведомлений раздела СБЕР — всё работает')
+        return _resp(200, {'ok': True, 'sent': n})
+
+    if action in ('connection_update', 'connection_delete'):
+        if not deputy:
+            return _err('Только заместитель директора', 403)
+        cid = int(body.get('id') or 0)
+        cur.execute(f'SELECT org FROM {SCHEMA}.sber_connections WHERE id = %s', (cid,))
+        r = cur.fetchone()
+        if not r:
+            return _err('Подключение не найдено', 404)
+        if action == 'connection_delete':
+            cur.execute(f'DELETE FROM {SCHEMA}.sber_vault WHERE key LIKE %s', (f'c{cid}:%',))
+            cur.execute(f'UPDATE {SCHEMA}.sber_connections SET active = false, is_default = false WHERE id = %s', (cid,))
+            cur.execute(f'SELECT count(*) FROM {SCHEMA}.sber_connections WHERE active AND is_default')
+            if cur.fetchone()[0] == 0:
+                cur.execute(f'UPDATE {SCHEMA}.sber_connections SET is_default = true WHERE id = (SELECT id FROM {SCHEMA}.sber_connections WHERE active ORDER BY id LIMIT 1)')
+            _log(cur, user, 'Подключение отключено', f'#{cid}')
+            return _resp(200, {'ok': True})
+        org = r[0] if isinstance(r[0], dict) else json.loads(r[0] or '{}')
+        acc = str(body.get('account') or '')
+        if acc and acc not in [a['number'] for a in org.get('accounts', [])]:
+            return _err('Выберите счёт этой организации')
+        title = str(body.get('title') or '').strip()[:100]
+        cur.execute(f'UPDATE {SCHEMA}.sber_connections SET title = COALESCE(NULLIF(%s, \'\'), title), account = COALESCE(NULLIF(%s, \'\'), account) WHERE id = %s',
+                    (title, acc, cid))
+        if body.get('is_default'):
+            cur.execute(f'UPDATE {SCHEMA}.sber_connections SET is_default = (id = %s) WHERE active', (cid,))
+        _log(cur, user, 'Подключение изменено', f'#{cid} {title} {acc}')
+        return _resp(200, {'ok': True})
 
     if action == 'sign_links':
         if 'sber.pay' not in can:
@@ -509,18 +677,23 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
                         (state, nonce, user['id'], str(body.get('origin') or '')[:200]))
             return _resp(200, {'url': sber.authorize_url(state, nonce, s.get('scope_v2') or s['scope'])})
         if action == 'disconnect':
-            cur.execute(f"DELETE FROM {SCHEMA}.sber_vault WHERE key IN ('access_token', 'access_exp', 'refresh_token')")
-            s['connected'] = False
-            _save_settings(cur, s, user['name'])
+            cur.execute(f"DELETE FROM {SCHEMA}.sber_vault WHERE key LIKE 'c%%:%%'")
+            cur.execute(f'UPDATE {SCHEMA}.sber_connections SET active = false, is_default = false')
             _log(cur, user, 'Отключён', '')
             return _resp(200, {'ok': True})
         lp, ld = _money(body.get('limit_payment')), _money(body.get('limit_day'))
         if not lp or not ld or lp > ld:
             return _err('Лимит одного платежа должен быть не больше дневного')
-        acc = str(body.get('account') or s.get('account') or '')
-        if s.get('org') and acc not in [a['number'] for a in s['org'].get('accounts', [])]:
-            return _err('Выберите счёт организации')
-        s.update({'limit_payment': float(lp), 'limit_day': float(ld), 'account': acc})
+        acc = str(body.get('account') or '')
+        if acc:
+            try:
+                c = _connection(cur, body.get('connection_id'))
+            except sber.SberError as e:
+                return _err(str(e))
+            if acc not in [a['number'] for a in c['org'].get('accounts', [])]:
+                return _err('Выберите счёт организации')
+            cur.execute(f'UPDATE {SCHEMA}.sber_connections SET account = %s WHERE id = %s', (acc, c['id']))
+        s.update({'limit_payment': float(lp), 'limit_day': float(ld)})
         _save_settings(cur, s, user['name'])
         _log(cur, user, 'Лимиты', f'платёж {lp}, день {ld}, счёт {acc}')
         return _resp(200, {'ok': True})
@@ -528,9 +701,11 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
     if action == 'sync':
         if 'sber.sync' not in can:
             return _err('Нет права обновлять выписку', 403)
-        res = sync_statement(cur, days=int(body.get('days') or 3), who=user['name'])
+        res = sync_all(cur, days=min(31, int(body.get('days') or 3)), who=user['name'])
         _refresh_statuses(cur)
         _log(cur, user, 'Выписка', f"добавлено {res['added']}")
+        if res['errors'] and not res['added']:
+            return _err('; '.join(res['errors']), 502)
         return _resp(200, {'ok': True, **res})
 
     # ---- реквизиты контрагентов
@@ -636,8 +811,18 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         rows = cur.fetchall()
         if not rows:
             return _err('Нет черновиков для отправки')
-        _log(cur, user, 'Заявки отправлены директору', f'неделя {week}: {len(rows)} шт. на {sum(_num(x[0]) for x in rows):.2f}')
-        return _resp(200, {'ok': True, 'count': len(rows)})
+        total = sum(_num(x[0]) for x in rows)
+        _log(cur, user, 'Заявки отправлены директору', f'неделя {week}: {len(rows)} шт. на {total:.2f}')
+        sent = 0
+        if _notify_settings(cur)['on_send']:
+            cur.execute(f"SELECT cp.name, r.amount FROM {SCHEMA}.sber_requests r JOIN {SCHEMA}.acc_counterparties cp ON cp.id = r.counterparty_id "
+                        f"WHERE r.week_start = %s AND r.status = 'sent' ORDER BY r.amount DESC LIMIT 15", (week,))
+            lines = '\n'.join(f'• {n} — {_fmt_rub(_num(a))}' for n, a in cur.fetchall())
+            end = week + timedelta(days=6)
+            text = (f'💳 Заявки на оплату\nНеделя {week.strftime("%d.%m")}–{end.strftime("%d.%m")}\nОт: {user["name"]}\n\n{lines}\n\n'
+                    f'Итого новых: {len(rows)} на {_fmt_rub(total)}\n\nОплатить: АнодБИЗ → раздел СБЕР')
+            sent = _vk_send(cur, _profiles_with(cur, 'sber.pay'), text)
+        return _resp(200, {'ok': True, 'count': len(rows), 'notified': sent})
 
     if action == 'reject':
         if 'sber.pay' not in can:
@@ -648,6 +833,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         if not cur.fetchone():
             return _err('Заявка уже обработана')
         _log(cur, user, 'Заявка отклонена', f"#{body.get('id')}: {reason}")
+        _notify_request(cur, int(body.get('id')), 'rejected')
         return _resp(200, {'ok': True})
 
     if action == 'pay':
@@ -660,8 +846,10 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
     """Оплата заявок директором: пароль, лимиты, сверка реквизитов, создание платёжки в СберБизнес."""
     if 'sber.pay' not in user['actions']:
         return _err('Оплачивать может только директор', 403)
-    if not s.get('connected') or not s.get('account') or not s.get('org'):
-        return _err('СберБизнес не подключён')
+    try:
+        conn = _connection(cur, body.get('connection_id'))
+    except sber.SberError as e:
+        return _err(str(e))
     if not _check_password(cur, user['id'], str(body.get('password') or '')):
         return _err('Неверный пароль', 403)
     ids = [int(x) for x in (body.get('ids') or [])][:50]
@@ -679,21 +867,21 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
     total = sum(r['amount'] for r in reqs)
     if _paid_today(cur) + total > float(s['limit_day']):
         return _err('Превышен дневной лимит оплат. Его меняет замдиректора в разделе СБЕР.')
-    token = _token(cur)
-    org = s['org']
+    token = _token(cur, conn['id'])
+    org = conn['org']
     today = date.today().isoformat()
     cur.execute(f"SELECT count(*) FROM {SCHEMA}.sber_requests WHERE external_id IS NOT NULL AND decided_at::date = CURRENT_DATE")
     n = cur.fetchone()[0]
     results = []
     for r in reqs:
-        cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'paying', decided_by = %s, decided_at = now(), external_id = COALESCE(external_id, %s) "
-                    f"WHERE id = %s AND status = 'sent' RETURNING external_id", (user['name'], sber.new_external_id(), r['id']))
+        cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'paying', decided_by = %s, decided_at = now(), external_id = COALESCE(external_id, %s), "
+                    f"connection_id = %s WHERE id = %s AND status = 'sent' RETURNING external_id", (user['name'], sber.new_external_id(), conn['id'], r['id']))
         row = cur.fetchone()
         if not row:
             continue
         ext = row[0]
         n += 1
-        pay = sber.payment_body(r, s['account'], org['name'], org['inn'], org.get('kpp') or '', ext,
+        pay = sber.payment_body(r, conn['account'], org['name'], org['inn'], org.get('kpp') or '', ext,
                                 int(datetime.now().strftime('%j')) * 100 + n, today)
         try:
             resp = sber.api('POST', '/v1/payments', token, json=pay, headers={'Content-Type': 'application/json'})
@@ -706,7 +894,7 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
             cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'signing', bank_status = %s, bank_checked_at = now() WHERE id = %s",
                         (str(data.get('bankStatus') or 'CREATED'), r['id']))
             results.append({'id': r['id'], 'ok': True, 'sign_url': _sign_url(s, ext)})
-            _log(cur, user, 'Оплата', f"{r['counterparty']} {r['amount']:.2f} ₽, счёт {r['requisites'].get('account')}")
+            _log(cur, user, 'Оплата', f"{r['counterparty']} {r['amount']:.2f} ₽, счёт {r['requisites'].get('account')}, с {conn['account']}")
         else:
             try:
                 msg = resp.json().get('message') or resp.json().get('error') or ''

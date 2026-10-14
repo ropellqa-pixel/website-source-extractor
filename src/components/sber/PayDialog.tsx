@@ -4,9 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/ui/icon';
 import { rub } from '@/lib/accountingApi';
-import { sberCall, VAT_LABELS, type SberRequest } from '@/lib/sberApi';
+import { sberCall, VAT_LABELS, type SberConnection, type SberRequest } from '@/lib/sberApi';
 
-export default function PayDialog({ items, onClose, onDone }: { items: SberRequest[]; onClose: () => void; onDone: () => void }) {
+export default function PayDialog({ items, connections, onClose, onDone }: { items: SberRequest[]; connections: SberConnection[]; onClose: () => void; onDone: () => void }) {
+  const live = connections.filter((c) => c.active && c.account);
+  const [connId, setConnId] = useState<number | null>((live.find((c) => c.is_default) || live[0])?.id ?? null);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -15,7 +17,7 @@ export default function PayDialog({ items, onClose, onDone }: { items: SberReque
 
   const pay = async () => {
     setBusy(true); setError(null);
-    const r = await sberCall<{ results: { id: number; ok: boolean; error?: string; sign_url?: string }[] }>({ action: 'pay', ids: items.map((x) => x.id), password });
+    const r = await sberCall<{ results: { id: number; ok: boolean; error?: string; sign_url?: string }[] }>({ action: 'pay', ids: items.map((x) => x.id), password, connection_id: connId });
     setBusy(false); setPassword('');
     if (r.error) { setError(r.error); return; }
     setResults(r.results);
@@ -61,6 +63,14 @@ export default function PayDialog({ items, onClose, onDone }: { items: SberReque
             <div className="flex items-center justify-between rounded-xl bg-emerald-600/10 px-4 py-3">
               <span className="text-sm">Итого к оплате ({items.length})</span><span className="text-lg font-semibold tabular-nums">{rub(total)}</span>
             </div>
+            {live.length > 1 && (
+              <label className="block space-y-1 text-sm">
+                <span className="text-muted-foreground">Списать со счёта</span>
+                <select value={connId ?? ''} onChange={(e) => setConnId(Number(e.target.value))} className="h-10 w-full rounded-md border bg-background px-2 text-sm">
+                  {live.map((c) => <option key={c.id} value={c.id}>{c.title} · •••• {c.account?.slice(-4)}</option>)}
+                </select>
+              </label>
+            )}
             <label className="block space-y-1 text-sm">
               <span className="text-muted-foreground">Подтвердите паролем от вашей учётной записи</span>
               <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)}

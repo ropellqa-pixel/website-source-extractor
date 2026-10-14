@@ -69,7 +69,7 @@ export default function Sber() {
     if (confirmText && !confirm(confirmText)) return;
     const r = await sberCall<{ count?: number }>({ action, ...extra });
     if (r.error) { alert(r.error); return; }
-    if (action === 'send_week') setNotice(`Отправлено директору: ${r.count} заявок`);
+    if (action === 'send_week') setNotice(`Отправлено директору: ${r.count} заявок${(r as { notified?: number }).notified ? ' · уведомление ушло в ВК' : ''}`);
     load();
   };
 
@@ -94,7 +94,7 @@ export default function Sber() {
         </div>
       )}
 
-      <BankCard bank={data.bank} isDeputy={data.is_deputy} canSync={can('sber.sync')} onChanged={load} />
+      <BankCard bank={data.bank} isDeputy={data.is_deputy} canSync={can('sber.sync')} onChanged={load} connections={data.connections.filter((c) => c.active && c.account).length} />
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg bg-secondary p-0.5">
@@ -306,7 +306,7 @@ export default function Sber() {
       )}
 
       {cp && <CounterpartyForm value={cp} categories={data.categories} onClose={() => setCp(null)} onSaved={() => { setCp(null); load(); }} />}
-      {paying && <PayDialog items={paying} onClose={() => { setPaying(null); load(); }} onDone={load} />}
+      {paying && <PayDialog items={paying} connections={data.connections} onClose={() => { setPaying(null); load(); }} onDone={load} />}
     </div>
   );
 }

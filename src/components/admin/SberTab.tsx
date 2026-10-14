@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/ui/icon';
-import { sberCall, sberUrl, type SberOverview } from '@/lib/sberApi';
+import { sberCall, sberUrl, type SberConnection, type SberOverview } from '@/lib/sberApi';
 
 type Cert = { subject: string; org: string; serial: string; valid_from: string; valid_to: string; file_name: string; uploaded_at: string; uploaded_by: string };
 
@@ -12,7 +12,9 @@ const fmtDate = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'n
 export default function SberTab() {
   const [bank, setBank] = useState<(SberOverview['bank'] & { cert?: Cert | null; scope_v1?: string | null; scope_v2?: string | null; has_tokens?: boolean | null; sign_url_template?: string | null }) | null>(null);
   const [scopes, setScopes] = useState({ scope_v1: '', scope_v2: '', sign_url_template: '' });
-  const [tokens, setTokens] = useState({ access_token: '', refresh_token: '' });
+  const [tokens, setTokens] = useState<{ access_token: string; refresh_token: string; title: string; connection_id: number | null } | null>(null);
+  const [conns, setConns] = useState<SberConnection[]>([]);
+  const [notify, setNotify] = useState<SberOverview['notify']>(null);
   const [msg2, setMsg2] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy2, setBusy2] = useState<string | null>(null);
   const [file, setFile] = useState<{ name: string; data: string } | null>(null);
@@ -25,7 +27,7 @@ export default function SberTab() {
     const r = await sberCall<SberOverview>({ action: 'overview' });
     if (r.error) { setMsg({ ok: false, text: r.error }); return; }
     const b = r.bank as typeof bank;
-    setBank(b);
+    setBank(b); setConns(r.connections.filter((c) => c.active)); setNotify(r.notify);
     setScopes({ scope_v1: b?.scope_v1 || '', scope_v2: b?.scope_v2 || '', sign_url_template: b?.sign_url_template || '' });
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -52,7 +54,7 @@ export default function SberTab() {
     const r = await sberCall<{ org?: { name: string } }>({ action, ...payload });
     setBusy2(null);
     if (r.error) { setMsg2({ ok: false, text: r.error }); return; }
-    if (action === 'tokens_save') { setTokens({ access_token: '', refresh_token: '' }); setMsg2({ ok: true, text: `Банк подключён: ${r.org?.name || ''}` }); }
+    if (action === 'tokens_save') { setTokens(null); setMsg2({ ok: true, text: `Банк принял ключи: ${r.org?.name || ''}` }); }
     else setMsg2({ ok: true, text: 'Сохранено' });
     load();
   };
@@ -152,19 +154,77 @@ export default function SberTab() {
         <Button size="sm" onClick={() => save2('scopes_save', scopes)} disabled={!!busy2}>Сохранить</Button>
       </div>
 
-      <div className="space-y-3 rounded-2xl border bg-card p-5">
-        <div className="flex items-center gap-2"><Icon name="KeyRound" size={18} className="text-emerald-600" /><h3 className="font-medium">Ключи доступа (токены)</h3></div>
+      <div className="space-y-3 rounded-2xl border bg-card p-5 lg:col-span-2">
+        <div className="flex items-center gap-2">
+          <Icon name="KeyRound" size={18} className="text-emerald-600" /><h3 className="font-medium">Подключения (ключи доступа)</h3>
+          <Button size="sm" className="ml-auto" onClick={() => setTokens({ access_token: '', refresh_token: '', title: '', connection_id: null })}>
+            <Icon name="Plus" size={15} />Добавить подключение
+          </Button>
+        </div>
         <p className="text-xs text-muted-foreground">
-          Если в кабинете Сбер API выданы Access Token и Refresh Token — вставьте их, банк подключится без входа через СберБизнес.
-          Дальше токены обновляются сами. {bank?.has_tokens && <b className="text-emerald-700">Токены уже сохранены.</b>}
+          Можно добавить несколько: разные организации, счета или запасные ключи. Перед сохранением банк проверяет ключи — если не принял, ничего не сохранится.
+          Выписка загружается по всем подключениям, оплата идёт с основного (директор может выбрать другое).
         </p>
-        <Input type="password" autoComplete="off" placeholder="Access Token" value={tokens.access_token} onChange={(e) => setTokens({ ...tokens, access_token: e.target.value })} />
-        <Input type="password" autoComplete="off" placeholder="Refresh Token" value={tokens.refresh_token} onChange={(e) => setTokens({ ...tokens, refresh_token: e.target.value })} />
-        <Button size="sm" onClick={() => save2('tokens_save', tokens)} disabled={!!busy2 || (!tokens.access_token && !tokens.refresh_token)}>
-          {busy2 === 'tokens_save' ? 'Проверяю в банке…' : 'Сохранить и подключить'}
-        </Button>
-        <p className="text-xs text-muted-foreground">Хранятся зашифрованно, обратно не показываются.</p>
+        {conns.length === 0 && <p className="rounded-xl bg-secondary p-4 text-center text-sm text-muted-foreground">Подключений пока нет</p>}
+        <div className="grid gap-2 md:grid-cols-2">
+          {conns.map((c, i) => (
+            <div key={c.id} className={`rounded-xl border p-3 ${c.is_default ? 'border-emerald-500/50 bg-emerald-500/5' : ''}`}>
+              <div className="flex items-start gap-2">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-xs font-semibold text-white">{i + 1}</div>
+                <div className="min-w-0 flex-1">
+                  <input defaultValue={c.title} onBlur={(e) => e.target.value.trim() && e.target.value !== c.title && save2('connection_update', { id: c.id, title: e.target.value })}
+                    className="w-full bg-transparent font-medium outline-none focus:underline" />
+                  <div className="text-xs text-muted-foreground">{c.org?.name} · ИНН {c.org?.inn}</div>
+                </div>
+                {c.is_default && <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] text-white">основное</span>}
+              </div>
+              <select value={c.account || ''} onChange={(e) => save2('connection_update', { id: c.id, account: e.target.value })}
+                className="mt-2 h-9 w-full rounded-md border bg-background px-2 font-mono text-xs">
+                {c.org?.accounts.map((a) => <option key={a.number} value={a.number}>{a.number}</option>)}
+              </select>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {c.last_error ? <span className="text-red-600">{c.last_error}</span> : c.last_sync ? `Выписка: ${new Date(c.last_sync).toLocaleString('ru-RU')}` : 'Выписка ещё не загружалась'}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {!c.is_default && <Button size="sm" variant="outline" className="h-7" onClick={() => save2('connection_update', { id: c.id, is_default: true })}>Сделать основным</Button>}
+                <Button size="sm" variant="ghost" className="h-7" onClick={() => setTokens({ access_token: '', refresh_token: '', title: c.title, connection_id: c.id })}>Обновить ключи</Button>
+                <Button size="sm" variant="ghost" className="h-7 text-red-600" onClick={() => confirm(`Отключить «${c.title}»? Ключи будут удалены.`) && save2('connection_delete', { id: c.id })}>Отключить</Button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {tokens && (
+          <div className="space-y-2 rounded-xl border border-dashed p-4">
+            <div className="text-sm font-medium">{tokens.connection_id ? `Новые ключи для «${tokens.title}»` : 'Новое подключение'}</div>
+            {!tokens.connection_id && <Input placeholder="Название, например «Основной счёт» или «ИП Иванов»" value={tokens.title} onChange={(e) => setTokens({ ...tokens, title: e.target.value })} />}
+            <Input type="password" autoComplete="off" placeholder="Access Token" value={tokens.access_token} onChange={(e) => setTokens({ ...tokens, access_token: e.target.value })} />
+            <Input type="password" autoComplete="off" placeholder="Refresh Token" value={tokens.refresh_token} onChange={(e) => setTokens({ ...tokens, refresh_token: e.target.value })} />
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => save2('tokens_save', tokens)} disabled={!!busy2 || !tokens.refresh_token}>
+                {busy2 === 'tokens_save' ? 'Проверяю в банке…' : 'Сохранить и подключить'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setTokens(null)}>Отмена</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Хранятся зашифрованно, обратно не показываются.</p>
+          </div>
+        )}
       </div>
+
+      {notify && (
+        <div className="space-y-3 rounded-2xl border bg-card p-5 lg:col-span-2">
+          <div className="flex items-center gap-2"><Icon name="Bell" size={18} className="text-emerald-600" /><h3 className="font-medium">Уведомления в ВК</h3></div>
+          <p className="text-xs text-muted-foreground">Приходят тем, у кого привязан ВК (Настройки → ВКонтакте).</p>
+          {([['on_send', 'Директору — когда старший сотрудник отправил заявки на оплату'], ['on_paid', 'Автору заявки — когда платёж прошёл или банк его отклонил'], ['on_reject', 'Автору заявки — когда директор отклонил заявку']] as const).map(([k, l]) => (
+            <label key={k} className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={notify[k]} onChange={(e) => { const n = { ...notify, [k]: e.target.checked }; setNotify(n); save2('notify_save', n); }} />{l}
+            </label>
+          ))}
+          <Button size="sm" variant="outline" onClick={async () => {
+            const r = await sberCall<{ sent: number }>({ action: 'notify_test' });
+            setMsg2(r.error ? { ok: false, text: r.error } : r.sent ? { ok: true, text: 'Проверочное сообщение отправлено вам в ВК' } : { ok: false, text: 'Не отправлено — привяжите свой ВК в Настройках' });
+          }}><Icon name="Send" size={15} />Проверить на себе</Button>
+        </div>
+      )}
       {msg2 && <p className={`text-sm lg:col-span-2 ${msg2.ok ? 'text-emerald-600' : 'text-red-600'}`}>{msg2.text}</p>}
     </div>
   );
