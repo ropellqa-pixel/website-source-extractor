@@ -20,4 +20,5 @@ export interface AdminData {
   params: { percent: number; manager_percent: number };
   categories: Category[];
   counterparties: Counterparty[];
+  general: { start_period: string; shift_hours: Record<string, number> };
 }

@@ -21,6 +21,7 @@ export interface AccessInfo {
   is_deputy: boolean;
   formulas: Record<string, string>;
   fields: Record<'salary' | 'manager' | 'collection', FieldDef[]>;
+  general?: { start_period: string; shift_hours: Record<string, number> };
 }
 
 interface Ctx {

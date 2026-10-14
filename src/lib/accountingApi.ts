@@ -9,7 +9,7 @@ export interface Category { id: number; kind: Kind; name: string; archived: bool
 
 export interface Entry {
   id: number | string; kind: Kind; date: string; amount: number; category_id: number | null; category: string;
-  comment: string | null; from_salary: boolean; linked: 'collection' | 'salary' | null; created_by: string | null;
+  comment: string | null; from_salary: boolean; linked: 'collection' | 'salary' | 'bank' | null; created_by: string | null;
   counterparty_id: number | null; counterparty: string | null;
 }
 
@@ -21,7 +21,7 @@ export interface ProfitData {
 
 export interface Staff {
   id: number; name: string; profile_id: string | null; position: string | null; pay_type: PayType; rate: number;
-  active: boolean; accrued: number; paid: number; debt: number; sheet: number | null;
+  active: boolean; accrued: number; paid: number; debt: number; debt_start: number; sheet: number | null;
 }
 
 export interface Accrual {
@@ -32,7 +32,7 @@ export interface Accrual {
 export interface Payment { id: number; staff_id: number; date: string; amount: number; period: string | null; comment: string | null }
 
 export interface SalaryData {
-  period: string; staff: Staff[]; accruals: (Accrual & { auto?: boolean })[]; payments: Payment[]; total_debt: number; closed: boolean;
+  period: string; staff: Staff[]; accruals: (Accrual & { auto?: boolean })[]; payments: Payment[]; total_debt: number; total_debt_start: number; closed: boolean; start_period: string; before_start: boolean;
   profiles?: { id: string; name: string }[];
 }
 

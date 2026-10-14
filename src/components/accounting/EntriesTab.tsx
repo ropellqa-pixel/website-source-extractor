@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
+import BankImport from './BankImport';
 import { accCall, fmtDay, rub, today, type Category, type CounterpartyRef, type Entry, type Kind } from '@/lib/accountingApi';
 
 interface Props {
@@ -24,7 +25,7 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
   const [kind, setKind] = useState<'all' | Kind>('all');
   const [cat, setCat] = useState('');
   const [search, setSearch] = useState('');
-  const [source, setSource] = useState<'all' | 'own' | 'collection' | 'salary'>('all');
+  const [source, setSource] = useState<'all' | 'own' | 'collection' | 'salary' | 'bank'>('all');
   const [form, setForm] = useState<typeof EMPTY | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -96,9 +97,11 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
           <option value="own">Внесено вручную</option>
           <option value="collection">Инкассация (факт)</option>
           <option value="salary">Зарплата по месяцам</option>
+          <option value="bank">Выписка банка</option>
         </select>
         {canEdit && (
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <BankImport categories={categories} onDone={load} />
             <Button size="sm" variant="outline" onClick={() => { setForm({ ...EMPTY, kind: 'income', date: today() }); setError(null); }}>
               <Icon name="Plus" size={15} />Доход
             </Button>
@@ -137,7 +140,10 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
                   <td className="whitespace-nowrap px-4 py-2.5 tabular-nums">{fmtDay(e.date)}</td>
                   <td className="px-4 py-2.5">
                     {e.category}
-                    {e.linked && (
+                    {e.linked === 'bank' && (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground"><Icon name="Landmark" size={11} />банк</span>
+                    )}
+                    {e.linked && e.linked !== 'bank' && (
                       <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">
                         <Icon name="Link" size={11} />{e.linked === 'collection' ? 'из Инкассации' : 'из Зарплаты'}
                       </span>
@@ -149,7 +155,7 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
                   </td>
                   {(canEdit || canDelete) && (
                     <td className="px-2 py-2.5 text-right">
-                      {e.linked ? null : closed.includes(String(e.date).slice(0, 7)) ? (
+                      {e.linked && e.linked !== 'bank' ? null : closed.includes(String(e.date).slice(0, 7)) ? (
                         <span title="Месяц закрыт" className="px-2 text-muted-foreground"><Icon name="Lock" size={14} /></span>
                       ) : e.from_salary ? (
                         <span title="Создано выплатой зарплаты" className="px-2 text-muted-foreground"><Icon name="Banknote" size={15} /></span>

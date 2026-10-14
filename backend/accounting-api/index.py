@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import psycopg2
 
 from access import current_user
+from bank import guess_category, parse_file
 from formulas import compute_period, global_params, load_config
 
 SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 'public')
@@ -88,6 +89,19 @@ def _cat_id(cur, kind: str, name: str) -> int:
     return cur.fetchone()[0]
 
 
+def _setting(cur, key: str, default: Any) -> Any:
+    cur.execute(f'SELECT value FROM {SCHEMA}.app_settings WHERE key = %s', (key,))
+    r = cur.fetchone()
+    if not r:
+        return default
+    return r[0] if isinstance(r[0], (dict, list)) else json.loads(r[0])
+
+
+def _start(cur) -> str:
+    v = str((_setting(cur, 'accounting', {}) or {}).get('start_period') or '2000-01')
+    return v if PERIOD_RE.match(v) else '2000-01'
+
+
 def _closed(cur) -> Dict[str, Dict[str, Any]]:
     cur.execute(f'SELECT period, closed, closed_at, closed_by, synced_at, snapshot FROM {SCHEMA}.acc_periods')
     return {r[0]: {'closed': r[1], 'closed_at': r[2], 'closed_by': r[3], 'synced_at': r[4], 'snapshot': r[5]}
@@ -107,7 +121,20 @@ def _data_periods(cur) -> List[str]:
                 f"UNION SELECT month_year FROM {SCHEMA}.collection_data WHERE month_year ~ '^\\d{{2}}\\.\\d{{4}}$' "
                 f"UNION SELECT month_year FROM {SCHEMA}.manager_data WHERE month_year ~ '^\\d{{2}}\\.\\d{{4}}$' "
                 f"AND (COALESCE(osn_hours,0) + COALESCE(dop_hours,0) + COALESCE(doplaty,0) + COALESCE(vacation_pay,0)) > 0")
-    return sorted({f'{r[0][3:]}-{r[0][:2]}' for r in cur.fetchall()})
+    start = _start(cur)
+    return sorted(p for p in {f'{r[0][3:]}-{r[0][:2]}' for r in cur.fetchall()} if p >= start)
+
+
+def _fingerprint(cur, period: str, cfg: Dict[str, Any], params: Dict[str, float]) -> str:
+    my = _my(period)
+    cur.execute(f"SELECT md5(COALESCE((SELECT string_agg(t::text, '|' ORDER BY t::text) FROM {SCHEMA}.salary_data t WHERE month_year = %s), '') "
+                f"|| COALESCE((SELECT string_agg(t::text, '|' ORDER BY t::text) FROM {SCHEMA}.manager_data t WHERE month_year = %s), '') "
+                f"|| COALESCE((SELECT revenue::text || '/' || days_in_month::text FROM {SCHEMA}.salary_settings WHERE month_year = %s LIMIT 1), '') "
+                f"|| COALESCE((SELECT string_agg(shift_date || shift_type || COALESCE(fact_value, 0)::text, '|' ORDER BY shift_date, shift_type) "
+                f"FROM {SCHEMA}.collection_data WHERE month_year = %s), '') "
+                f"|| COALESCE((SELECT string_agg(id::text || ':' || profile_id, ',' ORDER BY id) FROM {SCHEMA}.acc_staff), '') "
+                f"|| %s)", (my, my, my, my, json.dumps([cfg, params], sort_keys=True, ensure_ascii=False)))
+    return cur.fetchone()[0]
 
 
 def _upsert_entry(cur, source: str, key: str, kind: str, d: str, amount: float, cat: int, comment: str, period: str) -> None:
@@ -115,7 +142,7 @@ def _upsert_entry(cur, source: str, key: str, kind: str, d: str, amount: float, 
                 f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Синхронизация') "
                 f'ON CONFLICT (source, source_key) WHERE source IS NOT NULL DO UPDATE SET kind = EXCLUDED.kind, '
                 f'entry_date = EXCLUDED.entry_date, amount = EXCLUDED.amount, category_id = EXCLUDED.category_id, '
-                f'comment = EXCLUDED.comment, period = EXCLUDED.period, updated_at = now()',
+                f'comment = EXCLUDED.comment, period = EXCLUDED.period, void = false, updated_at = now()',
                 (kind, d, round(amount, 2), cat, comment, source, key, period))
 
 
@@ -129,13 +156,20 @@ def _staff_for_profile(cur, profile_id: str, name: str) -> int:
     return cur.fetchone()[0]
 
 
-def sync_period(cur, period: str, cfg=None, params=None) -> Dict[str, Any]:
+def sync_period(cur, period: str, cfg=None, params=None, force: bool = False) -> Dict[str, Any]:
     """Переносит в бухгалтерию данные месяца: ИТОГО к выдаче из «Зарплаты» (расход + начисления сотрудникам)
     и фактическую инкассацию по дням (доход). Записи постоянные; закрытый месяц не трогается."""
     if _is_closed(cur, period):
         return {'period': period, 'skipped': 'closed'}
+    if period < _start(cur):
+        return {'period': period, 'skipped': 'before_start'}
     cfg = cfg or load_config(cur, SCHEMA)
     params = params or global_params(cur, SCHEMA)
+    fp = _fingerprint(cur, period, cfg, params)
+    cur.execute(f'SELECT fingerprint, snapshot FROM {SCHEMA}.acc_periods WHERE period = %s', (period,))
+    prev = cur.fetchone()
+    if prev and prev[0] == fp and not force:
+        return {'period': period, 'skipped': 'unchanged', **(prev[1] or {})}
     calc = compute_period(cur, SCHEMA, _my(period), cfg, params)
     last = _last_day(period)
     totals = {'emp': 0.0, 'mgr': 0.0}
@@ -153,10 +187,10 @@ def sync_period(cur, period: str, cfg=None, params=None) -> Dict[str, Any]:
         cur.execute(f"INSERT INTO {SCHEMA}.acc_accruals (staff_id, period, pay_type, rate, base, bonus, amount, comment, created_by, source_key, details) "
                     f"VALUES (%s, %s, 'tabel', %s, 0, 0, %s, %s, 'Синхронизация', %s, %s) "
                     f'ON CONFLICT (source_key) WHERE source_key IS NOT NULL DO UPDATE SET amount = EXCLUDED.amount, '
-                    f'rate = EXCLUDED.rate, details = EXCLUDED.details, staff_id = EXCLUDED.staff_id',
+                    f'rate = EXCLUDED.rate, details = EXCLUDED.details, staff_id = EXCLUDED.staff_id, void = false',
                     (sid, period, p['rate'], round(p['total'], 2),
                      'Из раздела «Зарплата»' + (' (руководитель)' if p['kind'] == 'mgr' else ''), key, details))
-    cur.execute(f'DELETE FROM {SCHEMA}.acc_accruals WHERE period = %s AND source_key LIKE %s AND NOT (source_key = ANY(%s))',
+    cur.execute(f'UPDATE {SCHEMA}.acc_accruals SET void = true WHERE period = %s AND source_key LIKE %s AND NOT (source_key = ANY(%s))',
                 (period, f'sheet:{period}:%', keep_acc or ['']))
     for kind, cat_name, label in (('emp', CAT_EMP, 'сотрудников'), ('mgr', CAT_MGR, 'руководителей')):
         key = f'{period}:{kind}'
@@ -164,7 +198,7 @@ def sync_period(cur, period: str, cfg=None, params=None) -> Dict[str, Any]:
             _upsert_entry(cur, 'salary', key, 'expense', last, totals[kind], _cat_id(cur, 'expense', cat_name),
                           f'ИТОГО к выдаче из «Зарплаты», {label}: {counts[kind]}', period)
         else:
-            cur.execute(f"DELETE FROM {SCHEMA}.acc_entries WHERE source = 'salary' AND source_key = %s", (key,))
+            cur.execute(f"UPDATE {SCHEMA}.acc_entries SET void = true WHERE source = 'salary' AND source_key = %s", (key,))
     cur.execute(f"SELECT shift_date, SUM(COALESCE(fact_value, 0)), COUNT(*) FROM {SCHEMA}.collection_data "
                 f"WHERE month_year = %s AND shift_date ~ '^\\d{{2}}\\.\\d{{2}}\\.\\d{{4}}$' GROUP BY 1", (_my(period),))
     keep_col: List[str] = []
@@ -178,13 +212,13 @@ def sync_period(cur, period: str, cfg=None, params=None) -> Dict[str, Any]:
         keep_col.append(d)
         col_total += total
         _upsert_entry(cur, 'collection', d, 'income', d, total, col_cat, f'Инкассация (факт), смен: {n}', period)
-    cur.execute(f"DELETE FROM {SCHEMA}.acc_entries WHERE source = 'collection' AND period = %s AND NOT (source_key = ANY(%s))",
+    cur.execute(f"UPDATE {SCHEMA}.acc_entries SET void = true WHERE source = 'collection' AND period = %s AND NOT (source_key = ANY(%s))",
                 (period, keep_col or ['']))
     snap = {'salary_emp': round(totals['emp'], 2), 'salary_mgr': round(totals['mgr'], 2), 'collection': round(col_total, 2),
             'revenue': calc['base']['revenue'], 'rate': round(calc['base']['rate'], 6)}
-    cur.execute(f'INSERT INTO {SCHEMA}.acc_periods (period, synced_at, snapshot) VALUES (%s, now(), %s) '
-                f'ON CONFLICT (period) DO UPDATE SET synced_at = now(), snapshot = EXCLUDED.snapshot',
-                (period, json.dumps(snap)))
+    cur.execute(f'INSERT INTO {SCHEMA}.acc_periods (period, synced_at, snapshot, fingerprint) VALUES (%s, now(), %s, %s) '
+                f'ON CONFLICT (period) DO UPDATE SET synced_at = now(), snapshot = EXCLUDED.snapshot, fingerprint = EXCLUDED.fingerprint',
+                (period, json.dumps(snap), _fingerprint(cur, period, cfg, params)))
     return {'period': period, **snap}
 
 
@@ -196,7 +230,7 @@ def sync_range(cur, d_from: str, d_to: str) -> None:
     if not todo:
         return
     cfg, params = load_config(cur, SCHEMA), global_params(cur, SCHEMA)
-    for p in todo[-24:]:
+    for p in todo[-12:]:
         sync_period(cur, p, cfg, params)
 
 
@@ -207,7 +241,7 @@ def _entries(cur, d_from: str, d_to: str) -> List[Dict[str, Any]]:
                 f'e.source, e.counterparty_id, cp.name FROM {SCHEMA}.acc_entries e '
                 f'LEFT JOIN {SCHEMA}.acc_categories c ON c.id = e.category_id '
                 f'LEFT JOIN {SCHEMA}.acc_counterparties cp ON cp.id = e.counterparty_id '
-                f'WHERE e.entry_date BETWEEN %s AND %s ORDER BY e.entry_date DESC, e.id DESC LIMIT 3000', (d_from, d_to))
+                f'WHERE e.entry_date BETWEEN %s AND %s AND NOT e.void ORDER BY e.entry_date DESC, e.id DESC LIMIT 3000', (d_from, d_to))
     return [{'id': r[0], 'kind': r[1], 'date': r[2], 'amount': _num(r[3]), 'category_id': r[4], 'category': r[5] or 'Без статьи',
              'comment': r[6], 'from_salary': r[7] is not None, 'created_by': r[8], 'linked': r[9],
              'counterparty_id': r[10], 'counterparty': r[11]} for r in cur.fetchall()]
@@ -216,11 +250,11 @@ def _entries(cur, d_from: str, d_to: str) -> List[Dict[str, Any]]:
 def _profit(cur, d_from: str, d_to: str) -> Dict[str, Any]:
     cur.execute(f"SELECT e.kind, COALESCE(c.name, 'Без статьи'), SUM(e.amount), COUNT(*), MAX(e.source) "
                 f'FROM {SCHEMA}.acc_entries e LEFT JOIN {SCHEMA}.acc_categories c ON c.id = e.category_id '
-                f'WHERE e.entry_date BETWEEN %s AND %s GROUP BY 1, 2 ORDER BY 3 DESC', (d_from, d_to))
+                f'WHERE e.entry_date BETWEEN %s AND %s AND NOT e.void GROUP BY 1, 2 ORDER BY 3 DESC', (d_from, d_to))
     rows = [{'kind': r[0], 'category': r[1], 'total': _num(r[2]), 'count': r[3], 'linked': r[4]} for r in cur.fetchall()]
     cur.execute(f"SELECT to_char(entry_date, 'YYYY-MM'), SUM(CASE WHEN kind = 'income' THEN amount ELSE 0 END), "
                 f"SUM(CASE WHEN kind = 'expense' THEN amount ELSE 0 END) FROM {SCHEMA}.acc_entries "
-                f'WHERE entry_date BETWEEN %s AND %s GROUP BY 1 ORDER BY 1', (d_from, d_to))
+                f'WHERE entry_date BETWEEN %s AND %s AND NOT void GROUP BY 1 ORDER BY 1', (d_from, d_to))
     months = [{'month': r[0], 'income': _num(r[1]), 'expense': _num(r[2])} for r in cur.fetchall()]
     income = round(sum(r['total'] for r in rows if r['kind'] == 'income'), 2)
     expense = round(sum(r['total'] for r in rows if r['kind'] == 'expense'), 2)
@@ -230,11 +264,11 @@ def _profit(cur, d_from: str, d_to: str) -> Dict[str, Any]:
 def _dds(cur, d_from: str, d_to: str) -> Dict[str, Any]:
     """Отчёт о движении денежных средств: статьи × месяцы, остаток на начало и конец."""
     cur.execute(f"SELECT COALESCE(SUM(CASE WHEN kind = 'income' THEN amount ELSE -amount END), 0) FROM {SCHEMA}.acc_entries "
-                f'WHERE entry_date < %s', (d_from,))
+                f'WHERE entry_date < %s AND NOT void', (d_from,))
     opening = _num(cur.fetchone()[0])
     cur.execute(f"SELECT e.kind, COALESCE(c.name, 'Без статьи'), to_char(e.entry_date, 'YYYY-MM'), SUM(e.amount) "
                 f'FROM {SCHEMA}.acc_entries e LEFT JOIN {SCHEMA}.acc_categories c ON c.id = e.category_id '
-                f'WHERE e.entry_date BETWEEN %s AND %s GROUP BY 1, 2, 3', (d_from, d_to))
+                f'WHERE e.entry_date BETWEEN %s AND %s AND NOT e.void GROUP BY 1, 2, 3', (d_from, d_to))
     months, rows = set(), {}
     for kind, cat, m, total in cur.fetchall():
         months.add(m)
@@ -257,7 +291,7 @@ def _budget(cur, period: str) -> Dict[str, Any]:
     d_from, d_to = f'{period}-01', _last_day(period)
     cur.execute(f'SELECT category_id, amount FROM {SCHEMA}.acc_budget WHERE period = %s', (period,))
     plan = {r[0]: _num(r[1]) for r in cur.fetchall()}
-    cur.execute(f'SELECT category_id, SUM(amount) FROM {SCHEMA}.acc_entries WHERE entry_date BETWEEN %s AND %s GROUP BY 1',
+    cur.execute(f'SELECT category_id, SUM(amount) FROM {SCHEMA}.acc_entries WHERE entry_date BETWEEN %s AND %s AND NOT void GROUP BY 1',
                 (d_from, d_to))
     fact = {r[0]: _num(r[1]) for r in cur.fetchall()}
     cur.execute(f'SELECT id, kind, name, archived FROM {SCHEMA}.acc_categories ORDER BY kind, name')
@@ -275,8 +309,8 @@ def _counterparties(cur) -> List[Dict[str, Any]]:
     cur.execute(f"SELECT cp.id, cp.name, cp.kind, cp.inn, cp.phone, cp.comment, cp.archived, "
                 f"(SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_cp_docs d WHERE d.counterparty_id = cp.id AND d.direction = 'in'), "
                 f"(SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_cp_docs d WHERE d.counterparty_id = cp.id AND d.direction = 'out'), "
-                f"(SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_entries e WHERE e.counterparty_id = cp.id AND e.kind = 'expense'), "
-                f"(SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_entries e WHERE e.counterparty_id = cp.id AND e.kind = 'income') "
+                f"(SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_entries e WHERE e.counterparty_id = cp.id AND e.kind = 'expense' AND NOT e.void), "
+                f"(SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_entries e WHERE e.counterparty_id = cp.id AND e.kind = 'income' AND NOT e.void) "
                 f'FROM {SCHEMA}.acc_counterparties cp ORDER BY cp.archived, cp.name')
     out = []
     for r in cur.fetchall():
@@ -290,7 +324,7 @@ def _counterparties(cur) -> List[Dict[str, Any]]:
 
 def _cp_history(cur, cp_id: int) -> List[Dict[str, Any]]:
     cur.execute(f"SELECT 'doc', id, doc_date, direction, amount, comment FROM {SCHEMA}.acc_cp_docs WHERE counterparty_id = %s "
-                f"UNION ALL SELECT 'pay', id, entry_date, kind, amount, comment FROM {SCHEMA}.acc_entries WHERE counterparty_id = %s "
+                f"UNION ALL SELECT 'pay', id, entry_date, kind, amount, comment FROM {SCHEMA}.acc_entries WHERE counterparty_id = %s AND NOT void "
                 f'ORDER BY 3 DESC, 2 DESC', (cp_id, cp_id))
     labels = {('doc', 'in'): 'Получено от контрагента (товар/услуга)', ('doc', 'out'): 'Отгружено/оказано контрагенту',
               ('pay', 'expense'): 'Оплата контрагенту', ('pay', 'income'): 'Оплата от контрагента'}
@@ -299,27 +333,29 @@ def _cp_history(cur, cp_id: int) -> List[Dict[str, Any]]:
 
 
 def _salary(cur, period: str, with_profiles: bool) -> Dict[str, Any]:
+    start = _start(cur)
     cur.execute(f'SELECT id, name, profile_id, position, pay_type, rate, active FROM {SCHEMA}.acc_staff ORDER BY active DESC, name')
     staff = [{'id': r[0], 'name': (r[1] or '').strip(), 'profile_id': r[2], 'position': r[3], 'pay_type': r[4], 'rate': _num(r[5]),
               'active': r[6]} for r in cur.fetchall()]
-    cur.execute(f'SELECT staff_id, SUM(amount) FROM {SCHEMA}.acc_accruals WHERE period <= %s GROUP BY 1', (period,))
-    acc_all = {r[0]: _num(r[1]) for r in cur.fetchall()}
-    cur.execute(f"SELECT staff_id, SUM(amount) FROM {SCHEMA}.acc_payments WHERE COALESCE(period, to_char(pay_date, 'YYYY-MM')) <= %s "
-                f'GROUP BY 1', (period,))
-    pay_all = {r[0]: _num(r[1]) for r in cur.fetchall()}
-    cur.execute(f'SELECT staff_id, SUM(amount), SUM(CASE WHEN source_key IS NOT NULL THEN amount ELSE 0 END) '
-                f'FROM {SCHEMA}.acc_accruals WHERE period = %s GROUP BY 1', (period,))
-    acc_p = {r[0]: (_num(r[1]), _num(r[2])) for r in cur.fetchall()}
-    cur.execute(f"SELECT staff_id, SUM(amount) FROM {SCHEMA}.acc_payments WHERE COALESCE(period, to_char(pay_date, 'YYYY-MM')) = %s "
-                f'GROUP BY 1', (period,))
-    pay_p = {r[0]: _num(r[1]) for r in cur.fetchall()}
+    cur.execute(f'SELECT staff_id, SUM(CASE WHEN period < %s THEN amount ELSE 0 END), SUM(CASE WHEN period = %s THEN amount ELSE 0 END), '
+                f'SUM(CASE WHEN period = %s AND source_key IS NOT NULL THEN amount ELSE 0 END) '
+                f'FROM {SCHEMA}.acc_accruals WHERE NOT void AND period >= %s AND period <= %s GROUP BY 1', (period, period, period, start, period))
+    acc = {r[0]: (_num(r[1]), _num(r[2]), _num(r[3])) for r in cur.fetchall()}
+    cur.execute(f"SELECT staff_id, SUM(CASE WHEN p < %s THEN amount ELSE 0 END), SUM(CASE WHEN p = %s THEN amount ELSE 0 END) FROM "
+                f"(SELECT staff_id, amount, COALESCE(period, to_char(pay_date, 'YYYY-MM')) p FROM {SCHEMA}.acc_payments) x "
+                f'WHERE p >= %s AND p <= %s GROUP BY 1', (period, period, start, period))
+    pay = {r[0]: (_num(r[1]), _num(r[2])) for r in cur.fetchall()}
     for s in staff:
-        s['accrued'], sheet = acc_p.get(s['id'], (0.0, 0.0))
-        s['sheet'] = sheet if s['pay_type'] == 'tabel' else None
-        s['paid'] = pay_p.get(s['id'], 0.0)
-        s['debt'] = round(acc_all.get(s['id'], 0.0) - pay_all.get(s['id'], 0.0), 2)
+        a_before, a_now, sheet = acc.get(s['id'], (0.0, 0.0, 0.0))
+        p_before, p_now = pay.get(s['id'], (0.0, 0.0))
+        s['debt_start'] = round(a_before - p_before, 2)
+        s['accrued'] = round(a_now, 2)
+        s['sheet'] = round(sheet, 2) if s['pay_type'] == 'tabel' else None
+        s['paid'] = round(p_now, 2)
+        s['debt'] = round(s['debt_start'] + a_now - p_now, 2)
+    staff = [s for s in staff if s['active'] or s['accrued'] or s['paid'] or s['debt']]
     cur.execute(f'SELECT id, staff_id, period, pay_type, rate, base, bonus, amount, comment, created_at, source_key '
-                f'FROM {SCHEMA}.acc_accruals WHERE period = %s ORDER BY created_at DESC', (period,))
+                f'FROM {SCHEMA}.acc_accruals WHERE period = %s AND NOT void ORDER BY created_at DESC', (period,))
     accruals = [{'id': r[0], 'staff_id': r[1], 'period': r[2], 'pay_type': r[3], 'rate': _num(r[4]), 'base': _num(r[5]),
                  'bonus': _num(r[6]), 'amount': _num(r[7]), 'comment': r[8], 'created_at': r[9], 'auto': r[10] is not None}
                 for r in cur.fetchall()]
@@ -327,8 +363,9 @@ def _salary(cur, period: str, with_profiles: bool) -> Dict[str, Any]:
                 f"WHERE COALESCE(period, to_char(pay_date, 'YYYY-MM')) = %s ORDER BY pay_date DESC, id DESC", (period,))
     payments = [{'id': r[0], 'staff_id': r[1], 'date': r[2], 'amount': _num(r[3]), 'period': r[4], 'comment': r[5]}
                 for r in cur.fetchall()]
-    out = {'period': period, 'staff': staff, 'accruals': accruals, 'payments': payments,
-           'total_debt': round(sum(s['debt'] for s in staff), 2), 'closed': _is_closed(cur, period)}
+    out = {'period': period, 'start_period': start, 'before_start': period < start, 'staff': staff, 'accruals': accruals,
+           'payments': payments, 'total_debt': round(sum(s['debt'] for s in staff), 2),
+           'total_debt_start': round(sum(s['debt_start'] for s in staff), 2), 'closed': _is_closed(cur, period)}
     if with_profiles:
         cur.execute(f"SELECT id, full_name FROM {SCHEMA}.profiles WHERE status = 'active' ORDER BY full_name")
         out['profiles'] = [{'id': r[0], 'name': (r[1] or '').strip()} for r in cur.fetchall()]
@@ -341,13 +378,16 @@ def _payslip(cur, staff_id: int, period: str) -> Dict[str, Any]:
     if not st:
         return {}
     cfg = load_config(cur, SCHEMA)
-    cur.execute(f'SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_accruals WHERE staff_id = %s AND period < %s', (staff_id, period))
+    start = _start(cur)
+    cur.execute(f'SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_accruals WHERE staff_id = %s AND period < %s AND period >= %s AND NOT void',
+                (staff_id, period, start))
     acc_before = _num(cur.fetchone()[0])
     cur.execute(f"SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_payments WHERE staff_id = %s "
-                f"AND COALESCE(period, to_char(pay_date, 'YYYY-MM')) < %s", (staff_id, period))
+                f"AND COALESCE(period, to_char(pay_date, 'YYYY-MM')) < %s AND COALESCE(period, to_char(pay_date, 'YYYY-MM')) >= %s",
+                (staff_id, period, start))
     debt_start = round(acc_before - _num(cur.fetchone()[0]), 2)
     lines: List[Dict[str, Any]] = []
-    cur.execute(f'SELECT amount, comment, details FROM {SCHEMA}.acc_accruals WHERE staff_id = %s AND period = %s ORDER BY id',
+    cur.execute(f'SELECT amount, comment, details FROM {SCHEMA}.acc_accruals WHERE staff_id = %s AND period = %s AND NOT void ORDER BY id',
                 (staff_id, period))
     total_acc = 0.0
     for amount, comment, details in cur.fetchall():
@@ -388,6 +428,65 @@ def _calc_accrual(pay_type: str, rate: Decimal, base: Decimal, bonus: Decimal) -
 
 # ---------------------------------------------------------------- изменения
 
+def _bank(cur, user: Dict[str, Any], parsed: Dict[str, Any], commit: bool, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Выписка СберБизнес → операции. Контрагенты находятся по ИНН или названию (новые создаются),
+    статья — по правилу контрагента или по назначению платежа. Повторно загруженные строки пропускаются."""
+    cats = {(c['kind'], c['name'].lower()): c['id'] for c in _categories(cur) if not c['archived']}
+    cur.execute(f'SELECT id, name, inn, default_category_id FROM {SCHEMA}.acc_counterparties')
+    cps = [{'id': r[0], 'name': r[1], 'inn': r[2], 'cat': r[3]} for r in cur.fetchall()]
+    overrides = {str(k): v for k, v in (body.get('categories') or {}).items()}
+    closed = {p for p, v in _closed(cur).items() if v['closed']}
+    rows, added, skipped = [], 0, 0
+    for i, op in enumerate(parsed['ops']):
+        if not op['date'] or op['amount'] <= 0:
+            continue
+        key = f"{op['date']}|{op['kind']}|{op['amount']:.2f}|{op['number']}|{op['inn'] or op['name'][:40]}"
+        cur.execute(f"SELECT 1 FROM {SCHEMA}.acc_entries WHERE source = 'bank' AND source_key = %s", (key,))
+        dup = cur.fetchone() is not None
+        low = op['name'].lower()
+        cp = next((c for c in cps if op['inn'] and c['inn'] == op['inn']), None) or \
+            next((c for c in cps if low and c['name'].lower() == low), None)
+        cat_id = overrides.get(str(i))
+        if cat_id in (None, ''):
+            cat_id = cp['cat'] if cp and cp['cat'] else None
+            if not cat_id:
+                g = guess_category(op)
+                cat_id = cats.get((op['kind'], g.lower())) if g else None
+        is_closed = _period_of(op['date']) in closed
+        row = {**op, 'idx': i, 'duplicate': dup, 'closed': is_closed, 'counterparty_id': cp['id'] if cp else None,
+               'counterparty_new': not cp and bool(op['name']), 'category_id': int(cat_id) if cat_id else None}
+        rows.append(row)
+        if not commit:
+            continue
+        if dup or is_closed or str(i) in (body.get('skip') or []):
+            skipped += 1
+            continue
+        if not cp and op['name']:
+            cur.execute(f"INSERT INTO {SCHEMA}.acc_counterparties (name, kind, inn) VALUES (%s, %s, %s) RETURNING id",
+                        (op['name'][:150], 'supplier' if op['kind'] == 'expense' else 'customer', op['inn'] or None))
+            cp = {'id': cur.fetchone()[0], 'name': op['name'], 'inn': op['inn'], 'cat': None}
+            cps.append(cp)
+        if cp and row['category_id'] and not cp['cat']:
+            cur.execute(f'UPDATE {SCHEMA}.acc_counterparties SET default_category_id = %s WHERE id = %s', (row['category_id'], cp['id']))
+            cp['cat'] = row['category_id']
+        comment = (f"Банк №{op['number']}: " if op['number'] else 'Банк: ') + (op['purpose'] or '')[:400]
+        cur.execute(f"INSERT INTO {SCHEMA}.acc_entries (kind, entry_date, amount, category_id, comment, counterparty_id, period, "
+                    f"source, source_key, bank_purpose, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s, 'bank', %s, %s, %s) "
+                    f"ON CONFLICT (source, source_key) WHERE source IS NOT NULL DO NOTHING",
+                    (op['kind'], op['date'], op['amount'], row['category_id'], comment, cp['id'] if cp else None,
+                     _period_of(op['date']), key, op['purpose'][:1000], user['name']))
+        added += 1
+    if commit:
+        cur.execute(f'INSERT INTO {SCHEMA}.acc_bank_imports (file_name, account, date_from, date_to, added, skipped, created_by) '
+                    f'VALUES (%s, %s, %s, %s, %s, %s, %s)', (str(body.get('file_name') or '')[:200], parsed['account'],
+                                                           parsed['date_from'], parsed['date_to'], added, skipped, user['name']))
+        _log(cur, user, 'Выписка банка', f"{body.get('file_name')}: добавлено {added}, пропущено {skipped}")
+        return _resp(200, {'ok': True, 'added': added, 'skipped': skipped})
+    return _resp(200, {'account': parsed['account'], 'date_from': parsed['date_from'], 'date_to': parsed['date_to'], 'rows': rows,
+                       'income': round(sum(r['amount'] for r in rows if r['kind'] == 'income' and not r['duplicate']), 2),
+                       'expense': round(sum(r['amount'] for r in rows if r['kind'] == 'expense' and not r['duplicate']), 2)})
+
+
 def _guard_period(cur, d: str) -> Optional[Dict[str, Any]]:
     if _is_closed(cur, _period_of(d)):
         return _err(f'Месяц {d[5:7]}.{d[:4]} закрыт — изменения запрещены. Откройте месяц, если нужно поправить.')
@@ -407,7 +506,7 @@ def _edit(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
             ex = cur.fetchone()
             if not ex:
                 return _err('Операция не найдена', 404)
-            if ex[1]:
+            if ex[1] and ex[1] != 'bank':
                 return _err('Эта строка приходит из раздела «Зарплата» или «Инкассация» — исправьте её там')
             if ex[0]:
                 return _err('Эта операция создана выплатой зарплаты — измените выплату во вкладке «Зарплата»')
@@ -417,7 +516,10 @@ def _edit(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         if action == 'entry_delete':
             if not ex:
                 return _err('Операция не найдена', 404)
-            cur.execute(f'DELETE FROM {SCHEMA}.acc_entries WHERE id = %s', (body['id'],))
+            if ex[1] == 'bank':
+                cur.execute(f'UPDATE {SCHEMA}.acc_entries SET void = true WHERE id = %s', (body['id'],))
+            else:
+                cur.execute(f'DELETE FROM {SCHEMA}.acc_entries WHERE id = %s', (body['id'],))
             _log(cur, user, 'Удалена операция', f'#{body["id"]}: {ex[3]} {ex[4]} от {ex[2]}')
             return _resp(200, {'ok': True})
         kind = body.get('kind')
@@ -476,13 +578,24 @@ def _edit(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
             cur.execute(f'UPDATE {SCHEMA}.acc_periods SET closed = false, closed_at = NULL, closed_by = NULL WHERE period = %s', (period,))
             _log(cur, user, 'Месяц открыт', period)
             return _resp(200, {'ok': True})
-        res = sync_period(cur, period)
+        res = sync_period(cur, period, force=True)
         if action == 'period_close':
             cur.execute(f'INSERT INTO {SCHEMA}.acc_periods (period, closed, closed_at, closed_by) VALUES (%s, true, now(), %s) '
                         f'ON CONFLICT (period) DO UPDATE SET closed = true, closed_at = now(), closed_by = EXCLUDED.closed_by',
                         (period, user['name']))
             _log(cur, user, 'Месяц закрыт', f'{period}: {json.dumps(res, ensure_ascii=False)}')
         return _resp(200, {'ok': True, 'result': res})
+
+    if action in ('bank_preview', 'bank_import'):
+        if 'accounting.edit_entries' not in can:
+            return _err('Нет права на это действие', 403)
+        try:
+            parsed = parse_file(str(body.get('file_name') or ''), str(body.get('file') or ''))
+        except ValueError as e:
+            return _err(str(e))
+        except Exception:
+            return _err('Не удалось прочитать файл. Выгрузите выписку из СберБизнес в формате 1С (.txt) или Excel (.xlsx).')
+        return _bank(cur, user, parsed, action == 'bank_import', body)
 
     if action == 'budget_save':
         if 'accounting.edit_budget' not in can:
@@ -686,7 +799,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             cur.execute(f'SELECT id, name, kind FROM {SCHEMA}.acc_counterparties WHERE NOT archived ORDER BY name')
             cps = [{'id': r[0], 'name': r[1], 'kind': r[2]} for r in cur.fetchall()]
             return _resp(200, {'actions': sorted(can), 'role': user['role'], 'is_deputy': user['is_deputy'],
-                               'categories': _categories(cur), 'counterparties': cps})
+                               'categories': _categories(cur), 'counterparties': cps, 'start_period': _start(cur)})
+        if action == 'settings_save':
+            if not user['is_deputy']:
+                return _err('Только заместитель директора', 403)
+            sp = str(body.get('start_period') or '')
+            if not PERIOD_RE.match(sp):
+                return _err('Укажите месяц начала учёта')
+            cur.execute(f"INSERT INTO {SCHEMA}.app_settings (key, value, updated_by) VALUES ('accounting', %s, %s) "
+                        f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()",
+                        (json.dumps({'start_period': sp}), user['name']))
+            cur.execute(f'UPDATE {SCHEMA}.acc_accruals SET void = (period < %s) WHERE source_key IS NOT NULL', (sp,))
+            cur.execute(f'UPDATE {SCHEMA}.acc_entries SET void = (period < %s) WHERE source IN (%s, %s)', (sp, 'salary', 'collection'))
+            cur.execute(f'UPDATE {SCHEMA}.acc_periods SET fingerprint = NULL')
+            _log(cur, user, 'Начало учёта', sp)
+            return _resp(200, {'ok': True})
         if action == 'periods':
             sync_range(cur, '2000-01-01', date.today().isoformat())
             closed = _closed(cur)

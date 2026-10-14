@@ -84,9 +84,9 @@ export default function SalaryTab({ canEdit, reloadKey }: { canEdit: boolean; re
         </label>
         {data.closed && <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-700"><Icon name="Lock" size={12} />Месяц закрыт</span>}
         <Button size="sm" variant="ghost" className="ml-auto" onClick={() => downloadCsv(`Зарплата_${period}.csv`, [
-          ['Сотрудник', 'Должность', 'Начислено за месяц', 'Выплачено за месяц', 'Долг на конец'],
-          ...staff.map((s) => [s.name, s.position || '', s.accrued, s.paid, s.debt]),
-          ['ИТОГО', '', accrued, paid, data.total_debt],
+          ['Сотрудник', 'Долг на начало', 'Начислено за месяц', 'Выплачено за месяц', 'Долг на конец'],
+          ...staff.map((s) => [s.name, s.debt_start, s.accrued, s.paid, s.debt]),
+          ['ИТОГО', data.total_debt_start, accrued, paid, data.total_debt],
         ])}><Icon name="Download" size={15} />В Excel</Button>
         {canEdit && (
           <Button size="sm" onClick={() => open({ type: 'staff', id: 0, name: '', position: '', profile_id: '', pay_type: 'salary', rate: '', active: true })}>
@@ -95,10 +95,16 @@ export default function SalaryTab({ canEdit, reloadKey }: { canEdit: boolean; re
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      {data.before_start && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800">
+          Этот месяц раньше начала учёта ({monthLabel(data.start_period)}) — данные не учитываются. Начало учёта меняется в админ-панели → «Общие».
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Долг на начало месяца</div><div className="mt-1 text-xl font-semibold tabular-nums">{rub(data.total_debt_start)}</div></div>
         <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Начислено за месяц</div><div className="mt-1 text-xl font-semibold tabular-nums">{rub(accrued)}</div></div>
         <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Выплачено за месяц</div><div className="mt-1 text-xl font-semibold tabular-nums">{rub(paid)}</div></div>
-        <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Общий долг по зарплате</div><div className={`mt-1 text-xl font-semibold tabular-nums ${data.total_debt > 0 ? 'text-red-600' : ''}`}>{rub(data.total_debt)}</div></div>
+        <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Долг на конец месяца</div><div className={`mt-1 text-xl font-semibold tabular-nums ${data.total_debt > 0 ? 'text-red-600' : ''}`}>{rub(data.total_debt)}</div></div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-2xl border bg-card">
@@ -109,10 +115,10 @@ export default function SalaryTab({ canEdit, reloadKey }: { canEdit: boolean; re
             <thead className="sticky top-0 bg-card text-left text-xs text-muted-foreground">
               <tr className="border-b">
                 <th className="px-4 py-2.5 font-medium">Сотрудник</th>
-                <th className="px-4 py-2.5 font-medium">Оплата</th>
-                <th className="px-4 py-2.5 text-right font-medium">Начислено</th>
-                <th className="px-4 py-2.5 text-right font-medium">Выплачено</th>
-                <th className="px-4 py-2.5 text-right font-medium">Долг (всего)</th>
+                <th className="px-4 py-2.5 text-right font-medium">Долг на начало</th>
+                <th className="px-4 py-2.5 text-right font-medium">+ Начислено</th>
+                <th className="px-4 py-2.5 text-right font-medium">− Выплачено</th>
+                <th className="px-4 py-2.5 text-right font-medium">= Долг на конец</th>
                 <th />
               </tr>
             </thead>
@@ -121,15 +127,12 @@ export default function SalaryTab({ canEdit, reloadKey }: { canEdit: boolean; re
                 <tr key={s.id} className={`border-b last:border-0 hover:bg-secondary/40 ${s.active ? '' : 'opacity-60'}`}>
                   <td className="px-4 py-2.5">
                     <div className="font-medium">{s.name}</div>
-                    <div className="text-xs text-muted-foreground">{s.position || ''}{!s.active && ' · уволен'}</div>
+                    <div className="text-xs text-muted-foreground">{PAY_LABELS[s.pay_type]}{s.pay_type !== 'tabel' ? ` · ${rateText(s)}` : ''}{s.position ? ` · ${s.position}` : ''}{!s.active && ' · уволен'}</div>
                   </td>
-                  <td className="px-4 py-2.5">
-                    <div>{PAY_LABELS[s.pay_type]}</div>
-                    <div className="text-xs text-muted-foreground">{rateText(s)}</div>
-                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{rub(s.debt_start)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     {rub(s.accrued)}
-                    {s.sheet !== null && <div className="text-[11px] text-muted-foreground">из «Зарплаты»: {rub(s.sheet)}</div>}
+                    {s.sheet !== null && s.sheet !== s.accrued && <div className="text-[11px] text-muted-foreground">из «Зарплаты»: {rub(s.sheet)}</div>}
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{rub(s.paid)}</td>
                   <td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${s.debt > 0 ? 'text-red-600' : s.debt < 0 ? 'text-amber-600' : 'text-emerald-600'}`}>

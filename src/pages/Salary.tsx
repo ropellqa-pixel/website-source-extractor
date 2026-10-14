@@ -5,7 +5,7 @@ import { getAllVkBindings } from '../lib/vkBinding';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Banknote,
-  Save, Lock, Send, Settings2, Unlock, UserCheck, Loader2, CheckCircle
+  Save, Lock, Send, Settings2, Unlock, UserCheck, Loader2, CheckCircle, CalendarDays
 } from 'lucide-react';
 import func2url from '../../backend/func2url.json';
 import { evalFormula, useAccess, type FieldDef } from '@/lib/access';
@@ -451,6 +451,30 @@ export default function Salary() {
   }
 
   // Зам. директора разблокирует таблицу сотрудников, чтобы внести изменения.
+  const [tabelBusy, setTabelBusy] = useState(false);
+  async function fillHoursFromSchedule() {
+    if (!canEditHours()) return;
+    setTabelBusy(true);
+    try {
+      const { data } = await db.from('schedule_data').select('profile_id, shifts').eq('month_year', `${MONTHS[selectedMonth - 1]} ${selectedYear}`);
+      const sh = { 'Д': 12, 'Н': 12, 'Дп': 12, 'Нп': 12, ...(access?.general?.shift_hours || {}) } as Record<string, number>;
+      const hoursBy = new Map<string, number>();
+      for (const r of (data || []) as { profile_id: string; shifts: string[] | string }[]) {
+        const shifts: string[] = Array.isArray(r.shifts) ? r.shifts : JSON.parse(r.shifts || '[]');
+        hoursBy.set(r.profile_id, (hoursBy.get(r.profile_id) || 0) + shifts.reduce((s, x) => s + (sh[x] || 0), 0));
+      }
+      if (hoursBy.size === 0) { alert('В табеле за этот месяц нет смен'); return; }
+      const changes = salaryRows.filter(r => r.id && hoursBy.has(r.profile_id) && hoursBy.get(r.profile_id) !== (r.hours_worked || 0));
+      if (changes.length === 0) { alert('Часы уже совпадают с табелем'); return; }
+      const list = changes.map(r => `${getProfileName(r.profile_id)}: ${r.hours_worked || 0} → ${hoursBy.get(r.profile_id)}`).join('\n');
+      if (!confirm(`Подставить часы из табеля?\n\n${list}`)) return;
+      for (const r of changes) {
+        await db.from('salary_data').update({ hours_worked: hoursBy.get(r.profile_id) }).eq('id', r.id!);
+      }
+      setSalaryRows(prev => prev.map(r => hoursBy.has(r.profile_id) && changes.some(c => c.id === r.id) ? { ...r, hours_worked: hoursBy.get(r.profile_id)! } : r));
+    } finally { setTabelBusy(false); }
+  }
+
   async function handleUnlockPeriod() {
     if (!canLock) return;
     setPeriodLocked(false);
@@ -640,8 +664,15 @@ export default function Salary() {
                   {showFullTable ? 'Скрыть' : 'ПОЛНАЯ'}
                 </button>
               )}
+              {canEditHours() && (
+                <button onClick={fillHoursFromSchedule} disabled={tabelBusy}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-secondary hover:bg-border text-foreground/80 text-xs font-medium rounded-lg transition-all disabled:opacity-50"
+                  title="Посчитать часы по сменам из раздела «Табель»">
+                  {tabelBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarDays className="w-3.5 h-3.5" />} Часы из табеля
+                </button>
+              )}
               {isDeputy && (
-                <a href="/settings" className="flex items-center gap-1 px-3 py-1.5 bg-secondary hover:bg-border text-foreground/80 text-xs font-medium rounded-lg transition-all">
+                <a href="/admin" className="flex items-center gap-1 px-3 py-1.5 bg-secondary hover:bg-border text-foreground/80 text-xs font-medium rounded-lg transition-all">
                   <Settings2 className="w-3.5 h-3.5" /> Настройки ЗП
                 </a>
               )}

@@ -44,6 +44,13 @@ def _set(cur, key: str, value: Any, user: Dict[str, Any]) -> None:
                 (key, json.dumps(value, ensure_ascii=False), user['name']))
 
 
+def _general(cur) -> Dict[str, Any]:
+    cur.execute(f"SELECT key, value FROM {SCHEMA}.app_settings WHERE key IN ('accounting', 'shift_hours')")
+    raw = {k: (v if isinstance(v, (dict, list)) else json.loads(v)) for k, v in cur.fetchall()}
+    return {'start_period': (raw.get('accounting') or {}).get('start_period') or '2026-09',
+            'shift_hours': {**{'Д': 12, 'Н': 12, 'Дп': 12, 'Нп': 12}, **(raw.get('shift_hours') or {})}}
+
+
 def _positions(cur):
     cur.execute(f'SELECT pos.id, pos.name, pos.sections, pos.actions, '
                 f'(SELECT count(*) FROM {SCHEMA}.profiles p WHERE p.position_id = pos.id) FROM {SCHEMA}.positions pos ORDER BY pos.name')
@@ -104,7 +111,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         if action == 'my_access':
             cfg = load_config(cur, SCHEMA)
-            return _resp(200, {'role': user['role'], 'position': user['position'], 'sections': user['sections'],
+            return _resp(200, {'general': _general(cur),'role': user['role'], 'position': user['position'], 'sections': user['sections'],
                                'actions': sorted(user['actions']), 'is_deputy': user['is_deputy'],
                                'formulas': cfg['formulas'], 'fields': cfg['fields']})
 
@@ -127,8 +134,29 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'formulas': cfg['formulas'], 'default_formulas': DEFAULT_FORMULAS, 'formula_labels': FORMULA_LABELS,
                 'formula_order': FORMULA_ORDER, 'fields': cfg['fields'], 'default_fields': DEFAULT_FIELDS,
                 'variables': _variables(cfg['fields']), 'params': global_params(cur, SCHEMA),
-                'categories': cats, 'counterparties': cps,
+                'categories': cats, 'counterparties': cps, 'general': _general(cur),
             })
+
+        if action == 'general_save':
+            sp = str(body.get('start_period') or '')
+            if not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', sp):
+                return _err('Укажите месяц начала учёта')
+            hours = {}
+            for k in ('Д', 'Н', 'Дп', 'Нп'):
+                try:
+                    v = float(str((body.get('shift_hours') or {}).get(k, 12)).replace(',', '.'))
+                except ValueError:
+                    return _err('Часы смены — числом')
+                if not 0 <= v <= 24:
+                    return _err('Смена — от 0 до 24 часов')
+                hours[k] = v
+            _set(cur, 'accounting', {'start_period': sp}, user)
+            _set(cur, 'shift_hours', hours, user)
+            cur.execute(f'UPDATE {SCHEMA}.acc_accruals SET void = (period < %s) WHERE source_key IS NOT NULL', (sp,))
+            cur.execute(f"UPDATE {SCHEMA}.acc_entries SET void = (period < %s) WHERE source IN ('salary', 'collection')", (sp,))
+            cur.execute(f'UPDATE {SCHEMA}.acc_periods SET fingerprint = NULL')
+            _log(cur, user, 'Общие настройки', f'учёт с {sp}; часы смен {hours}')
+            return _resp(200, {'ok': True})
 
         if action == 'position_save':
             name = str(body.get('name') or '').strip()[:80]
@@ -188,6 +216,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if 'manager_percent' in params:
                 cur.execute(f'UPDATE {SCHEMA}.manager_settings SET manager_percent = %s WHERE month_year IS NULL',
                             (float(params['manager_percent'] or 0),))
+            cur.execute(f'UPDATE {SCHEMA}.acc_periods SET fingerprint = NULL')
             _log(cur, user, 'Формулы зарплаты', '; '.join(f'{k}={v}' for k, v in formulas.items()))
             return _resp(200, {'ok': True})
 
