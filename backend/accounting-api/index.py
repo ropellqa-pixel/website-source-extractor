@@ -629,6 +629,10 @@ def _edit(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
                     str(body.get('phone') or '').strip()[:40] or None, str(body.get('comment') or '').strip()[:300] or None,
                     bool(body.get('archived')))
             if body.get('id'):
+                cur.execute(f'SELECT name, inn, account FROM {SCHEMA}.acc_counterparties WHERE id = %s', (body['id'],))
+                old = cur.fetchone()
+                if old and old[2] and (old[0] != vals[0] or (old[1] or None) != vals[2]) and 'sber.edit_requisites' not in can:
+                    return _err('Название и ИНН контрагента с банковскими реквизитами меняет только замдиректора (раздел СБЕР)', 403)
                 cur.execute(f'UPDATE {SCHEMA}.acc_counterparties SET name = %s, kind = %s, inn = %s, phone = %s, comment = %s, '
                             f'archived = %s WHERE id = %s', (*vals, body['id']))
             else:

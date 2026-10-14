@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { AccessProvider, useAccess } from "./lib/access";
 import Admin from "./pages/Admin";
+import Sber from "./pages/Sber";
 import AppShell from "./components/shell/AppShell";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -87,6 +88,7 @@ const App = () => (
             <Route path="/skud" element={<ProtectedRoute path="/skud"><Skud /></ProtectedRoute>} />
             <Route path="/salary" element={<ProtectedRoute path="/salary"><Salary /></ProtectedRoute>} />
             <Route path="/schedule" element={<ProtectedRoute path="/schedule"><Schedule /></ProtectedRoute>} />
+            <Route path="/sber" element={<ProtectedRoute path="/sber"><Sber /></ProtectedRoute>} />
             <Route path="/accounting" element={<ProtectedRoute path="/accounting"><Accounting /></ProtectedRoute>} />
             <Route path="/collection" element={<ProtectedRoute path="/collection"><Collection /></ProtectedRoute>} />
             <Route path="/employees" element={<ProtectedRoute directorOnly path="/employees"><Employees /></ProtectedRoute>} />

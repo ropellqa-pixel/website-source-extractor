@@ -1,0 +1,7 @@
+{"tests": [
+  {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+  {"name": "No login rejected", "method": "POST", "path": "/", "body": {"action": "overview"}, "expectedStatus": 401},
+  {"name": "Pay without login rejected", "method": "POST", "path": "/", "body": {"action": "pay", "ids": [1], "password": "x"}, "expectedStatus": 401},
+  {"name": "Cron without key rejected", "method": "GET", "path": "/?cron=wrong", "expectedStatus": 403},
+  {"name": "Stale OAuth state rejected", "method": "GET", "path": "/?code=x&state=nope", "expectedStatus": 302}
+]}
