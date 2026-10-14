@@ -4,10 +4,12 @@ import { db } from '@/lib/sdk';
 import { getAllVkBindings } from '../lib/vkBinding';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Plus, Trash2, Banknote, Calculator,
+  ArrowLeft, Banknote,
   Save, Lock, Send, Settings2, Unlock, UserCheck, Loader2, CheckCircle
 } from 'lucide-react';
 import func2url from '../../backend/func2url.json';
+import { evalFormula, useAccess, type FieldDef } from '@/lib/access';
+import SalaryGrid, { cellValue, type GridRow } from '@/components/salary/SalaryGrid';
 
 const VK_API_URL = func2url['vk-api'];
 
@@ -33,6 +35,7 @@ interface SalaryRow {
   tax: number;
   underpayment: number;
   month_year: string;
+  extra?: Record<string, number | string> | null;
   responsible_user_id?: string;
   user_id?: string;
 }
@@ -48,6 +51,7 @@ interface ManagerRow {
   underpayment: number;
   hourly_rate: number;
   month_year: string;
+  extra?: Record<string, number | string> | null;
   user_id?: string;
 }
 
@@ -60,6 +64,29 @@ const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 function getDaysForMonth(month: number, year: number): number {
   if (month === 2 && ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0)) return 29;
   return DAYS_IN_MONTH[month - 1] || 30;
+}
+
+const DEFAULT_FX: Record<string, string> = {
+  rate: 'revenue / (days * 24) * percent / 100',
+  total: '(rate * hours + vacation) - non_cash - overtime - tax + underpayment',
+  week: 'total / 4',
+  manager_rate: 'rate * (1 + manager_percent / 100)',
+  manager_total: '((osn_hours * manager_rate) + vacation) - non_cash + doplaty + dop_hours * rate + underpayment',
+  manager_week: 'manager_total / 4',
+};
+const F = (key: string, v: string, label: string, kind: FieldDef['kind']): FieldDef => ({ key, var: v, label, visible: true, builtin: true, kind });
+const DEFAULT_FIELDS: Record<'salary' | 'manager' | 'collection', FieldDef[]> = {
+  salary: [F('hours_worked', 'hours', 'ЧАСЫ', 'accrual'), F('vacation_pay', 'vacation', 'ОТПУСК', 'accrual'), F('non_cash', 'non_cash', 'БЕЗНАЛ', 'deduction'),
+    F('overtime', 'overtime', 'ПЕРЕБОР', 'deduction'), F('tax', 'tax', 'НАЛОГ', 'deduction'), F('underpayment', 'underpayment', 'НЕДОПЛАТА', 'accrual')],
+  manager: [F('osn_hours', 'osn_hours', 'ОСН. ЧАСЫ', 'accrual'), F('dop_hours', 'dop_hours', 'ДОП. ЧАСЫ', 'accrual'), F('doplaty', 'doplaty', 'ДОПЛАТЫ', 'accrual'),
+    F('vacation_pay', 'vacation', 'ОТПУСК', 'accrual'), F('non_cash', 'non_cash', 'БЕЗНАЛ', 'deduction'), F('underpayment', 'underpayment', 'НЕДОПЛАТА', 'accrual')],
+  collection: [F('sbis_value', 'sbis', 'Сбис ₽', 'number'), F('fact_value', 'fact', 'Факт ₽', 'number')],
+};
+
+function rowEnv(row: Record<string, unknown>, fields: FieldDef[]) {
+  const env: Record<string, number> = {};
+  fields.forEach((f) => { const v = cellValue(row as GridRow, f); env[f.var] = typeof v === 'number' ? v : 0; });
+  return env;
 }
 
 function fmt(n: number) {
@@ -83,6 +110,14 @@ export default function Salary() {
   const navigate = useNavigate();
   const isDeputy = user?.role === 'deputy_director';
   const isDirector = user?.role === 'director';
+  const { access, can } = useAccess();
+  const usePositions = !!access && !isDeputy && access.position !== null;
+  const canEditPerm = isDeputy || can('salary.edit');
+  const canManageRows = isDeputy || can('salary.manage_rows');
+  const canLock = isDeputy || can('salary.lock');
+  const canViewFull = isDeputy || can('salary.view_full');
+  const fx = access?.formulas || DEFAULT_FX;
+  const fields = access?.fields || DEFAULT_FIELDS;
 
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -257,65 +292,40 @@ export default function Salary() {
     return user.profileId === responsibleId;
   }
 
-  function canEditHours(): boolean { return !locked && (isDeputy || isResponsiblePerson()); }
-  function canEditVacation(): boolean { return !locked && (isDeputy || isResponsiblePerson()); }
-  function canEditNonCash(): boolean { return !locked && (isDeputy || isResponsiblePerson()); }
-  function canEditOvertime(): boolean { return !locked && (isDeputy || isResponsiblePerson()); }
-  function canEditTax(): boolean { return !locked && (isDeputy || isResponsiblePerson()); }
-  function canEditUnderpayment(): boolean { return !locked && (isDeputy || isResponsiblePerson()); }
+  function canEditHours(): boolean { return !locked && (usePositions ? canEditPerm : (isDeputy || isResponsiblePerson())); }
   function canEditRevenueDays(): boolean { return !locked && (isDeputy || isResponsiblePerson()); }
-  function canAddDeleteRow(): boolean { return !locked && isDeputy; }
+  function canAddDeleteRow(): boolean { return !locked && canManageRows; }
 
   function isManagerResponsible(): boolean {
     if (!managerResponsibleId || !user?.profileId) return false;
     return user.profileId === managerResponsibleId;
   }
-  function canEditManager(): boolean { return !managerLocked && (isDeputy || isManagerResponsible()); }
-  function canEditManagerHours(): boolean { return canEditManager(); }
-  function canEditManagerDopHours(): boolean { return canEditManager(); }
-  function canEditManagerNonCash(): boolean { return canEditManager(); }
-  function canEditManagerUnderpayment(): boolean { return !managerLocked && (isDeputy || isManagerResponsible()); }
+  function canEditManager(): boolean { return !managerLocked && (usePositions ? canEditPerm : (isDeputy || isManagerResponsible())); }
 
-  const employeeRate = useMemo(() => {
-    const k2 = daysInMonth * 24;
-    return k2 > 0 ? (revenue / k2) * ((globalPercent || 0) / 100) : 0;
-  }, [revenue, daysInMonth, globalPercent]);
-
-  const managerRate = useMemo(() => {
-    return employeeRate * (1 + (managerPercent || 0) / 100);
-  }, [employeeRate, managerPercent]);
+  const baseEnv = useMemo(() => ({ revenue, days: daysInMonth, percent: globalPercent || 0, manager_percent: managerPercent || 0 }),
+    [revenue, daysInMonth, globalPercent, managerPercent]);
+  const employeeRate = useMemo(() => evalFormula(fx.rate, baseEnv), [fx.rate, baseEnv]);
+  const managerRate = useMemo(() => evalFormula(fx.manager_rate, { ...baseEnv, rate: employeeRate }), [fx.manager_rate, baseEnv, employeeRate]);
 
   const calculatedRows = useMemo(() => {
-    const k2 = daysInMonth * 24;
-    const pct = globalPercent || 0;
-    const d = k2 > 0 ? (revenue / k2) * (pct / 100) : 0;
+    const d = employeeRate;
     return salaryRows.map(row => {
-      const b = row.hours_worked || 0;
-      const e = row.vacation_pay || 0;
-      const f = row.non_cash || 0;
-      const g = row.overtime || 0;
-      const h = row.tax || 0;
-      const u = row.underpayment || 0;
-      const i = (d * b + e) - f - g - h + u;
-      const j = i / 4;
+      const env = { ...baseEnv, rate: d, ...rowEnv(row as unknown as Record<string, unknown>, fields.salary) };
+      const i = evalFormula(fx.total, env);
+      const j = evalFormula(fx.week, { ...env, total: i });
       return { ...row, d, i, j };
     });
-  }, [salaryRows, revenue, daysInMonth, globalPercent]);
+  }, [salaryRows, baseEnv, employeeRate, fx.total, fx.week, fields.salary]);
 
   const calculatedManagerRows = useMemo(() => {
     return managerRows.map(row => {
-      const osn = row.osn_hours || 0;
-      const dop = row.dop_hours || 0;
-      const doplaty = row.doplaty || 0;
-      const vacation = row.vacation_pay || 0;
-      const bezNal = row.non_cash || 0;
-      const u = row.underpayment || 0;
       const hr = managerRate;
-      const itog = (((osn * hr) + vacation) - bezNal) + doplaty + (dop * employeeRate) + u;
-      const week = itog / 4;
+      const env = { ...baseEnv, rate: employeeRate, manager_rate: hr, ...rowEnv(row as unknown as Record<string, unknown>, fields.manager) };
+      const itog = evalFormula(fx.manager_total, env);
+      const week = evalFormula(fx.manager_week, { ...env, manager_total: itog });
       return { ...row, hr, itog, week };
     });
-  }, [managerRows, managerRate, employeeRate]);
+  }, [managerRows, managerRate, employeeRate, baseEnv, fx.manager_total, fx.manager_week, fields.manager]);
 
   const totals = useMemo(() => {
     return calculatedRows.reduce((acc, r) => ({
@@ -326,23 +336,26 @@ export default function Salary() {
     }), { hours: 0, underpayment: 0, i: 0, j: 0 });
   }, [calculatedRows]);
 
-  const managerTotals = useMemo(() => {
-    return calculatedManagerRows.reduce((acc, r) => ({
-      osn: acc.osn + (r.osn_hours || 0),
-      dop: acc.dop + (r.dop_hours || 0),
-      underpayment: acc.underpayment + (r.underpayment || 0),
-      itog: acc.itog + r.itog,
-      week: acc.week + r.week,
-    }), { osn: 0, dop: 0, underpayment: 0, itog: 0, week: 0 });
-  }, [calculatedManagerRows]);
-
-  const showExpanded = isDeputy || isResponsiblePerson() || showFullTable;
+  const showExpanded = canViewFull || isResponsiblePerson() || showFullTable;
 
   function getProfileName(id: string) { return profiles.find(p => p.id === id)?.full_name || '—'; }
   function getProfileById(id: string) { return profiles.find(p => p.id === id); }
 
   const k2 = daysInMonth * 24;
-  const dRate = k2 > 0 ? (revenue / k2) * ((globalPercent || 0) / 100) : 0;
+  const dRate = employeeRate;
+
+  async function updateGridCell(table: 'salary_data' | 'manager_data', row: SalaryRow | ManagerRow, f: FieldDef, value: number | string) {
+    if (!row.id) return;
+    const setter = table === 'salary_data' ? setSalaryRows : setManagerRows;
+    if (f.builtin) {
+      (setter as (fn: (prev: (SalaryRow | ManagerRow)[]) => (SalaryRow | ManagerRow)[]) => void)(prev => prev.map(r => r.id === row.id ? { ...r, [f.key]: value } : r));
+      await db.from(table).update({ [f.key]: value }).eq('id', row.id);
+    } else {
+      const extra = { ...(row.extra || {}), [f.key]: value };
+      (setter as (fn: (prev: (SalaryRow | ManagerRow)[]) => (SalaryRow | ManagerRow)[]) => void)(prev => prev.map(r => r.id === row.id ? { ...r, extra } : r));
+      await db.from(table).update({ extra }).eq('id', row.id);
+    }
+  }
 
   async function addRow() {
     if (!newProfileId || !canAddDeleteRow()) return;
@@ -361,11 +374,6 @@ export default function Salary() {
     if (!error) setSalaryRows(prev => prev.filter(r => r.id !== id));
   }
 
-  async function updateCell(id: string, field: string, value: number) {
-    setSalaryRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
-    await db.from('salary_data').update({ [field]: value }).eq('id', id);
-  }
-
   async function updateRevenue(value: number) {
     setRevenue(value);
     if (periodSettingsId) await db.from('salary_settings').update({ revenue: value }).eq('id', periodSettingsId);
@@ -376,13 +384,8 @@ export default function Salary() {
     if (periodSettingsId) await db.from('salary_settings').update({ days_in_month: value }).eq('id', periodSettingsId);
   }
 
-  async function updateManagerCell(id: string, field: string, value: number) {
-    setManagerRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
-    await db.from('manager_data').update({ [field]: value }).eq('id', id);
-  }
-
   async function addManagerRow() {
-    if (!isDeputy) return;
+    if (!canManageRows) return;
     if (!newManagerProfileId) return;
     const { data, error } = await db.from('manager_data').insert({
       profile_id: newManagerProfileId, osn_hours: 0, dop_hours: 0, doplaty: 0,
@@ -394,13 +397,13 @@ export default function Salary() {
   }
 
   async function deleteManagerRow(id: string) {
-    if (!isDeputy) return;
+    if (!canManageRows) return;
     const { error } = await db.from('manager_data').delete().eq('id', id);
     if (!error) setManagerRows(prev => prev.filter(r => r.id !== id));
   }
 
   async function saveAll() {
-    if (!isDeputy && !isResponsiblePerson()) return;
+    if (!canLock && !isResponsiblePerson()) return;
     setSaving(true);
     try {
       if (periodSettingsId) {
@@ -449,7 +452,7 @@ export default function Salary() {
 
   // Зам. директора разблокирует таблицу сотрудников, чтобы внести изменения.
   async function handleUnlockPeriod() {
-    if (!isDeputy) return;
+    if (!canLock) return;
     setPeriodLocked(false);
     if (periodSettingsId) {
       await db.from('salary_settings').update({ is_locked: false }).eq('id', periodSettingsId);
@@ -619,7 +622,7 @@ export default function Salary() {
             </div>
             <div className="flex items-center gap-3">
               {periodLocked && (
-                isDeputy ? (
+                canLock ? (
                   <button onClick={handleUnlockPeriod}
                     className="flex items-center gap-1 text-xs text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1 rounded-lg transition-all"
                     title="Разблокировать таблицу сотрудников для правок">
@@ -678,143 +681,26 @@ export default function Salary() {
         </div>
 
         {/* EMPLOYEE TABLE */}
-        <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
-          <div className="px-4 py-3 bg-secondary border-b border-border">
-            <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Таблица сотрудников</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-secondary">
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[160px]"><span className="text-muted-foreground mr-1">A.</span>СОТРУДНИК</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[90px]"><span className="text-muted-foreground mr-1">B.</span>ЧАСЫ</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-emerald-700 min-w-[90px]"><span className="text-emerald-500 mr-1">D.</span>₽/ЧАС</th>
-                  {showExpanded && (
-                    <>
-                      <th className="text-center px-3 py-3 text-xs font-semibold text-foreground/80 min-w-[90px]"><span className="text-muted-foreground mr-1">E.</span>ОТПУСК</th>
-                      <th className="text-center px-3 py-3 text-xs font-semibold text-foreground/80 min-w-[80px]"><span className="text-muted-foreground mr-1">F.</span>БЕЗНАЛ</th>
-                      <th className="text-center px-3 py-3 text-xs font-semibold text-foreground/80 min-w-[80px]"><span className="text-muted-foreground mr-1">G.</span>ПЕРЕБОР</th>
-                      <th className="text-center px-3 py-3 text-xs font-semibold text-foreground/80 min-w-[80px]"><span className="text-muted-foreground mr-1">H.</span>НАЛОГ</th>
-                      <th className="text-center px-3 py-3 text-xs font-semibold text-orange-700 min-w-[100px]"><span className="text-orange-600 mr-1">H2.</span>НЕДОПЛАТА</th>
-                    </>
-                  )}
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-emerald-800 min-w-[110px]"><span className="text-emerald-600 mr-1">I.</span>ИТОГ</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-amber-700 min-w-[90px]"><span className="text-amber-600 mr-1">J.</span>НЕДЕЛЯ</th>
-                  {isDeputy && <th className="w-10"></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {calculatedRows.map((row, idx) => (
-                  <tr key={row.id || idx} className={`border-t border-border ${idx % 2 === 0 ? 'bg-card/60' : 'bg-card/60'}`}>
-                    <td className="px-4 py-2.5 text-center"><span className="text-sm text-foreground font-semibold">{getProfileName(row.profile_id)}</span></td>
-                    <td className="px-4 py-2.5 text-center">
-                      {canEditHours() ? (
-                        <input type="number" value={row.hours_worked || ''} onChange={(e) => row.id && updateCell(row.id, 'hours_worked', Number(e.target.value))}
-                          className="w-16 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground text-center focus:outline-none focus:ring-1 focus:ring-emerald-500" />
-                      ) : <span className="text-sm text-foreground font-medium">{row.hours_worked || 0}</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-center"><span className="text-sm text-emerald-600 font-bold">{fmt(row.d)}</span></td>
-                    {showExpanded && (
-                      <>
-                        <td className="px-3 py-2.5 text-center">
-                          {canEditVacation() ? (
-                            <input type="number" value={row.vacation_pay || ''} onChange={(e) => row.id && updateCell(row.id, 'vacation_pay', Number(e.target.value))}
-                              className="w-16 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground text-center focus:outline-none focus:ring-1 focus:ring-emerald-500" />
-                          ) : <span className="text-sm text-foreground">{fmt(row.vacation_pay || 0)}</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          {canEditNonCash() ? (
-                            <input type="number" value={row.non_cash || ''} onChange={(e) => row.id && updateCell(row.id, 'non_cash', Number(e.target.value))}
-                              className="w-16 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground text-center focus:outline-none focus:ring-1 focus:ring-emerald-500" />
-                          ) : <span className="text-sm text-foreground">{fmt(row.non_cash || 0)}</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          {canEditOvertime() ? (
-                            <input type="number" value={row.overtime || ''} onChange={(e) => row.id && updateCell(row.id, 'overtime', Number(e.target.value))}
-                              className="w-16 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground text-center focus:outline-none focus:ring-1 focus:ring-emerald-500" />
-                          ) : <span className="text-sm text-foreground">{fmt(row.overtime || 0)}</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          {canEditTax() ? (
-                            <input type="number" value={row.tax || ''} onChange={(e) => row.id && updateCell(row.id, 'tax', Number(e.target.value))}
-                              className="w-16 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground text-center focus:outline-none focus:ring-1 focus:ring-emerald-500" />
-                          ) : <span className="text-sm text-foreground">{fmt(row.tax || 0)}</span>}
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          {canEditUnderpayment() ? (
-                            <input type="number" value={row.underpayment || ''} onChange={(e) => row.id && updateCell(row.id, 'underpayment', Number(e.target.value))}
-                              className="w-16 bg-secondary border border-orange-600/50 rounded px-2 py-1 text-sm text-orange-700 text-center focus:outline-none focus:ring-1 focus:ring-orange-500" />
-                          ) : <span className="text-sm text-orange-700">{fmt(row.underpayment || 0)}</span>}
-                        </td>
-                      </>
-                    )}
-                    <td className="px-4 py-2.5 text-center"><span className={`text-sm font-bold ${row.i >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{fmt(row.i)}</span></td>
-                    <td className="px-4 py-2.5 text-center"><span className="text-sm text-amber-600 font-medium">{fmt(row.j)}</span></td>
-                    {isDeputy && (
-                      <td className="px-2 py-2.5 text-center">
-                        {canAddDeleteRow() && (
-                          <button onClick={() => row.id && deleteRow(row.id)} className="p-1 text-red-600/60 hover:text-red-600 hover:bg-red-500/10 rounded transition-all" title="Удалить">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-                {isDeputy && canAddDeleteRow() && (
-                  <tr className="border-t border-border bg-secondary">
-                    <td className="px-4 py-2.5">
-                      <select value={newProfileId} onChange={(e) => setNewProfileId(e.target.value)}
-                        className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                        <option value="">— Выберите сотрудника —</option>
-                        {profiles.filter(p => !salaryRows.some(r => r.profile_id === p.id) && p.role !== 'director').map(p => (
-                          <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td colSpan={showExpanded ? 8 : 3} className="px-4 py-2.5">
-                      <button onClick={addRow} disabled={!newProfileId}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center gap-2">
-                        <Plus className="w-4 h-4" /> Добавить сотрудника
-                      </button>
-                    </td>
-                    {isDeputy && <td></td>}
-                  </tr>
-                )}
-                {calculatedRows.length > 0 && (
-                  <tr className="border-t-2 border-emerald-500/40 bg-secondary font-bold">
-                    <td className="px-4 py-3 text-center text-base text-foreground">ИТОГО</td>
-                    <td className="px-4 py-3 text-center text-base text-foreground">{totals.hours}</td>
-                    <td className="px-4 py-3 text-center text-sm text-emerald-600">{fmt(dRate)}</td>
-                    {showExpanded && <td className="px-4 py-3 text-center text-sm text-muted-foreground">—</td>}
-                    {showExpanded && <td className="px-4 py-3 text-center text-sm text-muted-foreground">—</td>}
-                    {showExpanded && <td className="px-4 py-3 text-center text-sm text-muted-foreground">—</td>}
-                    {showExpanded && <td className="px-4 py-3 text-center text-sm text-muted-foreground">—</td>}
-                    {showExpanded && <td className="px-4 py-3 text-center text-sm text-orange-700">{fmt(totals.underpayment)}</td>}
-                    <td className="px-4 py-3 text-center text-base text-emerald-700">{fmt(totals.i)}</td>
-                    <td className="px-4 py-3 text-center text-base text-amber-600">{fmt(totals.j)}</td>
-                    {isDeputy && <td></td>}
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          {calculatedRows.length === 0 && (
-            <div className="text-center py-12">
-              <Calculator className="w-16 h-16 text-muted-foreground/70 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-muted-foreground mb-2">Таблица пуста</h3>
-              <p className="text-muted-foreground">{isDeputy || isResponsiblePerson() ? 'Добавьте сотрудников для расчёта зарплаты' : 'Зам. директора ещё не добавил сотрудников'}</p>
-            </div>
-          )}
-        </div>
+        <SalaryGrid
+          title={<div className="px-4 py-3 bg-secondary border-b border-border"><h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Таблица сотрудников</h2></div>}
+          accent="emerald" fields={fields.salary} rows={salaryRows as unknown as GridRow[]} computed={calculatedRows.map(r => ({ rate: r.d, total: r.i, week: r.j }))}
+          rate={dRate} showAll={showExpanded} shortKeys={['hours_worked']}
+          canEdit={canEditHours()} canManageRows={canAddDeleteRow()} profileName={getProfileName}
+          onCell={(row, f, v) => row.id && updateGridCell('salary_data', row as unknown as SalaryRow, f, v)}
+          onDelete={(row) => row.id && deleteRow(row.id)}
+          addOptions={profiles.filter(p => !salaryRows.some(r => r.profile_id === p.id) && p.role !== 'director').map(p => ({ id: p.id, name: p.full_name || p.email }))}
+          newProfileId={newProfileId} setNewProfileId={setNewProfileId} onAdd={addRow} addLabel="Добавить сотрудника"
+          emptyText={canAddDeleteRow() ? 'Добавьте сотрудников для расчёта зарплаты' : 'Сотрудники ещё не добавлены'}
+        />
 
         {/* MANAGER TABLE */}
-        <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
+        <SalaryGrid
+          title={
           <div className="px-4 py-3 bg-indigo-700/30 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <UserCheck className="w-4 h-4 text-indigo-600" />
               <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Заведующий</h2>
-              <span className="text-xs text-indigo-600/60 ml-2">Настройки в разделе «Настройки → Зарплата»</span>
+              <span className="text-xs text-indigo-600/60 ml-2">Формулы и колонки — в админ-панели</span>
             </div>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2 text-xs">
@@ -830,7 +716,7 @@ export default function Salary() {
                   <Lock className="w-3 h-3" /> Заблокировано
                 </span>
               )}
-              {isDeputy && managerLocked && (
+              {canLock && managerLocked && (
                 <button onClick={() => setShowManagerLock(true)}
                   className="flex items-center gap-1 px-3 py-1.5 bg-amber-600/20 text-amber-600 text-xs font-medium rounded-lg border border-amber-500/30 hover:bg-amber-600/30 transition-all">
                   <Unlock className="w-3 h-3" /> Разблокировать
@@ -838,146 +724,28 @@ export default function Salary() {
               )}
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-secondary">
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[160px]"><span className="text-muted-foreground mr-1">1.</span>ФИО</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[90px]"><span className="text-muted-foreground mr-1">2.</span>ОСН-Часы</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[90px]"><span className="text-muted-foreground mr-1">3.</span>ДОП-Часы</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-indigo-700 min-w-[90px]"><span className="text-indigo-600 mr-1">4.</span>Час/Руб</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[90px]"><span className="text-muted-foreground mr-1">5.</span>Доплаты</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[90px]"><span className="text-muted-foreground mr-1">6.</span>Отпускные</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[90px]"><span className="text-muted-foreground mr-1">7.</span>Безнал</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-orange-700 min-w-[100px]"><span className="text-orange-600 mr-1">7.1.</span>НЕДОПЛАТА</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-emerald-800 min-w-[110px]"><span className="text-emerald-600 mr-1">8.</span>ИТОГ</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-amber-700 min-w-[90px]"><span className="text-amber-600 mr-1">9.</span>Неделя</th>
-                  {isDeputy && <th className="w-10"></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {calculatedManagerRows.map((row, idx) => (
-                  <tr key={row.id || idx} className={`border-t border-border ${idx % 2 === 0 ? 'bg-card/60' : 'bg-card/60'}`}>
-                    <td className="px-4 py-2.5 text-center">
-                      <span className="text-sm text-foreground font-semibold">{getProfileName(row.profile_id)}</span>
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      {canEditManagerHours() ? (
-                        <input type="number" value={row.osn_hours || ''} onChange={(e) => row.id && updateManagerCell(row.id, 'osn_hours', Number(e.target.value))}
-                          className="w-16 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground text-center focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                      ) : <span className="text-sm text-foreground font-medium">{row.osn_hours || 0}</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      {canEditManagerDopHours() ? (
-                        <input type="number" value={row.dop_hours || ''} onChange={(e) => row.id && updateManagerCell(row.id, 'dop_hours', Number(e.target.value))}
-                          className="w-16 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground text-center focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                      ) : <span className="text-sm text-foreground font-medium">{row.dop_hours || 0}</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      <span className="text-sm text-indigo-600 font-bold">{fmt(row.hr)}</span>
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      {isDeputy && !managerLocked ? (
-                        <input type="number" value={row.doplaty || ''} onChange={(e) => row.id && updateManagerCell(row.id, 'doplaty', Number(e.target.value))}
-                          className="w-16 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground text-center focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                      ) : <span className="text-sm text-foreground">{fmt(row.doplaty || 0)}</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      {isDeputy && !managerLocked ? (
-                        <input type="number" value={row.vacation_pay || ''} onChange={(e) => row.id && updateManagerCell(row.id, 'vacation_pay', Number(e.target.value))}
-                          className="w-16 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground text-center focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                      ) : <span className="text-sm text-foreground">{fmt(row.vacation_pay || 0)}</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      {canEditManagerNonCash() ? (
-                        <input type="number" value={row.non_cash || ''} onChange={(e) => row.id && updateManagerCell(row.id, 'non_cash', Number(e.target.value))}
-                          className="w-16 bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground text-center focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                      ) : <span className="text-sm text-foreground">{fmt(row.non_cash || 0)}</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      {canEditManagerUnderpayment() ? (
-                        <input type="number" value={row.underpayment || ''} onChange={(e) => row.id && updateManagerCell(row.id, 'underpayment', Number(e.target.value))}
-                          className="w-16 bg-secondary border border-orange-600/50 rounded px-2 py-1 text-sm text-orange-700 text-center focus:outline-none focus:ring-1 focus:ring-orange-500" />
-                      ) : <span className="text-sm text-orange-700">{fmt(row.underpayment || 0)}</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      <span className={`text-sm font-bold ${row.itog >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{fmt(row.itog)}</span>
-                    </td>
-                    <td className="px-4 py-2.5 text-center">
-                      <span className="text-sm text-amber-600 font-medium">{fmt(row.week)}</span>
-                    </td>
-                    {isDeputy && (
-                      <td className="px-2 py-2.5 text-center">
-                        {!managerLocked && (
-                          <button onClick={() => row.id && deleteManagerRow(row.id)} className="p-1 text-red-600/60 hover:text-red-600 hover:bg-red-500/10 rounded transition-all" title="Удалить">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-                {isDeputy && !managerLocked && (
-                  <tr className="border-t border-border bg-secondary">
-                    <td className="px-4 py-2.5">
-                      <select value={newManagerProfileId} onChange={(e) => setNewManagerProfileId(e.target.value)}
-                        className="w-full bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                        <option value="">— Выберите сотрудника —</option>
-                        {profiles.filter(p => p.role !== 'director' && !managerRows.some(r => r.profile_id === p.id)).map(p => (
-                          <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td colSpan={8} className="px-4 py-2.5">
-                      <button onClick={addManagerRow} disabled={!newManagerProfileId}
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center gap-2">
-                        <Plus className="w-4 h-4" /> Добавить заведующего
-                      </button>
-                    </td>
-                    {isDeputy && <td></td>}
-                  </tr>
-                )}
-                {calculatedManagerRows.length > 0 && (
-                  <tr className="border-t-2 border-indigo-500/40 bg-secondary font-bold">
-                    <td className="px-4 py-3 text-center text-base text-foreground">ИТОГО</td>
-                    <td className="px-4 py-3 text-center text-base text-foreground">{managerTotals.osn}</td>
-                    <td className="px-4 py-3 text-center text-base text-foreground">{managerTotals.dop}</td>
-                    <td className="px-4 py-3 text-center text-sm text-indigo-600">{fmt(managerRate)}</td>
-                    <td className="px-4 py-3 text-center text-sm text-muted-foreground">—</td>
-                    <td className="px-4 py-3 text-center text-sm text-muted-foreground">—</td>
-                    <td className="px-4 py-3 text-center text-sm text-muted-foreground">—</td>
-                    <td className="px-4 py-3 text-center text-sm text-orange-700">{fmt(managerTotals.underpayment)}</td>
-                    <td className="px-4 py-3 text-center text-base text-emerald-700">{fmt(managerTotals.itog)}</td>
-                    <td className="px-4 py-3 text-center text-base text-amber-600">{fmt(managerTotals.week)}</td>
-                    {isDeputy && <td></td>}
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          {calculatedManagerRows.length === 0 && (
-            <div className="text-center py-8">
-              <UserCheck className="w-12 h-12 text-muted-foreground/70 mx-auto mb-3" />
-              <h3 className="text-base font-semibold text-muted-foreground mb-1">Нет заведующих</h3>
-              <p className="text-sm text-muted-foreground">Добавьте любого сотрудника в таблицу заведующих</p>
-              {isDeputy && (
-                <p className="text-xs text-muted-foreground/70 mt-1">Используйте выпадающий список ниже таблицы</p>
-              )}
-            </div>
-          )}
-        </div>
+          }
+          accent="indigo" fields={fields.manager} rows={managerRows as unknown as GridRow[]} computed={calculatedManagerRows.map(r => ({ rate: r.hr, total: r.itog, week: r.week }))}
+          rate={managerRate} showAll shortKeys={[]}
+          canEdit={canEditManager()} canManageRows={canManageRows && !managerLocked} profileName={getProfileName}
+          onCell={(row, f, v) => row.id && updateGridCell('manager_data', row as unknown as ManagerRow, f, v)}
+          onDelete={(row) => row.id && deleteManagerRow(row.id)}
+          addOptions={profiles.filter(p => p.role !== 'director' && !managerRows.some(r => r.profile_id === p.id)).map(p => ({ id: p.id, name: p.full_name || p.email }))}
+          newProfileId={newManagerProfileId} setNewProfileId={setNewManagerProfileId} onAdd={addManagerRow} addLabel="Добавить заведующего"
+          emptyText="Нет заведующих"
+        />
       </main>
 
       {/* Bottom bar — рассылка доступна любому сотруднику с доступом в систему */}
       {calculatedRows.length > 0 && (
         <div className="sticky bottom-0 bg-card backdrop-blur-sm border-t border-border px-4 py-3">
           <div className="max-w-full mx-auto flex items-center justify-end gap-3">
-            <button onClick={handleDistributeSalary} disabled={broadcasting || calculatedRows.length === 0}
+            {(!usePositions || can('salary.broadcast')) && <button onClick={handleDistributeSalary} disabled={broadcasting || calculatedRows.length === 0}
               className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed">
               {broadcasting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               {broadcasting ? 'Отправка...' : 'Рассылка'}
-            </button>
-            {(isDeputy || isResponsiblePerson()) && (
+            </button>}
+            {(canLock || isResponsiblePerson()) && (
               <button onClick={saveAll} disabled={saving || (periodLocked && managerLocked)}
                 className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50">
                 {periodLocked ? <Lock className="w-4 h-4" /> : <Save className="w-4 h-4" />}

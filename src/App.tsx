@@ -5,6 +5,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth";
+import { AccessProvider, useAccess } from "./lib/access";
+import Admin from "./pages/Admin";
 import AppShell from "./components/shell/AppShell";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -39,10 +41,15 @@ function Loader() {
   );
 }
 
-function ProtectedRoute({ children, directorOnly = false, deputyOnly = false }: { children: ReactNode; directorOnly?: boolean; deputyOnly?: boolean }) {
+function ProtectedRoute({ children, directorOnly = false, deputyOnly = false, path }: { children: ReactNode; directorOnly?: boolean; deputyOnly?: boolean; path?: string }) {
   const { user, loading } = useAuth();
+  const { access, canSee } = useAccess();
   if (loading) return <Loader />;
   if (!user) return <Navigate to="/login" replace />;
+  if (path && access) {
+    if (!canSee(path)) return <Navigate to="/dashboard" replace />;
+    return <AppShell>{children}</AppShell>;
+  }
   if (directorOnly && user.role !== "director" && user.role !== "deputy_director") {
     return <Navigate to="/dashboard" replace />;
   }
@@ -59,6 +66,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <AccessProvider>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/login" element={<Login />} />
@@ -71,21 +79,23 @@ const App = () => (
               <Route key={adpod.slug} path={adpod.path} element={<AdpodPinLogin adpodSlug={adpod.slug} />} />
             ))}
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/documents" element={<ProtectedRoute><Documents /></ProtectedRoute>} />
-            <Route path="/base" element={<ProtectedRoute><DocumentBase /></ProtectedRoute>} />
-            <Route path="/dto" element={<ProtectedRoute><Dto /></ProtectedRoute>} />
-            <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-            <Route path="/cameras" element={<ProtectedRoute><Cameras /></ProtectedRoute>} />
-            <Route path="/skud" element={<ProtectedRoute><Skud /></ProtectedRoute>} />
-            <Route path="/salary" element={<ProtectedRoute><Salary /></ProtectedRoute>} />
-            <Route path="/schedule" element={<ProtectedRoute><Schedule /></ProtectedRoute>} />
-            <Route path="/accounting" element={<ProtectedRoute><Accounting /></ProtectedRoute>} />
-            <Route path="/collection" element={<ProtectedRoute><Collection /></ProtectedRoute>} />
-            <Route path="/employees" element={<ProtectedRoute directorOnly><Employees /></ProtectedRoute>} />
+            <Route path="/documents" element={<ProtectedRoute path="/documents"><Documents /></ProtectedRoute>} />
+            <Route path="/base" element={<ProtectedRoute path="/base"><DocumentBase /></ProtectedRoute>} />
+            <Route path="/dto" element={<ProtectedRoute path="/dto"><Dto /></ProtectedRoute>} />
+            <Route path="/chat" element={<ProtectedRoute path="/chat"><Chat /></ProtectedRoute>} />
+            <Route path="/cameras" element={<ProtectedRoute path="/cameras"><Cameras /></ProtectedRoute>} />
+            <Route path="/skud" element={<ProtectedRoute path="/skud"><Skud /></ProtectedRoute>} />
+            <Route path="/salary" element={<ProtectedRoute path="/salary"><Salary /></ProtectedRoute>} />
+            <Route path="/schedule" element={<ProtectedRoute path="/schedule"><Schedule /></ProtectedRoute>} />
+            <Route path="/accounting" element={<ProtectedRoute path="/accounting"><Accounting /></ProtectedRoute>} />
+            <Route path="/collection" element={<ProtectedRoute path="/collection"><Collection /></ProtectedRoute>} />
+            <Route path="/employees" element={<ProtectedRoute directorOnly path="/employees"><Employees /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute deputyOnly><Admin /></ProtectedRoute>} />
             <Route path="/devices" element={<ProtectedRoute deputyOnly><Devices /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute path="/settings"><Settings /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
+          </AccessProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

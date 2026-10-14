@@ -3,6 +3,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
+import Payslip from './Payslip';
+import { downloadCsv } from './csv';
 import { accCall, fmtDay, monthLabel, PAY_LABELS, rub, shiftMonth, today, type PayType, type SalaryData, type Staff } from '@/lib/accountingApi';
 
 const rateHint: Record<PayType, string> = { tabel: '', salary: 'Оклад в месяц, ₽', percent: 'Процент от выручки, %', hourly: 'Ставка за час, ₽' };
@@ -14,9 +16,10 @@ type Modal =
   | { type: 'staff'; id: number; name: string; position: string; profile_id: string; pay_type: PayType; rate: string; active: boolean }
   | { type: 'accrual'; staff: Staff; pay_type: PayType; rate: string; base: string; bonus: string; comment: string }
   | { type: 'payment'; staff: Staff; date: string; amount: string; comment: string; to_expenses: boolean }
-  | { type: 'history'; staff: Staff };
+  | { type: 'history'; staff: Staff }
+  | { type: 'slip'; staff: Staff };
 
-export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
+export default function SalaryTab({ canEdit, reloadKey }: { canEdit: boolean; reloadKey: number }) {
   const [period, setPeriod] = useState(today().slice(0, 7));
   const [data, setData] = useState<SalaryData | null>(null);
   const [modal, setModal] = useState<Modal | null>(null);
@@ -27,14 +30,14 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
   const load = useCallback(async () => {
     const r = await accCall<SalaryData>({ action: 'salary', period });
     if (!r.error) setData(r);
-  }, [period]);
+  }, [period, reloadKey]);
 
   useEffect(() => { load(); }, [load]);
 
   const open = (m: Modal) => { setModal(m); setError(null); };
 
   const submit = async () => {
-    if (!modal || modal.type === 'history') return;
+    if (!modal || modal.type === 'history' || modal.type === 'slip') return;
     setBusy(true); setError(null);
     let r;
     if (modal.type === 'staff') {
@@ -47,13 +50,6 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
     setBusy(false);
     if (r.error) { setError(r.error); return; }
     setModal(null); load();
-  };
-
-  const importStaff = async () => {
-    const r = await accCall<{ added: number }>({ action: 'staff_import' });
-    if (r.error) { alert(r.error); return; }
-    alert(r.added ? `Добавлено сотрудников: ${r.added}` : 'Все сотрудники из раздела «Зарплата» уже есть в списке');
-    load();
   };
 
   const del = async (action: string, id: number, text: string) => {
@@ -86,11 +82,12 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />Показать уволенных
         </label>
-        {canEdit && (
-          <Button size="sm" variant="outline" className="ml-auto" onClick={importStaff}>
-            <Icon name="Link" size={15} />Взять из «Зарплаты»
-          </Button>
-        )}
+        {data.closed && <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-700"><Icon name="Lock" size={12} />Месяц закрыт</span>}
+        <Button size="sm" variant="ghost" className="ml-auto" onClick={() => downloadCsv(`Зарплата_${period}.csv`, [
+          ['Сотрудник', 'Должность', 'Начислено за месяц', 'Выплачено за месяц', 'Долг на конец'],
+          ...staff.map((s) => [s.name, s.position || '', s.accrued, s.paid, s.debt]),
+          ['ИТОГО', '', accrued, paid, data.total_debt],
+        ])}><Icon name="Download" size={15} />В Excel</Button>
         {canEdit && (
           <Button size="sm" onClick={() => open({ type: 'staff', id: 0, name: '', position: '', profile_id: '', pay_type: 'salary', rate: '', active: true })}>
             <Icon name="UserPlus" size={15} />Сотрудник
@@ -140,10 +137,11 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
                   </td>
                   <td className="px-2 py-2.5">
                     <div className="flex justify-end gap-1">
-                      {canEdit && <>
+                      {canEdit && !data.closed && <>
                         <Button size="sm" variant="outline" className="h-8" onClick={() => open({ type: 'accrual', staff: s, pay_type: s.pay_type === 'tabel' ? 'salary' : s.pay_type, rate: s.pay_type === 'tabel' ? '' : String(s.rate), base: '', bonus: '', comment: '' })}>Начислить</Button>
                         <Button size="sm" className="h-8" onClick={() => open({ type: 'payment', staff: s, date: today(), amount: s.debt > 0 ? String(s.debt) : '', comment: '', to_expenses: true })}>Выплатить</Button>
                       </>}
+                      <button title="Расчётный листок" onClick={() => open({ type: 'slip', staff: s })} className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="FileText" size={15} /></button>
                       <button title="История за месяц" onClick={() => open({ type: 'history', staff: s })} className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="History" size={15} /></button>
                       {canEdit && (
                         <button title="Изменить" onClick={() => open({ type: 'staff', id: s.id, name: s.name, position: s.position || '', profile_id: s.profile_id || '', pay_type: s.pay_type, rate: String(s.rate), active: s.active })}
@@ -159,7 +157,7 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
       </div>
 
       <Dialog open={!!modal} onOpenChange={(v) => !v && setModal(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className={modal?.type === 'slip' ? 'max-w-lg' : 'max-w-md'}>
           {modal?.type === 'staff' && (
             <>
               <DialogHeader><DialogTitle>{modal.id ? 'Сотрудник' : 'Новый сотрудник'}</DialogTitle></DialogHeader>
@@ -257,29 +255,27 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
             </>
           )}
 
+          {modal?.type === 'slip' && <Payslip staffId={modal.staff.id} period={period} />}
+
           {modal?.type === 'history' && (
             <>
               <DialogHeader><DialogTitle>{modal.staff.name} · {monthLabel(period)}</DialogTitle></DialogHeader>
               <div className="space-y-4 text-sm">
                 <div>
                   <h4 className="mb-1.5 font-medium">Начисления</h4>
-                  {modal.staff.sheet !== null && (
-                    <div className="flex items-center justify-between border-b py-1.5">
-                      <div><div className="tabular-nums">{rub(modal.staff.sheet || 0)}</div><div className="text-xs text-muted-foreground">Из раздела «Зарплата» (автоматически)</div></div>
-                    </div>
-                  )}
+
                   {data.accruals.filter((a) => a.staff_id === modal.staff.id).map((a) => (
                     <div key={a.id} className="flex items-center justify-between border-b py-1.5 last:border-0">
                       <div>
                         <div className="tabular-nums">{rub(a.amount)}</div>
                         <div className="text-xs text-muted-foreground">
-                          {PAY_LABELS[a.pay_type]}{a.pay_type !== 'salary' && `: ${a.base} × ${a.pay_type === 'percent' ? a.rate + '%' : rub(a.rate)}`}{a.bonus ? ` + премия ${rub(a.bonus)}` : ''}{a.comment ? ` · ${a.comment}` : ''}
+                          {a.auto ? (a.comment || 'Из раздела «Зарплата»') : <>{PAY_LABELS[a.pay_type]}{a.pay_type !== 'salary' && `: ${a.base} × ${a.pay_type === 'percent' ? a.rate + '%' : rub(a.rate)}`}{a.bonus ? ` + премия ${rub(a.bonus)}` : ''}{a.comment ? ` · ${a.comment}` : ''}</>}
                         </div>
                       </div>
-                      {canEdit && <button onClick={() => del('accrual_delete', a.id, 'Удалить начисление?')} className="p-1 text-muted-foreground hover:text-red-600"><Icon name="Trash2" size={14} /></button>}
+                      {canEdit && !a.auto && <button onClick={() => del('accrual_delete', a.id, 'Удалить начисление?')} className="p-1 text-muted-foreground hover:text-red-600"><Icon name="Trash2" size={14} /></button>}
                     </div>
                   ))}
-                  {!data.accruals.some((a) => a.staff_id === modal.staff.id) && modal.staff.sheet === null && <p className="text-muted-foreground">Нет</p>}
+                  {!data.accruals.some((a) => a.staff_id === modal.staff.id) && <p className="text-muted-foreground">Нет</p>}
                 </div>
                 <div>
                   <h4 className="mb-1.5 font-medium">Выплаты</h4>
@@ -298,7 +294,7 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
             </>
           )}
 
-          {modal && modal.type !== 'history' && (
+          {modal && modal.type !== 'history' && modal.type !== 'slip' && (
             <>
               {error && <p className="text-sm text-red-600">{error}</p>}
               <Button className="w-full" onClick={submit} disabled={busy}>{busy ? 'Сохраняю…' : 'Сохранить'}</Button>

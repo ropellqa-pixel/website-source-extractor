@@ -21,6 +21,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Инкассация', path: '/collection', icon: 'Coins', group: 2 },
   { label: 'Бухгалтерия', path: '/accounting', icon: 'Calculator', group: 2 },
   { label: 'Сотрудники', path: '/employees', icon: 'Users', group: 3, roles: ['director', 'deputy_director'] },
+  { label: 'Админ-панель', path: '/admin', icon: 'SlidersHorizontal', group: 3, roles: ['deputy_director'] },
   { label: 'Управление ПК', path: '/devices', icon: 'MonitorSmartphone', group: 3, roles: ['deputy_director'] },
   { label: 'Настройки', path: '/settings', icon: 'Settings', group: 3 },
 ];
@@ -32,7 +33,9 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   employee: 'Сотрудник',
 };
 
-export function visibleNav(role: UserRole | undefined) {
+export function visibleNav(role: UserRole | undefined, sections?: string[] | null) {
+  if (role === 'deputy_director') return NAV_ITEMS;
+  if (sections) return NAV_ITEMS.filter(i => i.path === '/dashboard' || (sections.includes(i.path) && i.path !== '/admin' && i.path !== '/devices'));
   return NAV_ITEMS.filter(i => !i.roles || (role && i.roles.includes(role)));
 }
 

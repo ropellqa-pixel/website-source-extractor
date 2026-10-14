@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '../lib/auth';
+import { useAccess } from '@/lib/access';
 import { db } from '@/lib/sdk';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -137,7 +138,14 @@ const UNLOCK_PIN = '2535';
 export default function Collection() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isDir = user?.role === 'director' || user?.role === 'deputy_director';
+  const { access, can } = useAccess();
+  const usePositions = !!access && !access.is_deputy && access.position !== null;
+  const isDir = usePositions ? can('collection.edit') : (user?.role === 'director' || user?.role === 'deputy_director');
+  const canImport = usePositions ? can('collection.import') : isDir;
+  const canUnlock = usePositions ? can('collection.unlock') : isDir;
+  const colFields = access?.fields?.collection;
+  const colLabel = (key: string, def: string) => colFields?.find((f) => f.key === key)?.label || def;
+  const colVisible = (key: string) => !colFields || colFields.find((f) => f.key === key)?.visible !== false;
   const fileRef = useRef<HTMLInputElement>(null);
 
   const now = new Date();
@@ -561,12 +569,12 @@ export default function Collection() {
                 <RefreshCw className="w-4 h-4" />
               </button>
               <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleUpload} />
-              <button onClick={() => fileRef.current?.click()} disabled={importing || !isEditable}
+              <button onClick={() => fileRef.current?.click()} disabled={importing || !isEditable || !canImport}
                 className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-white text-xs font-medium rounded-lg transition-all">
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 {importing ? 'Загрузка...' : 'Загрузить XLSX'}
               </button>
-              {monthLocked && isDir && (
+              {monthLocked && canUnlock && (
                 <button onClick={() => setShowUnlock(true)}
                   className="flex items-center gap-2 px-3 py-1.5 bg-amber-600/20 border border-amber-500/30 hover:bg-amber-600/30 text-amber-600 text-xs font-medium rounded-lg transition-all">
                   <Unlock className="w-3.5 h-3.5" /> Разблокировать
@@ -651,8 +659,8 @@ export default function Collection() {
                 <tr className="bg-secondary">
                   <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[110px]">Дата</th>
                   <th className="text-center px-3 py-3 text-xs font-semibold text-foreground/80 min-w-[60px]">Д/Н</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-amber-700 min-w-[130px]">Сбис ₽</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-emerald-700 min-w-[130px]">Факт ₽</th>
+                  {colVisible('sbis_value') && <th className="text-center px-4 py-3 text-xs font-semibold text-amber-700 min-w-[130px]">{colLabel('sbis_value', 'Сбис ₽')}</th>}
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-emerald-700 min-w-[130px]">{colLabel('fact_value', 'Факт ₽')}</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[130px]">Расхождение ₽</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-foreground/80 min-w-[220px]">Указать</th>
                 </tr>
@@ -674,13 +682,13 @@ export default function Collection() {
                           {row.shift_type}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 text-center">
+                      {colVisible('sbis_value') && <td className="px-4 py-2.5 text-center">
                         {row.sbis_value > 0 ? (
                           <span className="text-sm text-amber-600 font-medium">{fmt(row.sbis_value)}</span>
                         ) : (
                           <span className="text-xs text-muted-foreground/70">—</span>
                         )}
-                      </td>
+                      </td>}
                       <td className="px-4 py-2.5 text-center">
                         {isEditable ? (
                           <input type="number" step="0.01"

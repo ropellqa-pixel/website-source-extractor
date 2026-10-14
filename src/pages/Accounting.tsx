@@ -3,16 +3,21 @@ import Icon from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
 import EntriesTab from '@/components/accounting/EntriesTab';
 import ProfitTab from '@/components/accounting/ProfitTab';
+import DdsTab from '@/components/accounting/DdsTab';
+import BudgetTab from '@/components/accounting/BudgetTab';
+import CounterpartiesTab from '@/components/accounting/CounterpartiesTab';
 import SalaryTab from '@/components/accounting/SalaryTab';
-import AccessTab from '@/components/accounting/AccessTab';
+import PeriodsBar from '@/components/accounting/PeriodsBar';
 import { accCall, monthLabel, monthRange, shiftMonth, thisMonth, type Category, type Me } from '@/lib/accountingApi';
 
-type Tab = 'entries' | 'profit' | 'salary' | 'access';
-const TABS: [Tab, string, string][] = [
-  ['entries', 'Доходы и расходы', 'ArrowLeftRight'],
-  ['profit', 'Прибыль', 'TrendingUp'],
-  ['salary', 'Зарплата', 'Banknote'],
-  ['access', 'Доступ', 'ShieldCheck'],
+type Tab = 'entries' | 'profit' | 'dds' | 'budget' | 'counterparties' | 'salary';
+const TABS: [Tab, string, string, string][] = [
+  ['entries', 'Доходы и расходы', 'ArrowLeftRight', 'accounting.view_entries'],
+  ['profit', 'Прибыль', 'TrendingUp', 'accounting.view_reports'],
+  ['dds', 'ДДС', 'Table2', 'accounting.view_reports'],
+  ['budget', 'План-факт', 'Target', 'accounting.view_budget'],
+  ['counterparties', 'Контрагенты', 'Building2', 'accounting.view_counterparties'],
+  ['salary', 'Зарплата', 'Banknote', 'accounting.view_salary'],
 ];
 
 export default function Accounting() {
@@ -22,19 +27,25 @@ export default function Accounting() {
   const [tab, setTab] = useState<Tab>('entries');
   const [month, setMonth] = useState<string | null>(thisMonth());
   const [range, setRange] = useState<[string, string]>(monthRange(thisMonth()));
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const loadMe = () => accCall<Me>({ action: 'me' }).then((r) => {
+    if (r.error) { setError(r.error); return; }
+    setMe(r); setCategories(r.categories);
+    return r;
+  });
 
   useEffect(() => {
-    accCall<Me>({ action: 'me' }).then((r) => {
-      if (r.error) { setError(r.error); return; }
-      setMe(r); setCategories(r.categories);
-      const first = TABS.find(([k]) => k !== 'access' && r.perms[k as keyof Me['perms']]);
+    loadMe().then((r) => {
+      const first = r && TABS.find(([, , , a]) => r.actions.includes(a));
       if (first) setTab(first[0]);
     });
   }, []);
 
-  const tabs = useMemo(() => TABS.filter(([k]) => (k === 'access' ? me?.can_edit : me?.perms[k])), [me]);
-
+  const can = (a: string) => !!me && (me.is_deputy || me.actions.includes(a));
+  const tabs = useMemo(() => TABS.filter(([, , , a]) => me && (me.is_deputy || me.actions.includes(a))), [me]);
   const pickMonth = (m: string) => { setMonth(m); setRange(monthRange(m)); };
+  const bump = () => setReloadKey((k) => k + 1);
 
   if (error) return <div className="p-6 text-sm text-red-600">{error}</div>;
   if (!me) return <div className="flex justify-center py-20"><Icon name="Loader2" size={24} className="animate-spin text-muted-foreground" /></div>;
@@ -42,26 +53,29 @@ export default function Accounting() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
         <Icon name="Lock" size={32} />
-        <p className="text-sm">У вас нет доступа к бухгалтерии. Его может открыть заместитель директора.</p>
+        <p className="text-sm">У вашей должности нет доступа к бухгалтерии. Его настраивает заместитель директора в админ-панели.</p>
       </div>
     );
   }
 
-  const withPeriod = tab === 'entries' || tab === 'profit';
+  const withPeriod = tab === 'entries' || tab === 'profit' || tab === 'dds';
+  const readOnly = !['accounting.edit_entries', 'accounting.edit_salary', 'accounting.edit_budget', 'accounting.edit_counterparties'].some(can);
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 md:p-6">
       <div className="flex flex-wrap items-center gap-3">
         <div className="mr-auto">
           <h1 className="text-2xl font-semibold tracking-tight">Бухгалтерия</h1>
-          <p className="text-sm text-muted-foreground">
-            {me.can_edit ? 'Доходы, расходы, прибыль и зарплата' : 'Только просмотр — изменяет заместитель директора'}
-          </p>
+          <p className="text-sm text-muted-foreground">Деньги, прибыль, бюджет, контрагенты и зарплата</p>
         </div>
-        {!me.can_edit && (
-          <span className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground"><Icon name="Eye" size={13} />Просмотр</span>
+        {readOnly && (
+          <span className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground"><Icon name="Eye" size={13} />Только просмотр</span>
         )}
       </div>
+
+      {(can('accounting.close_month') || can('accounting.edit_entries')) && (
+        <PeriodsBar canClose={can('accounting.close_month')} canSync={can('accounting.edit_entries') || can('accounting.close_month')} onChanged={bump} />
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="mr-2 flex flex-wrap rounded-lg bg-secondary p-0.5">
@@ -88,10 +102,15 @@ export default function Accounting() {
         )}
       </div>
 
-      {tab === 'entries' && <EntriesTab from={range[0]} to={range[1]} canEdit={me.can_edit} categories={categories} onCategories={setCategories} />}
-      {tab === 'profit' && <ProfitTab from={range[0]} to={range[1]} />}
-      {tab === 'salary' && <SalaryTab canEdit={me.can_edit} />}
-      {tab === 'access' && <AccessTab />}
+      {tab === 'entries' && (
+        <EntriesTab from={range[0]} to={range[1]} canEdit={can('accounting.edit_entries')} canDelete={can('accounting.delete_entries')}
+          categories={categories} counterparties={me.counterparties} reloadKey={reloadKey} onCategories={setCategories} />
+      )}
+      {tab === 'profit' && <ProfitTab key={reloadKey} from={range[0]} to={range[1]} />}
+      {tab === 'dds' && <DdsTab from={range[0]} to={range[1]} reloadKey={reloadKey} />}
+      {tab === 'budget' && <BudgetTab canEdit={can('accounting.edit_budget')} reloadKey={reloadKey} />}
+      {tab === 'counterparties' && <CounterpartiesTab canEdit={can('accounting.edit_counterparties')} onChanged={() => loadMe()} />}
+      {tab === 'salary' && <SalaryTab canEdit={can('accounting.edit_salary')} reloadKey={reloadKey} />}
     </div>
   );
 }

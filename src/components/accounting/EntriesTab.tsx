@@ -3,19 +3,22 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
-import { accCall, fmtDay, rub, today, type Category, type Entry, type Kind } from '@/lib/accountingApi';
+import { accCall, fmtDay, rub, today, type Category, type CounterpartyRef, type Entry, type Kind } from '@/lib/accountingApi';
 
 interface Props {
   from: string;
   to: string;
   canEdit: boolean;
+  canDelete: boolean;
   categories: Category[];
+  counterparties: CounterpartyRef[];
+  reloadKey: number;
   onCategories: (c: Category[]) => void;
 }
 
-const EMPTY = { id: 0, kind: 'expense' as Kind, date: today(), amount: '', category_id: '', comment: '' };
+const EMPTY = { id: 0, kind: 'expense' as Kind, date: today(), amount: '', category_id: '', comment: '', counterparty_id: '' };
 
-export default function EntriesTab({ from, to, canEdit, categories, onCategories }: Props) {
+export default function EntriesTab({ from, to, canEdit, canDelete, categories, counterparties, reloadKey, onCategories }: Props) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [kind, setKind] = useState<'all' | Kind>('all');
@@ -27,12 +30,13 @@ export default function EntriesTab({ from, to, canEdit, categories, onCategories
   const [busy, setBusy] = useState(false);
   const [newCat, setNewCat] = useState('');
 
+  const [closed, setClosed] = useState<string[]>([]);
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await accCall<{ entries: Entry[] }>({ action: 'entries', date_from: from, date_to: to });
-    if (!r.error) setEntries(r.entries);
+    const r = await accCall<{ entries: Entry[]; closed: string[] }>({ action: 'entries', date_from: from, date_to: to });
+    if (!r.error) { setEntries(r.entries); setClosed(r.closed); }
     setLoading(false);
-  }, [from, to]);
+  }, [from, to, reloadKey]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -47,7 +51,7 @@ export default function EntriesTab({ from, to, canEdit, categories, onCategories
   const save = async () => {
     if (!form) return;
     setBusy(true); setError(null);
-    const r = await accCall({ action: 'entry_save', ...form, id: form.id || undefined, category_id: form.category_id ? Number(form.category_id) : null });
+    const r = await accCall({ action: 'entry_save', ...form, id: form.id || undefined, category_id: form.category_id ? Number(form.category_id) : null, counterparty_id: form.counterparty_id ? Number(form.counterparty_id) : null });
     setBusy(false);
     if (r.error) { setError(r.error); return; }
     setForm(null); load();
@@ -82,7 +86,7 @@ export default function EntriesTab({ from, to, canEdit, categories, onCategories
         </div>
         <select value={cat} onChange={(e) => setCat(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm">
           <option value="">Все статьи</option>
-          {categories.filter((c) => kind === 'all' || c.kind === kind).map((c) => (
+          {categories.filter((c) => !c.archived && (kind === 'all' || c.kind === kind)).map((c) => (
             <option key={c.id} value={c.id}>{c.kind === 'income' ? '↑' : '↓'} {c.name}</option>
           ))}
         </select>
@@ -124,7 +128,7 @@ export default function EntriesTab({ from, to, canEdit, categories, onCategories
                 <th className="px-4 py-2.5 font-medium">Статья</th>
                 <th className="px-4 py-2.5 font-medium">Комментарий</th>
                 <th className="px-4 py-2.5 text-right font-medium">Сумма</th>
-                {canEdit && <th className="w-20" />}
+                {(canEdit || canDelete) && <th className="w-20" />}
               </tr>
             </thead>
             <tbody>
@@ -139,19 +143,21 @@ export default function EntriesTab({ from, to, canEdit, categories, onCategories
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{e.comment}</td>
+                  <td className="px-4 py-2.5 text-muted-foreground">{e.counterparty && <span className="mr-1 font-medium text-foreground">{e.counterparty}.</span>}{e.comment}</td>
                   <td className={`whitespace-nowrap px-4 py-2.5 text-right font-medium tabular-nums ${e.kind === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
                     {e.kind === 'income' ? '+' : '−'}{rub(e.amount)}
                   </td>
-                  {canEdit && (
+                  {(canEdit || canDelete) && (
                     <td className="px-2 py-2.5 text-right">
-                      {e.linked ? null : e.from_salary ? (
+                      {e.linked ? null : closed.includes(String(e.date).slice(0, 7)) ? (
+                        <span title="Месяц закрыт" className="px-2 text-muted-foreground"><Icon name="Lock" size={14} /></span>
+                      ) : e.from_salary ? (
                         <span title="Создано выплатой зарплаты" className="px-2 text-muted-foreground"><Icon name="Banknote" size={15} /></span>
                       ) : (
                         <div className="flex justify-end gap-1">
-                          <button onClick={() => { setForm({ id: Number(e.id), kind: e.kind, date: e.date, amount: String(e.amount), category_id: e.category_id ? String(e.category_id) : '', comment: e.comment || '' }); setError(null); }}
-                            className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="Pencil" size={14} /></button>
-                          <button onClick={() => remove(e)} className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-red-600"><Icon name="Trash2" size={14} /></button>
+                          {canEdit && <button onClick={() => { setForm({ id: Number(e.id), kind: e.kind, date: String(e.date), amount: String(e.amount), category_id: e.category_id ? String(e.category_id) : '', comment: e.comment || '', counterparty_id: e.counterparty_id ? String(e.counterparty_id) : '' }); setError(null); }}
+                            className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="Pencil" size={14} /></button>}
+                          {canDelete && <button onClick={() => remove(e)} className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-red-600"><Icon name="Trash2" size={14} /></button>}
                         </div>
                       )}
                     </td>
@@ -197,6 +203,14 @@ export default function EntriesTab({ from, to, canEdit, categories, onCategories
                   onKeyDown={(e) => e.key === 'Enter' && addCategory()} className="h-9" />
                 <Button size="sm" variant="outline" onClick={addCategory} disabled={!newCat.trim()}>Добавить</Button>
               </div>
+              <label className="block space-y-1 text-sm">
+                <span className="text-muted-foreground">Контрагент (необязательно)</span>
+                <select value={form.counterparty_id} onChange={(e) => setForm({ ...form, counterparty_id: e.target.value })}
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm">
+                  <option value="">— нет —</option>
+                  {counterparties.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
               <label className="block space-y-1 text-sm">
                 <span className="text-muted-foreground">Комментарий</span>
                 <Input value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} />

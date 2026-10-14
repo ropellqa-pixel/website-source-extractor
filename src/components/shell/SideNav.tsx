@@ -3,14 +3,16 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import AnodBizLogo from '@/components/AnodBizLogo';
 import { useAuth } from '@/lib/auth';
+import { useAccess } from '@/lib/access';
 import { ROLE_LABELS, initials, shortName, visibleNav } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
 import { getUnreadCount, subscribeUnread } from '@/lib/chatUnread';
 
 export default function SideNav({ onNavigate }: { onNavigate?: () => void }) {
   const { user, signOut } = useAuth();
+  const { access } = useAccess();
   const navigate = useNavigate();
-  const items = visibleNav(user?.role);
+  const items = visibleNav(user?.role, access?.sections);
   const name = user?.fullName || user?.email || '';
   const [unread, setUnread] = useState(0);
 

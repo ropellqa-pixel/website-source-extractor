@@ -4,13 +4,13 @@ const URL = (func2url as Record<string, string>)['accounting-api'];
 
 export type Kind = 'income' | 'expense';
 export type PayType = 'salary' | 'percent' | 'hourly' | 'tabel';
-export type Section = 'entries' | 'profit' | 'salary';
 
 export interface Category { id: number; kind: Kind; name: string; archived: boolean }
 
 export interface Entry {
   id: number | string; kind: Kind; date: string; amount: number; category_id: number | null; category: string;
   comment: string | null; from_salary: boolean; linked: 'collection' | 'salary' | null; created_by: string | null;
+  counterparty_id: number | null; counterparty: string | null;
 }
 
 export interface ProfitData {
@@ -32,11 +32,14 @@ export interface Accrual {
 export interface Payment { id: number; staff_id: number; date: string; amount: number; period: string | null; comment: string | null }
 
 export interface SalaryData {
-  period: string; staff: Staff[]; accruals: Accrual[]; payments: Payment[]; total_debt: number;
+  period: string; staff: Staff[]; accruals: (Accrual & { auto?: boolean })[]; payments: Payment[]; total_debt: number; closed: boolean;
   profiles?: { id: string; name: string }[];
 }
 
-export interface Me { can_edit: boolean; perms: Record<Section, boolean>; role: string; categories: Category[] }
+export interface CounterpartyRef { id: number; name: string; kind: string }
+export interface Me { actions: string[]; role: string; is_deputy: boolean; categories: Category[]; counterparties: CounterpartyRef[] }
+export interface PeriodInfo { period: string; closed: boolean; closed_at?: string | null; closed_by?: string | null; synced_at?: string | null;
+  snapshot?: { salary_emp?: number; salary_mgr?: number; collection?: number } | null }
 
 export const PAY_LABELS: Record<PayType, string> = { tabel: 'Из «Зарплаты»', salary: 'Оклад', percent: 'Процент от выручки', hourly: 'По часам' };
 

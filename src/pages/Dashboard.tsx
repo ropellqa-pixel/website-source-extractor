@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import { useAuth } from '@/lib/auth';
+import { useAccess } from '@/lib/access';
 import { ROLE_LABELS, visibleNav } from '@/lib/navigation';
 import MonthSlab, { monthInfo } from '@/components/dashboard/MonthSlab';
 import StatsRow from '@/components/dashboard/StatsRow';
@@ -9,10 +10,11 @@ const MONTHS_NOM = ['Январь', 'Февраль', 'Март', 'Апрель'
 
 export default function Dashboard() {
   const { user, company } = useAuth();
+  const { access } = useAccess();
   const today = new Date();
   const { workdays, m } = monthInfo(today);
   const isDirectorOrDeputy = user?.role === 'director' || user?.role === 'deputy_director';
-  const sections = visibleNav(user?.role).filter(i => i.path !== '/dashboard');
+  const sections = visibleNav(user?.role, access?.sections).filter(i => i.path !== '/dashboard');
   const firstName = (user?.fullName || '').split(' ')[1] || user?.fullName?.split(' ')[0] || '';
 
   return (
