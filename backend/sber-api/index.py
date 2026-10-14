@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import os
@@ -77,6 +78,11 @@ def _vault_get(cur, key: str) -> Optional[str]:
 def _vault_set(cur, key: str, value: str) -> None:
     cur.execute(f'INSERT INTO {SCHEMA}.sber_vault (key, value, updated_at) VALUES (%s, %s, now()) '
                 f'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()', (key, sber.encrypt(value)))
+
+
+def _load_cert(cur) -> None:
+    raw, pw = _vault_get(cur, 'cert_p12'), _vault_get(cur, 'cert_password')
+    sber.set_cert(base64.b64decode(raw) if raw else None, pw or '')
 
 
 def _token(cur) -> str:
@@ -302,6 +308,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     conn.autocommit = True
     cur = conn.cursor()
     try:
+        _load_cert(cur)
         if method == 'GET' and qs.get('code') and qs.get('state'):
             return _oauth_callback(cur, qs)
         if method == 'GET' and qs.get('cron') is not None:
@@ -398,9 +405,40 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
                      'org': s.get('org'), 'account': s.get('account'), 'last_sync': s.get('last_sync'),
                      'last_sync_result': s.get('last_sync_result'), 'last_sync_error': s.get('last_sync_error'),
                      'limit_payment': s.get('limit_payment'), 'limit_day': s.get('limit_day'), 'paid_today': _paid_today(cur),
-                     'cron_url_ready': bool(s.get('cron_key')) and deputy,
+                     'cron_url_ready': bool(s.get('cron_key')) and deputy, 'cert': s.get('cert'),
                      'cron_key': s.get('cron_key') if deputy else None},
         })
+
+    if action in ('cert_upload', 'cert_delete'):
+        if not deputy:
+            return _err('Сертификат загружает только заместитель директора', 403)
+        if action == 'cert_delete':
+            cur.execute(f"DELETE FROM {SCHEMA}.sber_vault WHERE key IN ('cert_p12', 'cert_password')")
+            s.pop('cert', None)
+            _save_settings(cur, s, user['name'])
+            _log(cur, user, 'Сертификат удалён', '')
+            return _resp(200, {'ok': True})
+        name = str(body.get('file_name') or '')
+        if not name.lower().endswith(('.p12', '.pfx')):
+            return _err('Нужен файл сертификата .p12 или .pfx')
+        try:
+            raw = base64.b64decode(str(body.get('file') or '').split(',', 1)[-1], validate=True)
+        except Exception:
+            return _err('Файл повреждён')
+        if not 100 < len(raw) < 50000:
+            return _err('Файл не похож на сертификат')
+        password = str(body.get('password') or '')
+        info = sber.inspect_cert(raw, password)
+        if info['valid_to'] < date.today().isoformat():
+            return _err(f"Сертификат уже истёк ({info['valid_to']}) — загрузите новый")
+        _vault_set(cur, 'cert_p12', base64.b64encode(raw).decode())
+        _vault_set(cur, 'cert_password', password)
+        sber.set_cert(raw, password)
+        s['cert'] = {**info, 'file_name': name[:120], 'uploaded_at': datetime.now().isoformat(timespec='seconds'),
+                     'uploaded_by': user['name']}
+        _save_settings(cur, s, user['name'])
+        _log(cur, user, 'Сертификат загружен', f"{info['subject']} до {info['valid_to']}")
+        return _resp(200, {'ok': True, 'cert': s['cert']})
 
     # ---- настройки банка: только замдиректора
     if action in ('connect', 'disconnect', 'bank_settings'):
@@ -414,7 +452,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
                         (state, nonce, user['id'], str(body.get('origin') or '')[:200]))
             return _resp(200, {'url': sber.authorize_url(state, nonce, s['scope'])})
         if action == 'disconnect':
-            cur.execute(f'DELETE FROM {SCHEMA}.sber_vault')
+            cur.execute(f"DELETE FROM {SCHEMA}.sber_vault WHERE key IN ('access_token', 'access_exp', 'refresh_token')")
             s['connected'] = False
             _save_settings(cur, s, user['name'])
             _log(cur, user, 'Отключён', '')

@@ -29,14 +29,45 @@ def _env(name: str) -> str:
     return (os.environ.get(name) or '').strip()
 
 
+_cert_p12: Optional[bytes] = None
+_cert_pass: str = ''
+
+
+def set_cert(p12: Optional[bytes], password: str) -> None:
+    global _cert_p12, _cert_pass, _cert_files
+    if p12 != _cert_p12 or password != _cert_pass:
+        _cert_files = None
+    _cert_p12, _cert_pass = p12, password or ''
+
+
 def configured() -> Dict[str, bool]:
     return {
         'client_id': bool(_env('SBER_CLIENT_ID')),
         'client_secret': bool(_env('SBER_CLIENT_SECRET')),
-        'certificate': bool(_env('SBER_CERT_P12_BASE64')),
-        'certificate_password': bool(_env('SBER_CERT_PASSWORD')),
         'redirect_uri': bool(_env('SBER_REDIRECT_URI')),
+        'certificate': bool(_cert_p12),
     }
+
+
+def inspect_cert(p12: bytes, password: str) -> Dict[str, Any]:
+    """Проверка файла сертификата: открывается ли паролем, кому выдан, до какого числа действует."""
+    try:
+        key, cert, _ = pkcs12.load_key_and_certificates(p12, (password or '').encode() or None)
+    except Exception:
+        raise SberError('Не удалось открыть файл: неверный пароль или это не сертификат .p12/.pfx')
+    if not key or not cert:
+        raise SberError('В файле нет закрытого ключа или сертификата — выгрузите сертификат вместе с ключом')
+    def attr(name, oid):
+        try:
+            return cert.subject.get_attributes_for_oid(oid)[0].value
+        except IndexError:
+            return ''
+    from cryptography.x509.oid import NameOID
+    valid_to = getattr(cert, 'not_valid_after_utc', None) or cert.not_valid_after
+    valid_from = getattr(cert, 'not_valid_before_utc', None) or cert.not_valid_before
+    return {'subject': attr('cn', NameOID.COMMON_NAME), 'org': attr('o', NameOID.ORGANIZATION_NAME),
+            'serial': format(cert.serial_number, 'x')[-12:], 'valid_from': valid_from.date().isoformat(),
+            'valid_to': valid_to.date().isoformat()}
 
 
 def is_test() -> bool:
@@ -52,7 +83,10 @@ def auth_base() -> str:
 
 
 def _fernet() -> Fernet:
-    key = hashlib.sha256(('sber-vault:' + _env('SBER_CLIENT_SECRET') + ':' + _env('SBER_CERT_PASSWORD')).encode()).digest()
+    seed = _env('SBER_VAULT_KEY') or _env('AWS_SECRET_ACCESS_KEY')
+    if not seed:
+        raise SberError('Не настроено шифрование хранилища')
+    key = hashlib.sha256(('sber-vault-v2:' + seed).encode()).digest()
     return Fernet(base64.urlsafe_b64encode(key))
 
 
@@ -75,11 +109,10 @@ def cert_files() -> Tuple[str, str]:
     global _cert_files
     if _cert_files and all(os.path.exists(p) for p in _cert_files):
         return _cert_files
-    raw = _env('SBER_CERT_P12_BASE64')
-    if not raw:
-        raise SberError('Не загружен сертификат СберБизнес (SBER_CERT_P12_BASE64)')
+    if not _cert_p12:
+        raise SberError('Не загружен сертификат СберБизнес — замдиректора: Админ-панель → СберБизнес')
     try:
-        key, cert, extra = pkcs12.load_key_and_certificates(base64.b64decode(raw), (_env('SBER_CERT_PASSWORD') or '').encode() or None)
+        key, cert, extra = pkcs12.load_key_and_certificates(_cert_p12, _cert_pass.encode() or None)
     except Exception:
         raise SberError('Не удалось открыть сертификат: проверьте файл и пароль от него')
     d = tempfile.mkdtemp(prefix='sber_')
