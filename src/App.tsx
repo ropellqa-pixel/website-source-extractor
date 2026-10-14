@@ -27,6 +27,7 @@ import Settings from "./pages/Settings";
 import Salary from "./pages/Salary";
 import Schedule from "./pages/Schedule";
 import Collection from "./pages/Collection";
+import Accounting from "./pages/Accounting";
 
 const queryClient = new QueryClient();
 
@@ -78,6 +79,7 @@ const App = () => (
             <Route path="/skud" element={<ProtectedRoute><Skud /></ProtectedRoute>} />
             <Route path="/salary" element={<ProtectedRoute><Salary /></ProtectedRoute>} />
             <Route path="/schedule" element={<ProtectedRoute><Schedule /></ProtectedRoute>} />
+            <Route path="/accounting" element={<ProtectedRoute><Accounting /></ProtectedRoute>} />
             <Route path="/collection" element={<ProtectedRoute><Collection /></ProtectedRoute>} />
             <Route path="/employees" element={<ProtectedRoute directorOnly><Employees /></ProtectedRoute>} />
             <Route path="/devices" element={<ProtectedRoute deputyOnly><Devices /></ProtectedRoute>} />
