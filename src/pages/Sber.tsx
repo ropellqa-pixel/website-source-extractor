@@ -7,12 +7,12 @@ import Icon from '@/components/ui/icon';
 import BankCard from '@/components/sber/BankCard';
 import CounterpartyForm from '@/components/sber/CounterpartyForm';
 import PayDialog from '@/components/sber/PayDialog';
-import { rub } from '@/lib/accountingApi';
+import { monthLabel, recentMonths, rub, thisMonth } from '@/lib/accountingApi';
 import { useAuth } from '@/lib/auth';
 import { shiftWeek, sberCall, STATUS_STYLE, VAT_LABELS, weekLabel, type SberCp, type SberOverview, type SberRequest } from '@/lib/sberApi';
 
 type Tab = 'requests' | 'counterparties';
-const EMPTY_REQ = { id: 0, counterparty_id: '', amount: '', purpose: '', vat_rate: '' };
+const EMPTY_REQ = { id: 0, counterparty_id: '', amount: '', purpose: '', vat_rate: '', category_id: '', period: thisMonth() };
 
 export default function Sber() {
   const { user } = useAuth();
@@ -67,7 +67,7 @@ export default function Sber() {
   const saveReq = async () => {
     if (!req) return;
     setReqError(null);
-    const r = await sberCall({ action: 'request_save', ...req, id: req.id || undefined, counterparty_id: Number(req.counterparty_id), week });
+    const r = await sberCall({ action: 'request_save', ...req, id: req.id || undefined, counterparty_id: Number(req.counterparty_id), category_id: req.category_id ? Number(req.category_id) : null, week });
     if (r.error) { setReqError(r.error); return; }
     setReq(null); load();
   };
@@ -82,7 +82,7 @@ export default function Sber() {
 
   const pickCp = (id: string) => {
     const c = data.counterparties.find((x) => String(x.id) === id);
-    setReq((p) => p && { ...p, counterparty_id: id, purpose: p.purpose || c?.default_purpose || '', vat_rate: p.vat_rate || c?.vat_rate || 'none' });
+    setReq((p) => p && { ...p, counterparty_id: id, purpose: p.purpose || c?.default_purpose || '', vat_rate: p.vat_rate || c?.vat_rate || 'none', category_id: p.category_id || (c?.default_category_id ? String(c.default_category_id) : '') });
   };
 
   return (
@@ -135,9 +135,9 @@ export default function Sber() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {can('sber.request') && (
+            {(can('sber.request') || can('sber.pay')) && (
               <Button onClick={() => { setReq({ ...EMPTY_REQ }); setReqError(null); }} disabled={ready.length === 0}>
-                <Icon name="Plus" size={16} />Заявка на оплату
+                <Icon name="Plus" size={16} />{can('sber.pay') ? 'Новая оплата' : 'Заявка на оплату'}
               </Button>
             )}
             {can('sber.request') && drafts.length > 0 && (
@@ -150,7 +150,8 @@ export default function Sber() {
                 <Icon name="Landmark" size={16} />Оплатить выбранные ({selected.size}) · {rub(sum(toPay.filter((r) => selected.has(r.id))))}
               </Button>
             )}
-            {can('sber.request') && ready.length === 0 && <p className="self-center text-sm text-muted-foreground">Нет контрагентов с заполненными реквизитами — их добавляет замдиректора.</p>}
+            {ready.length === 0 && <p className="self-center text-sm text-muted-foreground">Сначала добавьте получателя с реквизитами во вкладке «Контрагенты и реквизиты».</p>}
+            {!data.bank.connected && <p className="self-center text-sm text-amber-700">Банк не подключён: выберите расчётный счёт в Админ-панели → СберБизнес.</p>}
           </div>
 
           <div className="overflow-auto rounded-2xl border bg-card">
@@ -188,7 +189,11 @@ export default function Sber() {
                       </td>
                       <td className="max-w-xs px-3 py-2.5">
                         <div className="line-clamp-2">{r.purpose}</div>
-                        <div className="text-xs text-muted-foreground">{VAT_LABELS[r.vat_rate] || r.vat_rate}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {VAT_LABELS[r.vat_rate] || r.vat_rate}
+                          {r.category_id && ` · ${data.categories.find((c) => c.id === r.category_id)?.name || ''}`}
+                          {r.period && ` · за ${monthLabel(r.period).toLowerCase()}`}
+                        </div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums">{rub(r.amount)}</td>
                       <td className="px-3 py-2.5">
@@ -213,8 +218,8 @@ export default function Sber() {
                               window.location.href = x.links[0].url;
                             }}>Подписать по СМС</Button>
                           )}
-                          {can('sber.request') && ['draft', 'rejected'].includes(r.status) && (r.created_by_user === user?.id || data.is_deputy) && (
-                            <button title="Изменить" onClick={() => { setReq({ id: r.id, counterparty_id: String(r.counterparty_id), amount: String(r.amount), purpose: r.purpose, vat_rate: r.vat_rate }); setReqError(null); }}
+                          {(can('sber.request') || can('sber.pay')) && (['draft', 'rejected'].includes(r.status) || (r.status === 'sent' && can('sber.pay'))) && (r.created_by_user === user?.id || data.is_deputy || can('sber.pay')) && (
+                            <button title="Изменить" onClick={() => { setReq({ id: r.id, counterparty_id: String(r.counterparty_id), amount: String(r.amount), purpose: r.purpose, vat_rate: r.vat_rate, category_id: r.category_id ? String(r.category_id) : '', period: r.period || thisMonth() }); setReqError(null); }}
                               className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="Pencil" size={15} /></button>
                           )}
                           {can('sber.request') && ['draft', 'rejected', 'sent'].includes(r.status) && (r.created_by_user === user?.id || data.is_deputy) && (
@@ -279,6 +284,21 @@ export default function Sber() {
                   {ready.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block space-y-1 text-sm">
+                  <span className="text-muted-foreground">Статья расхода</span>
+                  <select value={req.category_id} onChange={(e) => setReq({ ...req, category_id: e.target.value })} className="h-10 w-full rounded-md border bg-background px-2 text-sm">
+                    <option value="">— выберите —</option>
+                    {data.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </label>
+                <label className="block space-y-1 text-sm">
+                  <span className="text-muted-foreground">За какой месяц</span>
+                  <select value={req.period} onChange={(e) => setReq({ ...req, period: e.target.value })} className="h-10 w-full rounded-md border bg-background px-2 text-sm">
+                    {recentMonths(thisMonth()).map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+                  </select>
+                </label>
+              </div>
               <label className="block space-y-1 text-sm">
                 <span className="text-muted-foreground">Сумма, ₽</span>
                 <Input inputMode="decimal" value={req.amount} onChange={(e) => setReq({ ...req, amount: e.target.value })} className="text-lg font-semibold" />
@@ -294,7 +314,7 @@ export default function Sber() {
                 </select>
               </label>
               {reqError && <p className="text-sm text-red-600">{reqError}</p>}
-              <Button className="w-full" onClick={saveReq}>Сохранить черновик</Button>
+              <Button className="w-full" onClick={saveReq}>{can('sber.pay') ? 'Сохранить — появится кнопка «Оплатить»' : 'Сохранить черновик'}</Button>
               <p className="text-center text-xs text-muted-foreground">Черновики недели отправляются директору одной кнопкой</p>
             </div>
           </DialogContent>

@@ -15,7 +15,7 @@ export interface SberRequest {
   status: ReqStatus; status_label: string; requisites: { name: string; inn: string; kpp: string; account: string; bic: string; bank_name: string };
   requisites_changed: boolean; created_by: string; created_at: string; sent_at: string | null; decided_by: string | null;
   decided_at: string | null; reject_reason: string | null; bank_status: string | null; bank_comment: string | null;
-  created_by_user: string; category_id: number | null;
+  created_by_user: string; category_id: number | null; period: string | null;
 }
 
 export interface SberBank {

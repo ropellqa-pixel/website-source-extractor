@@ -179,3 +179,23 @@ def guess_category(op: Dict[str, Any]) -> Optional[str]:
         if kind == op['kind'] and re.search(pattern, text):
             return cat
     return None
+
+
+MONTHS_RU = {'январ': 1, 'феврал': 2, 'март': 3, 'апрел': 4, 'ма': 5, 'июн': 6, 'июл': 7, 'август': 8,
+             'сентябр': 9, 'октябр': 10, 'ноябр': 11, 'декабр': 12}
+
+
+def period_from_text(text: str, op_date: str) -> str:
+    """Месяц, за который платёж: «за сентябрь 2026», «за 09.2026», «за 9 месяц» — иначе месяц операции."""
+    low = (text or '').lower()
+    year = int(op_date[:4])
+    m = re.search(r'за\s+(\d{1,2})[./](\d{4})', low)
+    if m and 1 <= int(m.group(1)) <= 12:
+        return f'{int(m.group(2)):04d}-{int(m.group(1)):02d}'
+    m = re.search(r'за\s+(январ\w*|феврал\w*|март\w*|апрел\w*|ма[йя]\w*|июн\w*|июл\w*|август\w*|сентябр\w*|октябр\w*|ноябр\w*|декабр\w*)\s*(\d{4})?', low)
+    if m:
+        word = m.group(1)
+        num = next(v for k, v in sorted(MONTHS_RU.items(), key=lambda x: -len(x[0])) if word.startswith(k))
+        y = int(m.group(2)) if m.group(2) else (year - 1 if num > int(op_date[5:7]) + 1 else year)
+        return f'{y:04d}-{num:02d}'
+    return op_date[:7]

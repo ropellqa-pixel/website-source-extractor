@@ -10,7 +10,7 @@ export interface Category { id: number; kind: Kind; name: string; archived: bool
 export interface Entry {
   id: number | string; kind: Kind; date: string; amount: number; category_id: number | null; category: string;
   comment: string | null; from_salary: boolean; linked: 'collection' | 'salary' | 'bank' | null; created_by: string | null;
-  counterparty_id: number | null; counterparty: string | null;
+  counterparty_id: number | null; counterparty: string | null; period: string | null;
 }
 
 export interface ProfitData {
@@ -79,3 +79,8 @@ export function shiftMonth(p: string, delta: number) {
   const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
+
+export const recentMonths = (center: string, back = 12, forward = 2) =>
+  Array.from({ length: back + forward + 1 }, (_, i) => shiftMonth(center, forward - i));
+
+export type DueMap = Record<string, { total: number; paid: number; left: number }>;

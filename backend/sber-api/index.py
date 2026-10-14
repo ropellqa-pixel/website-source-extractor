@@ -13,7 +13,7 @@ import requests
 
 import sber
 from access import current_user
-from bank import guess_category
+from bank import guess_category, period_from_text
 
 SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 'public')
 CORS = {
@@ -230,7 +230,7 @@ def _counterparties(cur) -> List[Dict[str, Any]]:
 def _requests(cur, where: str = '', args: tuple = ()) -> List[Dict[str, Any]]:
     cur.execute(f'SELECT r.id, r.counterparty_id, cp.name, r.amount, r.purpose, r.vat_rate, r.week_start, r.status, r.requisites, '
                 f'r.requisites_hash, cp.requisites_hash, r.created_by, r.created_at, r.sent_at, r.decided_by, r.decided_at, '
-                f'r.reject_reason, r.external_id, r.bank_status, r.bank_comment, r.created_by_user, r.category_id '
+                f'r.reject_reason, r.external_id, r.bank_status, r.bank_comment, r.created_by_user, r.category_id, r.period '
                 f'FROM {SCHEMA}.sber_requests r LEFT JOIN {SCHEMA}.acc_counterparties cp ON cp.id = r.counterparty_id '
                 f'{where} ORDER BY r.week_start DESC, r.id DESC LIMIT 500', args)
     out = []
@@ -241,7 +241,7 @@ def _requests(cur, where: str = '', args: tuple = ()) -> List[Dict[str, Any]]:
                     'requisites': req, 'requisites_changed': bool(r[9] and r[10] and r[9] != r[10] and r[7] in ('draft', 'sent')),
                     'created_by': r[11], 'created_at': r[12], 'sent_at': r[13], 'decided_by': r[14], 'decided_at': r[15],
                     'reject_reason': r[16], 'external_id': r[17], 'bank_status': r[18], 'bank_comment': r[19],
-                    'mine': False, 'created_by_user': r[20], 'category_id': r[21]})
+                    'mine': False, 'created_by_user': r[20], 'category_id': r[21], 'period': r[22]})
     return out
 
 
@@ -355,10 +355,15 @@ def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автоз
                 if cur.fetchone():
                     skipped += 1
                     continue
-                cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'paid', bank_status = 'EXECUTED', bank_checked_at = now() "
-                            f"WHERE status IN ('paying', 'signing') AND external_id = %s RETURNING id", (t.get('externalId') or '',))
-                for (paid_id,) in cur.fetchall():
-                    _notify_request(cur, paid_id, 'paid')
+                ext = t.get('externalId') or ''
+                req_link = None
+                if ext:
+                    cur.execute(f"SELECT id, status, category_id, period, counterparty_id FROM {SCHEMA}.sber_requests WHERE external_id = %s LIMIT 1", (ext,))
+                    req_link = cur.fetchone()
+                if req_link and req_link[1] in ('paying', 'signing', 'sent', 'failed'):
+                    cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'paid', bank_status = 'EXECUTED', bank_checked_at = now() WHERE id = %s",
+                                (req_link[0],))
+                    _notify_request(cur, req_link[0], 'paid')
                 low = name.lower()
                 cp = next((c for c in cps if inn and c['inn'] == inn), None) or next((c for c in cps if low and c['name'].lower() == low), None)
                 if not cp and name:
@@ -366,16 +371,23 @@ def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автоз
                                 (name[:150], 'supplier' if kind == 'expense' else 'customer', inn or None))
                     cp = {'id': cur.fetchone()[0], 'name': name, 'inn': inn, 'cat': None}
                     cps.append(cp)
-                cat = cp['cat'] if cp and cp['cat'] else None
-                if not cat:
-                    g = guess_category({'kind': kind, 'purpose': purpose, 'name': name})
-                    cat = _cat_id(cur, kind, g) if g else None
+                g = guess_category({'kind': kind, 'purpose': purpose, 'name': name})
+                cat = (req_link[2] if req_link and req_link[2] else None) or (cp['cat'] if cp and cp['cat'] else None) \
+                    or (_cat_id(cur, kind, g) if g else None)
+                period = (req_link[3] if req_link and req_link[3] else None) or period_from_text(purpose, op_date)
                 cur.execute(f"INSERT INTO {SCHEMA}.acc_entries (kind, entry_date, amount, category_id, comment, counterparty_id, period, "
                             f"source, source_key, bank_purpose, created_by, bank_connection_id) VALUES (%s, %s, %s, %s, %s, %s, %s, 'bank', %s, %s, %s, %s) "
-                            f'ON CONFLICT (source, source_key) WHERE source IS NOT NULL DO NOTHING',
+                            f'ON CONFLICT (source, source_key) WHERE source IS NOT NULL DO NOTHING RETURNING id',
                             (kind, op_date, round(amount, 2), cat, f"Банк №{t.get('number') or ''}: {purpose[:400]}",
-                             cp['id'] if cp else None, op_date[:7], uid, purpose[:1000], who, c['id']))
-                added += 1
+                             cp['id'] if cp else None, period, uid, purpose[:1000], who, c['id']))
+                new_entry = cur.fetchone()
+                if new_entry and req_link:
+                    cur.execute(f'UPDATE {SCHEMA}.sber_requests SET entry_id = %s WHERE id = %s', (new_entry[0], req_link[0]))
+                if new_entry:
+                    added += 1
+                    cur.execute(f'UPDATE {SCHEMA}.acc_periods SET fingerprint = NULL WHERE period = %s', (period,))
+                    if period in closed:
+                        cur.execute(f"UPDATE {SCHEMA}.acc_entries SET period = %s WHERE id = %s", (op_date[:7], new_entry[0]))
             links = data.get('_links') or []
             if not any((l.get('rel') == 'next') for l in links if isinstance(l, dict)):
                 break
@@ -451,7 +463,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def _upsert_connection(cur, org: Dict[str, Any], who: str, title: Optional[str], conn_id: Optional[int] = None) -> int:
-    rub = [a['number'] for a in org['accounts'] if (a.get('currency') or '643') in ('643', 'RUB', 'RUR')]
+    rub = [a['number'] for a in org['accounts'] if (a.get('currency') or '643') in ('643', '810', 'RUB', 'RUR') and (a.get('state') or 'OPEN') == 'OPEN']
     if conn_id:
         cur.execute(f'SELECT account FROM {SCHEMA}.sber_connections WHERE id = %s', (conn_id,))
         r = cur.fetchone()
@@ -599,7 +611,12 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
             s['cron_key'] = sber.new_state()[0]
             _save_settings(cur, s, user['name'])
         _log(cur, user, 'Подключение по токенам', f"#{cid} {org.get('name') or ''}")
-        return _resp(200, {'ok': True, 'org': org, 'connection_id': cid})
+        loaded = None
+        try:
+            loaded = sync_statement(cur, _connection(cur, cid), days=7, who=user['name'])
+        except Exception as e:
+            cur.execute(f'UPDATE {SCHEMA}.sber_connections SET last_error = %s WHERE id = %s', (str(e)[:300], cid))
+        return _resp(200, {'ok': True, 'org': org, 'connection_id': cid, 'loaded': loaded})
 
     if action == 'diagnose':
         if not deputy:
@@ -783,7 +800,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
 
     # ---- заявки на оплату
     if action == 'request_save':
-        if 'sber.request' not in can:
+        if not ({'sber.request', 'sber.pay'} & can):
             return _err('Нет права создавать заявки', 403)
         cp = _cp(cur, int(body.get('counterparty_id') or 0))
         if not cp or cp['archived']:
@@ -801,19 +818,28 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         if vat not in VATS:
             vat = 'none'
         snap = _snapshot(cp)
+        period = str(body.get('period') or '')
+        if not re.match(r'^\d{4}-(0[1-9]|1[0-2])$', period):
+            return _err('Укажите, за какой месяц расход')
+        cat = body.get('category_id') or cp['default_category_id']
+        if not cat:
+            return _err('Выберите статью расхода')
+        direct = 'sber.pay' in can
         if body.get('id'):
             cur.execute(f"UPDATE {SCHEMA}.sber_requests SET counterparty_id = %s, amount = %s, purpose = %s, vat_rate = %s, requisites = %s, "
-                        f"requisites_hash = %s, category_id = %s WHERE id = %s AND status IN ('draft', 'rejected') AND (created_by_user = %s OR %s) "
-                        f'RETURNING id', (cp['id'], amount, purpose[:200], vat, json.dumps(snap, ensure_ascii=False), cp['requisites_hash'],
-                                          body.get('category_id') or cp['default_category_id'], body['id'], user['id'], deputy))
+                        f"requisites_hash = %s, category_id = %s, period = %s WHERE id = %s AND status IN ('draft', 'rejected', 'sent') "
+                        f'AND (created_by_user = %s OR %s OR %s) RETURNING id', (cp['id'], amount, purpose[:200], vat, json.dumps(snap, ensure_ascii=False),
+                                                                          cp['requisites_hash'], cat, period, body['id'], user['id'], deputy, direct))
             if not cur.fetchone():
-                return _err('Изменить можно только черновик или отклонённую заявку')
-            cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'draft', reject_reason = NULL WHERE id = %s", (body['id'],))
+                return _err('Изменить можно только неоплаченную заявку')
+            cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = %s, reject_reason = NULL, sent_at = CASE WHEN %s THEN now() ELSE sent_at END "
+                        f'WHERE id = %s', ('sent' if direct else 'draft', direct, body['id']))
         else:
             cur.execute(f'INSERT INTO {SCHEMA}.sber_requests (counterparty_id, amount, purpose, vat_rate, week_start, requisites, requisites_hash, '
-                        f'created_by, created_by_user, category_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                        f'created_by, created_by_user, category_id, period, status, sent_at) '
+                        f'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CASE WHEN %s THEN now() END)',
                         (cp['id'], amount, purpose[:200], vat, week, json.dumps(snap, ensure_ascii=False), cp['requisites_hash'],
-                         user['name'], user['id'], body.get('category_id') or cp['default_category_id']))
+                         user['name'], user['id'], cat, period, 'sent' if direct else 'draft', direct))
         return _resp(200, {'ok': True})
 
     if action in ('request_delete', 'send_week'):

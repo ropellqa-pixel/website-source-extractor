@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import BankImport from './BankImport';
-import { accCall, fmtDay, rub, today, type Category, type CounterpartyRef, type Entry, type Kind } from '@/lib/accountingApi';
+import { accCall, fmtDay, monthLabel, recentMonths, rub, thisMonth, today, type Category, type CounterpartyRef, type DueMap, type Entry, type Kind } from '@/lib/accountingApi';
 
 interface Props {
   from: string;
@@ -17,7 +17,7 @@ interface Props {
   onCategories: (c: Category[]) => void;
 }
 
-const EMPTY = { id: 0, kind: 'expense' as Kind, date: today(), amount: '', category_id: '', comment: '', counterparty_id: '' };
+const EMPTY = { id: 0, kind: 'expense' as Kind, date: today(), period: thisMonth(), amount: '', category_id: '', comment: '', counterparty_id: '' };
 
 export default function EntriesTab({ from, to, canEdit, canDelete, categories, counterparties, reloadKey, onCategories }: Props) {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -30,6 +30,28 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [newCat, setNewCat] = useState('');
+  const [due, setDue] = useState<DueMap>({});
+
+  const formPeriod = form?.period;
+  const formId = form?.id;
+  useEffect(() => {
+    if (!formPeriod) return;
+    accCall<{ due: DueMap }>({ action: 'salary_due', period: formPeriod, exclude_id: formId || 0 }).then((r) => { if (!r.error) setDue(r.due); });
+  }, [formPeriod, formId]);
+
+  useEffect(() => {
+    setForm((f) => {
+      const d = f && due[f.category_id];
+      return f && d && !f.amount && d.left > 0 ? { ...f, amount: String(d.left) } : f;
+    });
+  }, [due]);
+
+  const pickCategory = (category_id: string) => {
+    if (!form) return;
+    const d = due[category_id];
+    const auto = d && d.left > 0 && (!form.amount || Number(form.amount) === due[form.category_id]?.left);
+    setForm({ ...form, category_id, amount: auto ? String(d.left) : form.amount });
+  };
 
   const [closed, setClosed] = useState<string[]>([]);
   const load = useCallback(async () => {
@@ -152,6 +174,7 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
                   <td className="px-4 py-2.5 text-muted-foreground">{e.counterparty && <span className="mr-1 font-medium text-foreground">{e.counterparty}.</span>}{e.comment}</td>
                   <td className={`whitespace-nowrap px-4 py-2.5 text-right font-medium tabular-nums ${e.kind === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
                     {e.kind === 'income' ? '+' : '−'}{rub(e.amount)}
+                    {e.period && e.period !== String(e.date).slice(0, 7) && <div className="text-[11px] font-normal text-muted-foreground">за {monthLabel(e.period).toLowerCase()}</div>}
                   </td>
                   {(canEdit || canDelete) && (
                     <td className="px-2 py-2.5 text-right">
@@ -161,7 +184,7 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
                         <span title="Создано выплатой зарплаты" className="px-2 text-muted-foreground"><Icon name="Banknote" size={15} /></span>
                       ) : (
                         <div className="flex justify-end gap-1">
-                          {canEdit && <button onClick={() => { setForm({ id: Number(e.id), kind: e.kind, date: String(e.date), amount: String(e.amount), category_id: e.category_id ? String(e.category_id) : '', comment: e.comment || '', counterparty_id: e.counterparty_id ? String(e.counterparty_id) : '' }); setError(null); }}
+                          {canEdit && <button onClick={() => { setForm({ id: Number(e.id), kind: e.kind, date: String(e.date), period: e.period || String(e.date).slice(0, 7), amount: String(e.amount), category_id: e.category_id ? String(e.category_id) : '', comment: e.comment || '', counterparty_id: e.counterparty_id ? String(e.counterparty_id) : '' }); setError(null); }}
                             className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="Pencil" size={14} /></button>}
                           {canDelete && <button onClick={() => remove(e)} className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-red-600"><Icon name="Trash2" size={14} /></button>}
                         </div>
@@ -186,9 +209,38 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
                     className={`flex-1 rounded-md py-1.5 text-sm font-medium ${form.kind === k ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}>{l}</button>
                 ))}
               </div>
+              <label className="block space-y-1 text-sm">
+                <span className="text-muted-foreground">Статья</span>
+                <select value={form.category_id} onChange={(e) => pickCategory(e.target.value)}
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm">
+                  <option value="">— выберите —</option>
+                  {formCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <label className="block space-y-1 text-sm">
+                <span className="text-muted-foreground">За какой месяц</span>
+                <select value={form.period} onChange={(e) => setForm({ ...form, period: e.target.value })}
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm">
+                  {recentMonths(thisMonth()).map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+                </select>
+              </label>
+              {due[form.category_id] && (
+                <div className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-2 text-xs">
+                  <Icon name="Calculator" size={14} className="shrink-0 text-muted-foreground" />
+                  <span className="flex-1">
+                    {form.kind === 'income' ? 'Инкассация по факту' : 'Начислено'} за {monthLabel(form.period).toLowerCase()}: <b>{rub(due[form.category_id].total)}</b>
+                    {due[form.category_id].paid > 0 && <> · уже внесено {rub(due[form.category_id].paid)}</>}
+                  </span>
+                  {due[form.category_id].left > 0 && (
+                    <button className="font-medium text-primary hover:underline" onClick={() => setForm({ ...form, amount: String(due[form.category_id].left) })}>
+                      Подставить {rub(due[form.category_id].left)}
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <label className="space-y-1 text-sm">
-                  <span className="text-muted-foreground">Дата</span>
+                  <span className="text-muted-foreground">Дата оплаты</span>
                   <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
                 </label>
                 <label className="space-y-1 text-sm">
@@ -196,14 +248,6 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
                   <Input inputMode="decimal" value={form.amount} placeholder="0" onChange={(e) => setForm({ ...form, amount: e.target.value })} />
                 </label>
               </div>
-              <label className="block space-y-1 text-sm">
-                <span className="text-muted-foreground">Статья</span>
-                <select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm">
-                  <option value="">— выберите —</option>
-                  {formCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </label>
               <div className="flex gap-2">
                 <Input placeholder="Новая статья, например «Реклама»" value={newCat} onChange={(e) => setNewCat(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addCategory()} className="h-9" />

@@ -187,7 +187,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 # Если запрос пришёл с конкретного АдПода — пин-код должен быть привязан именно к нему
                 if adpod_slug and pin_adpod_slug and adpod_slug != pin_adpod_slug:
                     return _resp(403, {'error': 'Этот пин-код привязан к другому адресу входа'})
-                cur.execute(f'SELECT full_name FROM {SCHEMA}.profiles WHERE email = %s LIMIT 1', (email,))
+                cur.execute(f'SELECT full_name FROM {SCHEMA}.profiles WHERE lower(email) = lower(%s) LIMIT 1', (email,))
                 prof = cur.fetchone()
                 return _resp(200, {'email': email, 'full_name': prof[0] if prof else 'Сотрудник'})
 
@@ -207,13 +207,19 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 email, pin_adpod_slug = row[0], row[1]
                 if pin_adpod_slug != adpod_slug:
                     return _resp(403, {'error': 'Этот пин-код привязан к другому адресу входа'})
-                cur.execute(f'SELECT id, is_admin FROM {SCHEMA}.auth_users WHERE email = %s LIMIT 1', (email,))
+                cur.execute(f'SELECT id, is_admin, email FROM {SCHEMA}.auth_users WHERE lower(email) = lower(%s) LIMIT 1', (email,))
                 user_row = cur.fetchone()
+                if not user_row:
+                    cur.execute(
+                        f'SELECT a.id, a.is_admin, a.email FROM {SCHEMA}.profiles p '
+                        f'JOIN {SCHEMA}.auth_users a ON a.id::text = p.user_id::text '
+                        f'WHERE lower(p.email) = lower(%s) LIMIT 1', (email,))
+                    user_row = cur.fetchone()
                 if not user_row:
                     return _resp(404, {'error': 'У сотрудника нет учётной записи для входа. Обратитесь к руководителю.'})
                 token = create_session(cur, user_row[0])
                 conn.commit()
-                return _resp(200, {'user': {'id': user_row[0], 'email': email}, 'token': token, 'is_admin': user_row[1]})
+                return _resp(200, {'user': {'id': user_row[0], 'email': user_row[2]}, 'token': token, 'is_admin': user_row[1]})
 
             elif action == 'session':
                 token = body.get('token') or (event.get('headers') or {}).get('X-Authorization', '')
