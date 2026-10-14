@@ -23,7 +23,7 @@ CORS = {
 }
 STATUS = {
     'draft': 'Черновик', 'sent': 'На оплате у директора', 'rejected': 'Отклонена', 'paying': 'Отправлена в банк',
-    'signing': 'Ждёт подписи в СберБизнес', 'paid': 'Оплачена', 'failed': 'Ошибка банка', 'cancelled': 'Отменена',
+    'signing': 'Ждёт подписи по СМС', 'paid': 'Оплачена', 'failed': 'Ошибка банка', 'cancelled': 'Отменена',
 }
 PBKDF2_ITERATIONS = 150000
 VATS = {'none', '0', '5', '7', '10', '20', '22'}
@@ -78,6 +78,11 @@ def _vault_get(cur, key: str) -> Optional[str]:
 def _vault_set(cur, key: str, value: str) -> None:
     cur.execute(f'INSERT INTO {SCHEMA}.sber_vault (key, value, updated_at) VALUES (%s, %s, now()) '
                 f'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()', (key, sber.encrypt(value)))
+
+
+def _sign_url(s: Dict[str, Any], ext: str) -> str:
+    tpl = str(s.get('sign_url_template') or '')
+    return tpl.replace('{externalId}', ext) if '{externalId}' in tpl else sber.sign_url(ext)
 
 
 def _load_cert(cur) -> None:
@@ -406,8 +411,59 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
                      'last_sync_result': s.get('last_sync_result'), 'last_sync_error': s.get('last_sync_error'),
                      'limit_payment': s.get('limit_payment'), 'limit_day': s.get('limit_day'), 'paid_today': _paid_today(cur),
                      'cron_url_ready': bool(s.get('cron_key')) and deputy, 'cert': s.get('cert'),
+                     'scope_v1': s.get('scope_v1') if deputy else None, 'scope_v2': s.get('scope_v2') if deputy else None,
+                     'has_tokens': bool(_vault_get(cur, 'refresh_token')) if deputy else None,
+                     'sign_url_template': s.get('sign_url_template') if deputy else None,
                      'cron_key': s.get('cron_key') if deputy else None},
         })
+
+    if action in ('scopes_save', 'tokens_save'):
+        if not deputy:
+            return _err('Только заместитель директора', 403)
+        if action == 'scopes_save':
+            clean = lambda v: ' '.join(str(v or '').replace(',', ' ').split())[:2000]
+            s['scope_v1'], s['scope_v2'] = clean(body.get('scope_v1')), clean(body.get('scope_v2'))
+            tpl = str(body.get('sign_url_template') or '').strip()[:500]
+            if tpl and (not tpl.startswith('https://') or '{externalId}' not in tpl or not re.match(r'^https://[a-z0-9.-]*sberbank\.ru', tpl)):
+                return _err('Ссылка подписания должна вести на сайт Сбербанка и содержать {externalId}')
+            s['sign_url_template'] = tpl
+            if s['scope_v2']:
+                s['scope'] = s['scope_v2']
+            _save_settings(cur, s, user['name'])
+            _log(cur, user, 'Scope', f"v1: {s['scope_v1'][:200]}; v2: {s['scope_v2'][:200]}")
+            return _resp(200, {'ok': True})
+        access, refresh_t = str(body.get('access_token') or '').strip(), str(body.get('refresh_token') or '').strip()
+        if not refresh_t and not access:
+            return _err('Вставьте Access Token и Refresh Token')
+        if not sber.configured()['certificate']:
+            return _err('Сначала загрузите сертификат организации')
+        if refresh_t:
+            _vault_set(cur, 'refresh_token', refresh_t)
+        if access:
+            _vault_set(cur, 'access_token', access)
+            _vault_set(cur, 'access_exp', str(sber.now() + 3000))
+        else:
+            _vault_set(cur, 'access_exp', '0')
+        try:
+            org = _org(cur, _token(cur), s)
+        except sber.SberError as e:
+            return _err(f'Ключи сохранены, но банк их не принял: {e}')
+        s.update({'connected': True, 'org': org, 'connected_at': datetime.now().isoformat(timespec='seconds'), 'connected_by': user['id']})
+        rub = [a for a in org['accounts'] if (a.get('currency') or '643') in ('643', 'RUB', 'RUR')]
+        if not s.get('account') and rub:
+            s['account'] = rub[0]['number']
+        if not s.get('cron_key'):
+            s['cron_key'] = sber.new_state()[0]
+        s.pop('last_sync_error', None)
+        _save_settings(cur, s, user['name'])
+        _log(cur, user, 'Подключён по токенам', org.get('name') or '')
+        return _resp(200, {'ok': True, 'org': org})
+
+    if action == 'sign_links':
+        if 'sber.pay' not in can:
+            return _err('Нет права', 403)
+        rows = _requests(cur, "WHERE r.id = ANY(%s) AND r.status IN ('paying', 'signing')", ([int(x) for x in body.get('ids') or []][:50],))
+        return _resp(200, {'links': [{'id': r['id'], 'url': _sign_url(s, r['external_id'])} for r in rows if r['external_id']]})
 
     if action in ('cert_upload', 'cert_delete'):
         if not deputy:
@@ -445,12 +501,13 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         if not deputy:
             return _err('Только заместитель директора', 403)
         if action == 'connect':
-            if not all(sber.configured().values()):
-                return _err('Сначала добавьте ключи СберБизнес в секреты проекта')
+            cfg = sber.configured()
+            if not all(cfg.values()):
+                return _err('Сначала добавьте ключи СберБизнес и загрузите сертификат (Админ-панель → СберБизнес)')
             state, nonce = sber.new_state()
             cur.execute(f'INSERT INTO {SCHEMA}.sber_oauth (state, nonce, user_id, origin) VALUES (%s, %s, %s, %s)',
                         (state, nonce, user['id'], str(body.get('origin') or '')[:200]))
-            return _resp(200, {'url': sber.authorize_url(state, nonce, s['scope'])})
+            return _resp(200, {'url': sber.authorize_url(state, nonce, s.get('scope_v2') or s['scope'])})
         if action == 'disconnect':
             cur.execute(f"DELETE FROM {SCHEMA}.sber_vault WHERE key IN ('access_token', 'access_exp', 'refresh_token')")
             s['connected'] = False
@@ -648,7 +705,7 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
             data = resp.json() if resp.content else {}
             cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'signing', bank_status = %s, bank_checked_at = now() WHERE id = %s",
                         (str(data.get('bankStatus') or 'CREATED'), r['id']))
-            results.append({'id': r['id'], 'ok': True})
+            results.append({'id': r['id'], 'ok': True, 'sign_url': _sign_url(s, ext)})
             _log(cur, user, 'Оплата', f"{r['counterparty']} {r['amount']:.2f} ₽, счёт {r['requisites'].get('account')}")
         else:
             try:

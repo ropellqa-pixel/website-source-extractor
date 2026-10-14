@@ -44,7 +44,6 @@ def configured() -> Dict[str, bool]:
     return {
         'client_id': bool(_env('SBER_CLIENT_ID')),
         'client_secret': bool(_env('SBER_CLIENT_SECRET')),
-        'redirect_uri': bool(_env('SBER_REDIRECT_URI')),
         'certificate': bool(_cert_p12),
     }
 
@@ -142,7 +141,14 @@ def _request(method: str, url: str, **kw) -> requests.Response:
         raise SberError('Банк не отвечает, попробуйте позже')
 
 
+def sign_url(external_id: str) -> str:
+    host = 'https://efs-sbbol-ift-web.testsbi.sberbank.ru:9443' if is_test() else 'https://sbi.sberbank.ru:9443'
+    return f'{host}/ic/ufs/rpp-light/index.html#/payment-creator/{external_id}'
+
+
 def authorize_url(state: str, nonce: str, scope: str) -> str:
+    if not _env('SBER_REDIRECT_URI'):
+        raise SberError('Для входа через СберБизнес нужен секрет SBER_REDIRECT_URI — или вставьте Access/Refresh Token в админ-панели')
     q = {'response_type': 'code', 'client_id': _env('SBER_CLIENT_ID'), 'redirect_uri': _env('SBER_REDIRECT_URI'),
          'scope': scope, 'state': state, 'nonce': nonce}
     host = 'https://efs-sbbol-ift-web.testsbi.sberbank.ru:9443' if is_test() else 'https://sbi.sberbank.ru:9443'

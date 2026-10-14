@@ -199,6 +199,13 @@ export default function Sber() {
                           {can('sber.pay') && r.status === 'sent' && (
                             <Button size="sm" variant="ghost" className="h-8" onClick={() => { setRejecting(r); setReason(''); }}>Отклонить</Button>
                           )}
+                          {can('sber.pay') && r.status === 'signing' && (
+                            <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={async () => {
+                              const x = await sberCall<{ links: { id: number; url: string }[] }>({ action: 'sign_links', ids: [r.id] });
+                              if (x.error || !x.links?.[0]) { alert(x.error || 'Ссылка недоступна'); return; }
+                              window.open(x.links[0].url, 'sber_sign', 'width=520,height=760');
+                            }}>Подписать по СМС</Button>
+                          )}
                           {can('sber.request') && ['draft', 'rejected'].includes(r.status) && (r.created_by_user === user?.id || data.is_deputy) && (
                             <button title="Изменить" onClick={() => { setReq({ id: r.id, counterparty_id: String(r.counterparty_id), amount: String(r.amount), purpose: r.purpose, vat_rate: r.vat_rate }); setReqError(null); }}
                               className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="Pencil" size={15} /></button>

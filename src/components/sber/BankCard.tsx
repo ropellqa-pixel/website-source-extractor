@@ -6,8 +6,8 @@ import { rub } from '@/lib/accountingApi';
 import { sberCall, sberUrl, type SberBank } from '@/lib/sberApi';
 
 const KEYS: [string, string][] = [
-  ['client_id', 'SBER_CLIENT_ID'], ['client_secret', 'SBER_CLIENT_SECRET'], ['certificate', 'SBER_CERT_P12_BASE64'],
-  ['certificate_password', 'SBER_CERT_PASSWORD'], ['redirect_uri', 'SBER_REDIRECT_URI'],
+  ['client_id', 'Client ID (секрет SBER_CLIENT_ID)'], ['client_secret', 'Client Secret (секрет SBER_CLIENT_SECRET)'],
+  ['certificate', 'Сертификат .p12 (Админ-панель → СберБизнес)'],
 ];
 
 interface Props { bank: SberBank; isDeputy: boolean; canSync: boolean; onChanged: () => void }
@@ -44,7 +44,7 @@ export default function BankCard({ bank, isDeputy, canSync, onChanged }: Props) 
                   {KEYS.map(([k, n]) => (
                     <div key={k} className="flex items-center gap-2 text-sm">
                       <Icon name={bank.configured[k] ? 'CircleCheck' : 'CircleDashed'} size={16} className={bank.configured[k] ? 'text-emerald-600' : 'text-muted-foreground'} />
-                      <code className="text-xs">{n}</code>
+                      <span className="text-xs">{n}</span>
                     </div>
                   ))}
                 </div>
@@ -56,7 +56,7 @@ export default function BankCard({ bank, isDeputy, canSync, onChanged }: Props) 
                 <Button onClick={() => run('connect', { origin: window.location.origin })} disabled={!bank.ready || !!busy} className="bg-emerald-600 hover:bg-emerald-700">
                   <Icon name="Link" size={16} />{busy ? 'Открываю СберБизнес…' : 'Подключить СберБизнес'}
                 </Button>
-                {!bank.ready && <p className="text-xs text-muted-foreground">Кнопка станет активной, когда все ключи будут добавлены в секреты проекта.</p>}
+                <p className="text-xs text-muted-foreground">Или вставьте Access/Refresh Token в Админ-панели → СберБизнес — банк подключится без этой кнопки.</p>
               </>
             ) : <p className="text-sm text-amber-700">Подключение выполняет заместитель директора.</p>}
             {msg && <p className={`text-sm ${msg.ok ? 'text-emerald-600' : 'text-red-600'}`}>{msg.text}</p>}

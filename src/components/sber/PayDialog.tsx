@@ -10,12 +10,12 @@ export default function PayDialog({ items, onClose, onDone }: { items: SberReque
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<{ id: number; ok: boolean; error?: string }[] | null>(null);
+  const [results, setResults] = useState<{ id: number; ok: boolean; error?: string; sign_url?: string }[] | null>(null);
   const total = items.reduce((s, r) => s + r.amount, 0);
 
   const pay = async () => {
     setBusy(true); setError(null);
-    const r = await sberCall<{ results: { id: number; ok: boolean; error?: string }[] }>({ action: 'pay', ids: items.map((x) => x.id), password });
+    const r = await sberCall<{ results: { id: number; ok: boolean; error?: string; sign_url?: string }[] }>({ action: 'pay', ids: items.map((x) => x.id), password });
     setBusy(false); setPassword('');
     if (r.error) { setError(r.error); return; }
     setResults(r.results);
@@ -33,12 +33,17 @@ export default function PayDialog({ items, onClose, onDone }: { items: SberReque
               return (
                 <div key={x.id} className="flex items-start gap-2 text-sm">
                   <Icon name={x.ok ? 'CircleCheck' : 'CircleX'} size={18} className={x.ok ? 'text-emerald-600' : 'text-red-600'} />
-                  <div><b>{r?.counterparty}</b> — {rub(r?.amount || 0)}<div className="text-muted-foreground">{x.ok ? 'Платёжка создана в СберБизнес' : x.error}</div></div>
+                  <div className="flex-1"><b>{r?.counterparty}</b> — {rub(r?.amount || 0)}<div className="text-muted-foreground">{x.ok ? 'Платёжка создана, осталось подписать кодом из СМС' : x.error}</div></div>
+                  {x.ok && x.sign_url && (
+                    <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => window.open(x.sign_url, 'sber_sign', 'width=520,height=760')}>
+                      <Icon name="MessageSquareCode" fallback="Smartphone" size={15} />Подписать по СМС
+                    </Button>
+                  )}
                 </div>
               );
             })}
             <div className="rounded-xl bg-secondary p-3 text-sm">
-              Платёжки созданы. Подпишите их в СберБизнес (приложение или сайт) — после подписи банк исполнит оплату, а статус здесь обновится сам.
+              Нажмите «Подписать по СМС» — откроется окно Сбера, введите код из СМС. После подписи банк исполнит оплату, статус здесь обновится сам.
             </div>
             <Button className="w-full" onClick={onClose}>Готово</Button>
           </div>
@@ -65,7 +70,7 @@ export default function PayDialog({ items, onClose, onDone }: { items: SberReque
             <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={pay} disabled={busy || !password}>
               <Icon name="ShieldCheck" size={16} />{busy ? 'Отправляю в банк…' : `Оплатить ${rub(total)}`}
             </Button>
-            <p className="text-center text-xs text-muted-foreground">Деньги спишутся только после подписи платёжки в СберБизнес</p>
+            <p className="text-center text-xs text-muted-foreground">Следующий шаг — подтверждение кодом из СМС от Сбера</p>
           </div>
         )}
       </DialogContent>

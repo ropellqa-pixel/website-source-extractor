@@ -10,7 +10,11 @@ type Cert = { subject: string; org: string; serial: string; valid_from: string; 
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 
 export default function SberTab() {
-  const [bank, setBank] = useState<(SberOverview['bank'] & { cert?: Cert | null }) | null>(null);
+  const [bank, setBank] = useState<(SberOverview['bank'] & { cert?: Cert | null; scope_v1?: string | null; scope_v2?: string | null; has_tokens?: boolean | null; sign_url_template?: string | null }) | null>(null);
+  const [scopes, setScopes] = useState({ scope_v1: '', scope_v2: '', sign_url_template: '' });
+  const [tokens, setTokens] = useState({ access_token: '', refresh_token: '' });
+  const [msg2, setMsg2] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy2, setBusy2] = useState<string | null>(null);
   const [file, setFile] = useState<{ name: string; data: string } | null>(null);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -19,7 +23,10 @@ export default function SberTab() {
 
   const load = useCallback(async () => {
     const r = await sberCall<SberOverview>({ action: 'overview' });
-    if (r.error) setMsg({ ok: false, text: r.error }); else setBank(r.bank);
+    if (r.error) { setMsg({ ok: false, text: r.error }); return; }
+    const b = r.bank as typeof bank;
+    setBank(b);
+    setScopes({ scope_v1: b?.scope_v1 || '', scope_v2: b?.scope_v2 || '', sign_url_template: b?.sign_url_template || '' });
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -40,9 +47,19 @@ export default function SberTab() {
     load();
   };
 
+  const save2 = async (action: string, payload: Record<string, unknown>) => {
+    setBusy2(action); setMsg2(null);
+    const r = await sberCall<{ org?: { name: string } }>({ action, ...payload });
+    setBusy2(null);
+    if (r.error) { setMsg2({ ok: false, text: r.error }); return; }
+    if (action === 'tokens_save') { setTokens({ access_token: '', refresh_token: '' }); setMsg2({ ok: true, text: `Банк подключён: ${r.org?.name || ''}` }); }
+    else setMsg2({ ok: true, text: 'Сохранено' });
+    load();
+  };
+
   const cert = bank?.cert;
   const daysLeft = cert ? Math.ceil((new Date(cert.valid_to).getTime() - Date.now()) / 86400000) : null;
-  const keys: [string, string][] = [['client_id', 'SBER_CLIENT_ID'], ['client_secret', 'SBER_CLIENT_SECRET'], ['redirect_uri', 'SBER_REDIRECT_URI']];
+  const keys: [string, string][] = [['client_id', 'SBER_CLIENT_ID'], ['client_secret', 'SBER_CLIENT_SECRET']];
 
   return (
     <div className="grid max-w-4xl gap-4 lg:grid-cols-2">
@@ -116,6 +133,39 @@ export default function SberTab() {
           </>
         )}
       </div>
+
+      <div className="space-y-3 rounded-2xl border bg-card p-5">
+        <div className="flex items-center gap-2"><Icon name="ListChecks" size={18} className="text-emerald-600" /><h3 className="font-medium">Scope (права доступа)</h3></div>
+        <p className="text-xs text-muted-foreground">Скопируйте из кабинета Сбер API. Можно через пробел или запятую.</p>
+        <label className="block space-y-1 text-sm">
+          <span className="text-muted-foreground">Scope для авторизации v1</span>
+          <textarea value={scopes.scope_v1} onChange={(e) => setScopes({ ...scopes, scope_v1: e.target.value })} rows={3} className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" />
+        </label>
+        <label className="block space-y-1 text-sm">
+          <span className="text-muted-foreground">Scope для авторизации v2 (используется для входа)</span>
+          <textarea value={scopes.scope_v2} onChange={(e) => setScopes({ ...scopes, scope_v2: e.target.value })} rows={3} className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" />
+        </label>
+        <label className="block space-y-1 text-sm">
+          <span className="text-muted-foreground">Ссылка подписания платёжки (если Сбер дал свою, с {'{externalId}'})</span>
+          <Input value={scopes.sign_url_template} placeholder="необязательно" onChange={(e) => setScopes({ ...scopes, sign_url_template: e.target.value })} className="font-mono text-xs" />
+        </label>
+        <Button size="sm" onClick={() => save2('scopes_save', scopes)} disabled={!!busy2}>Сохранить</Button>
+      </div>
+
+      <div className="space-y-3 rounded-2xl border bg-card p-5">
+        <div className="flex items-center gap-2"><Icon name="KeyRound" size={18} className="text-emerald-600" /><h3 className="font-medium">Ключи доступа (токены)</h3></div>
+        <p className="text-xs text-muted-foreground">
+          Если в кабинете Сбер API выданы Access Token и Refresh Token — вставьте их, банк подключится без входа через СберБизнес.
+          Дальше токены обновляются сами. {bank?.has_tokens && <b className="text-emerald-700">Токены уже сохранены.</b>}
+        </p>
+        <Input type="password" autoComplete="off" placeholder="Access Token" value={tokens.access_token} onChange={(e) => setTokens({ ...tokens, access_token: e.target.value })} />
+        <Input type="password" autoComplete="off" placeholder="Refresh Token" value={tokens.refresh_token} onChange={(e) => setTokens({ ...tokens, refresh_token: e.target.value })} />
+        <Button size="sm" onClick={() => save2('tokens_save', tokens)} disabled={!!busy2 || (!tokens.access_token && !tokens.refresh_token)}>
+          {busy2 === 'tokens_save' ? 'Проверяю в банке…' : 'Сохранить и подключить'}
+        </Button>
+        <p className="text-xs text-muted-foreground">Хранятся зашифрованно, обратно не показываются.</p>
+      </div>
+      {msg2 && <p className={`text-sm lg:col-span-2 ${msg2.ok ? 'text-emerald-600' : 'text-red-600'}`}>{msg2.text}</p>}
     </div>
   );
 }
