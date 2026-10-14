@@ -8,15 +8,15 @@ import secrets
 import tempfile
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple
-from urllib.parse import urlencode
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote, urlencode
 
 import requests
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, pkcs12
 
 PROD_API = 'https://fintech.sberbank.ru:9443'
-PROD_AUTH = 'https://sbi.sberbank.ru:9443'
+PROD_AUTH = 'https://fintech.sberbank.ru:9443'
 TEST_API = 'https://iftfintech.testsbi.sberbank.ru:9443'
 TEST_AUTH = 'https://iftfintech.testsbi.sberbank.ru:9443'
 
@@ -103,6 +103,48 @@ def decrypt(token: str) -> Optional[str]:
 _cert_files: Optional[Tuple[str, str]] = None
 
 
+def diagnose() -> List[Dict[str, Any]]:
+    """Пошаговая проверка: сертификат → TLS к банку → ответ банка на наш сертификат."""
+    import socket
+    import ssl
+    steps: List[Dict[str, Any]] = []
+    try:
+        cp, kp = cert_files()
+        info = inspect_cert(_cert_p12 or b'', _cert_pass)
+        steps.append({'step': 'Сертификат организации', 'ok': True, 'text': f"{info['subject']}, до {info['valid_to']}"})
+    except SberError as e:
+        return [{'step': 'Сертификат организации', 'ok': False, 'text': str(e)}]
+    host = api_base().split('//')[1].split(':')[0]
+    try:
+        ctx = ssl.create_default_context(cafile=_verify() if isinstance(_verify(), str) else None)
+        ctx.load_cert_chain(cp, kp)
+        with socket.create_connection((host, 9443), timeout=10) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as t:
+                issuer = dict(x[0] for x in t.getpeercert()['issuer']).get('commonName')
+        steps.append({'step': 'Соединение с банком', 'ok': True, 'text': f'{host}, сервер подтверждён ({issuer})'})
+    except Exception as e:
+        steps.append({'step': 'Соединение с банком', 'ok': False, 'text': str(e)[:200]})
+        return steps
+    try:
+        r = requests.post(f'{auth_base()}/ic/sso/api/v2/oauth/token', cert=(cp, kp), verify=_verify(), timeout=15,
+                          data={'grant_type': 'refresh_token', 'refresh_token': 'check', 'client_id': _env('SBER_CLIENT_ID'),
+                                'client_secret': _env('SBER_CLIENT_SECRET')})
+        body = r.text[:300]
+        if 'No required SSL certificate' in body or 'SSL certificate' in body:
+            steps.append({'step': 'Банк принял сертификат', 'ok': False, 'text': 'Банк не принял сертификат организации'})
+        else:
+            low = body.lower()
+            bad_client = 'invalid_client' in low
+            steps.append({'step': 'Банк принял сертификат', 'ok': True, 'text': f'ответ банка {r.status_code}'})
+            steps.append({'step': 'Client ID и Client Secret', 'ok': not bad_client,
+                          'text': 'банк их не узнал — проверьте секреты' if bad_client else 'банк их принял'})
+    except requests.exceptions.SSLError as e:
+        steps.append({'step': 'Банк принял сертификат', 'ok': False, 'text': str(e)[:200]})
+    except requests.exceptions.RequestException as e:
+        steps.append({'step': 'Банк принял сертификат', 'ok': False, 'text': f'нет ответа: {str(e)[:120]}'})
+    return steps
+
+
 def cert_files() -> Tuple[str, str]:
     """Сертификат организации (.p12/.pfx из СберБизнес) → временные PEM-файлы для mTLS."""
     global _cert_files
@@ -135,15 +177,22 @@ def _verify() -> Any:
 def _request(method: str, url: str, **kw) -> requests.Response:
     try:
         return requests.request(method, url, cert=cert_files(), verify=_verify(), timeout=kw.pop('timeout', 20), **kw)
-    except requests.exceptions.SSLError:
-        raise SberError('Банк не принял защищённое соединение: проверьте сертификат организации')
+    except requests.exceptions.SSLError as e:
+        t = str(e).lower()
+        if 'certificate verify failed' in t:
+            raise SberError('Не удалось проверить сертификат сервера банка (цепочка доверенных сертификатов)')
+        if 'unknown ca' in t or 'bad certificate' in t or 'certificate required' in t or 'alert' in t:
+            raise SberError('Банк отклонил сертификат организации: загрузите сертификат, выпущенный для Sber API (.p12 из СберБизнес → Сертификаты)')
+        raise SberError(f'Ошибка защищённого соединения с банком: {str(e)[:160]}')
     except requests.exceptions.RequestException:
         raise SberError('Банк не отвечает, попробуйте позже')
 
 
-def sign_url(external_id: str) -> str:
-    host = 'https://efs-sbbol-ift-web.testsbi.sberbank.ru:9443' if is_test() else 'https://sbi.sberbank.ru:9443'
-    return f'{host}/ic/ufs/rpp-light/index.html#/payment-creator/{external_id}'
+def sign_url(external_id: str, back_url: str = '') -> str:
+    """Страница подписания черновика платёжки СМС-пользователем (документация Sber API)."""
+    host = 'https://sbi-test.sberbank.ru' if is_test() else 'https://sbi.sberbank.ru:9443'
+    url = f'{host}/ic/ufs/rpp-light/index.html#/payment-creator/{external_id}'
+    return url + (f'?backUrl={quote(back_url, safe="")}' if back_url else '')
 
 
 def authorize_url(state: str, nonce: str, scope: str) -> str:
@@ -160,7 +209,16 @@ def _token_call(data: Dict[str, str]) -> Dict[str, Any]:
     r = _request('POST', f'{auth_base()}/ic/sso/api/v2/oauth/token', data=data,
                  headers={'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'})
     if r.status_code != 200:
-        raise SberError(f'Банк отказал в доступе ({r.status_code}). Подключите СберБизнес заново.')
+        if 'SSL certificate' in r.text:
+            raise SberError('Банк не принял сертификат организации — загрузите сертификат, выпущенный для Sber API')
+        try:
+            j = r.json()
+            detail = j.get('error_description') or j.get('error') or j.get('message') or ''
+        except ValueError:
+            detail = r.text[:120]
+        hint = {'invalid_client': 'неверный Client ID или Client Secret', 'invalid_grant': 'ключ устарел или уже использован — получите новый',
+                'unauthorized_client': 'приложению не разрешён этот вход'}.get(str(detail).split()[0] if detail else '', '')
+        raise SberError(f'Банк отказал ({r.status_code}): {hint or detail}'.strip())
     return r.json()
 
 
@@ -174,7 +232,12 @@ def refresh(refresh_token: str) -> Dict[str, Any]:
 
 def api(method: str, path: str, token: str, **kw) -> requests.Response:
     headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/json', **kw.pop('headers', {})}
-    return _request(method, f'{api_base()}/fintech/api{path}', headers=headers, **kw)
+    r = _request(method, f'{api_base()}/fintech/api{path}', headers=headers, **kw)
+    if r.status_code == 400 and 'SSL certificate' in r.text:
+        raise SberError('Банк не принял сертификат организации — загрузите сертификат, выпущенный для Sber API')
+    if r.status_code == 401:
+        raise SberError('Банк не принял ключ доступа (Access Token) — обновите ключи подключения')
+    return r
 
 
 def new_external_id() -> str:

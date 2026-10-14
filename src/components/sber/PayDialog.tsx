@@ -17,7 +17,7 @@ export default function PayDialog({ items, connections, onClose, onDone }: { ite
 
   const pay = async () => {
     setBusy(true); setError(null);
-    const r = await sberCall<{ results: { id: number; ok: boolean; error?: string; sign_url?: string }[] }>({ action: 'pay', ids: items.map((x) => x.id), password, connection_id: connId });
+    const r = await sberCall<{ results: { id: number; ok: boolean; error?: string; sign_url?: string }[] }>({ action: 'pay', ids: items.map((x) => x.id), password, connection_id: connId, origin: window.location.origin });
     setBusy(false); setPassword('');
     if (r.error) { setError(r.error); return; }
     setResults(r.results);
@@ -37,7 +37,7 @@ export default function PayDialog({ items, connections, onClose, onDone }: { ite
                   <Icon name={x.ok ? 'CircleCheck' : 'CircleX'} size={18} className={x.ok ? 'text-emerald-600' : 'text-red-600'} />
                   <div className="flex-1"><b>{r?.counterparty}</b> — {rub(r?.amount || 0)}<div className="text-muted-foreground">{x.ok ? 'Платёжка создана, осталось подписать кодом из СМС' : x.error}</div></div>
                   {x.ok && x.sign_url && (
-                    <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => window.open(x.sign_url, 'sber_sign', 'width=520,height=760')}>
+                    <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => { window.location.href = x.sign_url!; }}>
                       <Icon name="MessageSquareCode" fallback="Smartphone" size={15} />Подписать по СМС
                     </Button>
                   )}
@@ -45,7 +45,7 @@ export default function PayDialog({ items, connections, onClose, onDone }: { ite
               );
             })}
             <div className="rounded-xl bg-secondary p-3 text-sm">
-              Нажмите «Подписать по СМС» — откроется окно Сбера, введите код из СМС. После подписи банк исполнит оплату, статус здесь обновится сам.
+              Нажмите «Подписать по СМС» — откроется страница Сбера, войдите и введите код из СМС. После подписи вы автоматически вернётесь сюда, статус обновится сам.
             </div>
             <Button className="w-full" onClick={onClose}>Готово</Button>
           </div>

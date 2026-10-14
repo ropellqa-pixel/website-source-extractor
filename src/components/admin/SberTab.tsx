@@ -15,6 +15,15 @@ export default function SberTab() {
   const [tokens, setTokens] = useState<{ access_token: string; refresh_token: string; title: string; connection_id: number | null } | null>(null);
   const [conns, setConns] = useState<SberConnection[]>([]);
   const [notify, setNotify] = useState<SberOverview['notify']>(null);
+  const [diag, setDiag] = useState<{ steps: { step: string; ok: boolean; text: string }[]; redirect_uri: string } | null>(null);
+  const [diagBusy, setDiagBusy] = useState(false);
+  const runDiag = async () => {
+    setDiagBusy(true); setDiag(null);
+    const r = await sberCall<{ steps: { step: string; ok: boolean; text: string }[]; redirect_uri: string }>({ action: 'diagnose' });
+    setDiagBusy(false);
+    if (r.error) { setMsg2({ ok: false, text: r.error }); return; }
+    setDiag(r);
+  };
   const [msg2, setMsg2] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy2, setBusy2] = useState<string | null>(null);
   const [file, setFile] = useState<{ name: string; data: string } | null>(null);
@@ -124,9 +133,29 @@ export default function SberTab() {
                 Сертификат <span className="text-xs text-muted-foreground">— загружается здесь</span>
               </div>
             </div>
-            <div className="rounded-xl bg-secondary p-3 text-xs text-muted-foreground">
-              Адрес возврата для заявки в Сбер: <code className="select-all break-all text-foreground">{sberUrl}</code>
+            <div className="space-y-2 rounded-xl bg-secondary p-3 text-xs text-muted-foreground">
+              <div>В кабинете Sber API в поле <b className="text-foreground">Redirect URI</b> и в секрет SBER_REDIRECT_URI вставьте:</div>
+              <code className="block select-all break-all rounded bg-background px-2 py-1 text-foreground">{sberUrl}</code>
+              <div>В поле <b className="text-foreground">Back URL</b> (возврат после подписи платёжки):</div>
+              <code className="block select-all break-all rounded bg-background px-2 py-1 text-foreground">{window.location.origin}/sber</code>
+              <div>Цепочка доверенных сертификатов Сбера уже встроена в систему — загружать её не нужно.</div>
             </div>
+            <Button variant="outline" onClick={runDiag} disabled={diagBusy}>
+              <Icon name={diagBusy ? 'Loader2' : 'Stethoscope'} fallback="Activity" size={15} className={diagBusy ? 'animate-spin' : ''} />Проверить подключение к банку
+            </Button>
+            {diag && (
+              <div className="space-y-1.5 rounded-xl border p-3">
+                {diag.steps.map((x) => (
+                  <div key={x.step} className="flex items-start gap-2 text-sm">
+                    <Icon name={x.ok ? 'CircleCheck' : 'CircleX'} size={16} className={`mt-0.5 shrink-0 ${x.ok ? 'text-emerald-600' : 'text-red-600'}`} />
+                    <div><b>{x.step}</b> — <span className="text-muted-foreground">{x.text}</span></div>
+                  </div>
+                ))}
+                {diag.redirect_uri && diag.redirect_uri !== sberUrl && (
+                  <div className="flex items-start gap-2 text-sm text-red-600"><Icon name="CircleX" size={16} className="mt-0.5" />SBER_REDIRECT_URI отличается от нужного адреса — исправьте секрет</div>
+                )}
+              </div>
+            )}
             <div className={`flex items-center gap-2 text-sm ${bank.connected ? 'text-emerald-700' : 'text-muted-foreground'}`}>
               <Icon name={bank.connected ? 'ShieldCheck' : 'ShieldOff'} size={16} />
               {bank.connected ? `Подключено: ${bank.org?.name || ''}` : 'Банк ещё не подключён'}
@@ -148,8 +177,9 @@ export default function SberTab() {
           <textarea value={scopes.scope_v2} onChange={(e) => setScopes({ ...scopes, scope_v2: e.target.value })} rows={3} className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" />
         </label>
         <label className="block space-y-1 text-sm">
-          <span className="text-muted-foreground">Ссылка подписания платёжки (если Сбер дал свою, с {'{externalId}'})</span>
-          <Input value={scopes.sign_url_template} placeholder="необязательно" onChange={(e) => setScopes({ ...scopes, sign_url_template: e.target.value })} className="font-mono text-xs" />
+          <span className="text-muted-foreground">Ссылка подписания платёжки — оставьте пустой</span>
+          <Input value={scopes.sign_url_template} placeholder="по умолчанию: ссылка из документации Сбера" onChange={(e) => setScopes({ ...scopes, sign_url_template: e.target.value })} className="font-mono text-xs" />
+          <span className="block text-xs text-muted-foreground">Система сама формирует ссылку на каждую платёжку и возвращает директора обратно после подписи по СМС.</span>
         </label>
         <Button size="sm" onClick={() => save2('scopes_save', scopes)} disabled={!!busy2}>Сохранить</Button>
       </div>

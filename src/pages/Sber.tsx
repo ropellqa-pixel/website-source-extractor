@@ -40,9 +40,16 @@ export default function Sber() {
 
   useEffect(() => {
     const c = params.get('connect');
+    if (params.get('signed')) {
+      setNotice('Вы вернулись из СберБизнес. Если платёжка подписана — банк исполнит её, статус обновится в течение пары минут.');
+      params.delete('signed'); setParams(params, { replace: true });
+      return;
+    }
     if (!c) return;
-    setNotice(c === 'ok' ? 'СберБизнес подключён. Выписка начнёт загружаться автоматически.' : c === 'expired' ? 'Ссылка подключения устарела — нажмите «Подключить» ещё раз.' : 'Банк не подтвердил подключение. Проверьте ключи и сертификат.');
-    params.delete('connect'); setParams(params, { replace: true });
+    const reason = params.get('reason');
+    setNotice(c === 'ok' ? 'СберБизнес подключён. Выписка начнёт загружаться автоматически.' : c === 'expired' ? 'Ссылка подключения устарела — нажмите «Подключить» ещё раз.'
+      : `Банк не подтвердил подключение${reason ? `: ${reason}` : ''}. Замдиректора: Админ-панель → СберБизнес → «Проверить подключение к банку».`);
+    params.delete('connect'); params.delete('reason'); setParams(params, { replace: true });
   }, [params, setParams]);
 
   const can = (a: string) => !!data && data.can.includes(a);
@@ -201,9 +208,9 @@ export default function Sber() {
                           )}
                           {can('sber.pay') && r.status === 'signing' && (
                             <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={async () => {
-                              const x = await sberCall<{ links: { id: number; url: string }[] }>({ action: 'sign_links', ids: [r.id] });
+                              const x = await sberCall<{ links: { id: number; url: string }[] }>({ action: 'sign_links', ids: [r.id], origin: window.location.origin });
                               if (x.error || !x.links?.[0]) { alert(x.error || 'Ссылка недоступна'); return; }
-                              window.open(x.links[0].url, 'sber_sign', 'width=520,height=760');
+                              window.location.href = x.links[0].url;
                             }}>Подписать по СМС</Button>
                           )}
                           {can('sber.request') && ['draft', 'rejected'].includes(r.status) && (r.created_by_user === user?.id || data.is_deputy) && (

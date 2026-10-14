@@ -81,9 +81,17 @@ def _vault_set(cur, key: str, value: str) -> None:
                 f'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()', (key, sber.encrypt(value)))
 
 
-def _sign_url(s: Dict[str, Any], ext: str) -> str:
+def _sign_url(s: Dict[str, Any], ext: str, back: str = '') -> str:
     tpl = str(s.get('sign_url_template') or '')
-    return tpl.replace('{externalId}', ext) if '{externalId}' in tpl else sber.sign_url(ext)
+    if '{externalId}' in tpl:
+        from urllib.parse import quote
+        return tpl.replace('{externalId}', ext).replace('{backUrl}', quote(back, safe=''))
+    return sber.sign_url(ext, back)
+
+
+def _back(body: Dict[str, Any]) -> str:
+    o = str(body.get('origin') or '')
+    return (o + '/sber?signed=1') if re.match(r'^https://[a-z0-9.-]+(:\d+)?$', o) else ''
 
 
 def _load_cert(cur) -> None:
@@ -419,7 +427,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     cur = conn.cursor()
     try:
         _load_cert(cur)
-        if method == 'GET' and qs.get('code') and qs.get('state'):
+        if method == 'GET' and qs.get('state') and (qs.get('code') or qs.get('error')):
             return _oauth_callback(cur, qs)
         if method == 'GET' and qs.get('cron') is not None:
             return _cron(cur, qs.get('cron') or '')
@@ -478,6 +486,9 @@ def _oauth_callback(cur, qs: Dict[str, str]) -> Dict[str, Any]:
     back = (r[1] if r and r[1] else '') + '/sber'
     if not r:
         return {'statusCode': 302, 'headers': {'Location': back + '?connect=expired'}, 'body': ''}
+    if qs.get('error'):
+        from urllib.parse import quote
+        return {'statusCode': 302, 'headers': {'Location': back + '?connect=error&reason=' + quote(str(qs.get('error_description') or qs['error'])[:300])}, 'body': ''}
     try:
         t = sber.exchange_code(qs['code'])
         s = _settings(cur)
@@ -490,8 +501,10 @@ def _oauth_callback(cur, qs: Dict[str, str]) -> Dict[str, Any]:
         cur.execute(f"INSERT INTO {SCHEMA}.acc_log (user_name, action, details) VALUES ('Система', 'СБЕР: подключён', %s)",
                     (org.get('name') or '',))
         return {'statusCode': 302, 'headers': {'Location': back + '?connect=ok'}, 'body': ''}
-    except sber.SberError:
-        return {'statusCode': 302, 'headers': {'Location': back + '?connect=error'}, 'body': ''}
+    except sber.SberError as e:
+        from urllib.parse import quote
+        cur.execute(f"INSERT INTO {SCHEMA}.acc_log (user_name, action, details) VALUES ('Система', 'СБЕР: ошибка подключения', %s)", (str(e)[:400],))
+        return {'statusCode': 302, 'headers': {'Location': back + '?connect=error&reason=' + quote(str(e)[:300])}, 'body': ''}
 
 
 def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -586,6 +599,11 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         _log(cur, user, 'Подключение по токенам', f"#{cid} {org.get('name') or ''}")
         return _resp(200, {'ok': True, 'org': org, 'connection_id': cid})
 
+    if action == 'diagnose':
+        if not deputy:
+            return _err('Только заместитель директора', 403)
+        return _resp(200, {'steps': sber.diagnose(), 'redirect_uri': os.environ.get('SBER_REDIRECT_URI') or ''})
+
     if action == 'notify_save':
         if not deputy:
             return _err('Только заместитель директора', 403)
@@ -631,7 +649,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         if 'sber.pay' not in can:
             return _err('Нет права', 403)
         rows = _requests(cur, "WHERE r.id = ANY(%s) AND r.status IN ('paying', 'signing')", ([int(x) for x in body.get('ids') or []][:50],))
-        return _resp(200, {'links': [{'id': r['id'], 'url': _sign_url(s, r['external_id'])} for r in rows if r['external_id']]})
+        return _resp(200, {'links': [{'id': r['id'], 'url': _sign_url(s, r['external_id'], _back(body))} for r in rows if r['external_id']]})
 
     if action in ('cert_upload', 'cert_delete'):
         if not deputy:
@@ -893,7 +911,7 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
             data = resp.json() if resp.content else {}
             cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'signing', bank_status = %s, bank_checked_at = now() WHERE id = %s",
                         (str(data.get('bankStatus') or 'CREATED'), r['id']))
-            results.append({'id': r['id'], 'ok': True, 'sign_url': _sign_url(s, ext)})
+            results.append({'id': r['id'], 'ok': True, 'sign_url': _sign_url(s, ext, _back(body))})
             _log(cur, user, 'Оплата', f"{r['counterparty']} {r['amount']:.2f} ₽, счёт {r['requisites'].get('account')}, с {conn['account']}")
         else:
             try:
