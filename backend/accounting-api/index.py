@@ -16,7 +16,7 @@ CORS = {
 }
 EDITOR = 'deputy_director'
 KINDS = {'income', 'expense'}
-PAY_TYPES = {'salary', 'percent', 'hourly'}
+PAY_TYPES = {'salary', 'percent', 'hourly', 'tabel'}
 SECTIONS = ('entries', 'profit', 'salary')
 PERIOD_RE = re.compile(r'^\d{4}-(0[1-9]|1[0-2])$')
 SALARY_CATEGORY = 'Зарплата'
@@ -102,31 +102,100 @@ def _salary_category(cur) -> int:
     return cur.fetchone()[0]
 
 
+def _month_last_day(period: str) -> str:
+    y, m = int(period[:4]), int(period[5:7])
+    nxt = date(y + (m == 12), m % 12 + 1, 1)
+    return date.fromordinal(nxt.toordinal() - 1).isoformat()
+
+
+def _sheet_payroll(cur) -> Dict[str, Dict[str, float]]:
+    """Итоги из раздела «Зарплата» по месяцам: {'2026-09': {profile_id: сумма}}.
+    Формулы те же, что на странице «Зарплата»: ставка = выручка / (дней × 24) × процент."""
+    cur.execute(f'SELECT percent FROM {SCHEMA}.salary_settings WHERE month_year IS NULL LIMIT 1')
+    r = cur.fetchone()
+    pct = _num(r[0]) if r and r[0] is not None else 2.5
+    cur.execute(f'SELECT manager_percent FROM {SCHEMA}.manager_settings WHERE month_year IS NULL LIMIT 1')
+    r = cur.fetchone()
+    mpct = _num(r[0]) if r and r[0] is not None else 5.0
+    cur.execute(f'SELECT month_year, revenue, days_in_month FROM {SCHEMA}.salary_settings WHERE month_year IS NOT NULL')
+    rates: Dict[str, float] = {}
+    for my, rev, days in cur.fetchall():
+        k2 = (days or 30) * 24
+        rates[my] = (_num(rev) / k2) * (pct / 100) if k2 else 0.0
+    out: Dict[str, Dict[str, float]] = {}
+
+    def add(my: str, pid: str, v: float) -> None:
+        if not re.fullmatch(r'\d{2}\.\d{4}', my or '') or not pid:
+            return
+        key = f'{my[3:]}-{my[:2]}'
+        out.setdefault(key, {})
+        out[key][pid] = round(out[key].get(pid, 0.0) + v, 2)
+
+    cur.execute(f'SELECT month_year, profile_id, hours_worked, vacation_pay, non_cash, overtime, tax, underpayment '
+                f'FROM {SCHEMA}.salary_data')
+    for my, pid, b, e, f, g, h, u in cur.fetchall():
+        d = rates.get(my, 0.0)
+        add(my, pid, (d * _num(b) + _num(e)) - _num(f) - _num(g) - _num(h) + _num(u))
+    cur.execute(f'SELECT month_year, profile_id, osn_hours, dop_hours, doplaty, vacation_pay, non_cash, underpayment '
+                f'FROM {SCHEMA}.manager_data')
+    for my, pid, osn, dop, dopl, vac, nc, u in cur.fetchall():
+        er = rates.get(my, 0.0)
+        hr = er * (1 + mpct / 100)
+        add(my, pid, (((_num(osn) * hr) + _num(vac)) - _num(nc)) + _num(dopl) + (_num(dop) * er) + _num(u))
+    return out
+
+
+def _linked(cur, d_from: str, d_to: str) -> List[Dict[str, Any]]:
+    """Операции, которые берутся из других разделов автоматически (только чтение):
+    инкассация — только фактические суммы по дням; зарплата — итог месяца из раздела «Зарплата»."""
+    rows: List[Dict[str, Any]] = []
+    cur.execute(f"SELECT to_date(shift_date, 'DD.MM.YYYY') d, SUM(fact_value), COUNT(*) FROM {SCHEMA}.collection_data "
+                f"WHERE shift_date ~ '^\\d{{2}}\\.\\d{{2}}\\.\\d{{4}}$' AND COALESCE(fact_value, 0) > 0 "
+                f"AND to_date(shift_date, 'DD.MM.YYYY') BETWEEN %s AND %s GROUP BY 1 ORDER BY 1", (d_from, d_to))
+    for d, total, n in cur.fetchall():
+        rows.append({'id': f'col-{d}', 'kind': 'income', 'date': d.isoformat(), 'amount': round(_num(total), 2),
+                     'category_id': None, 'category': 'Инкассация', 'comment': f'Инкассация (факт), смен: {n}',
+                     'from_salary': False, 'linked': 'collection', 'created_by': None})
+    for period, people in _sheet_payroll(cur).items():
+        last = _month_last_day(period)
+        total = round(sum(people.values()), 2)
+        if total <= 0 or not (d_from <= last <= d_to):
+            continue
+        rows.append({'id': f'sal-{period}', 'kind': 'expense', 'date': last, 'amount': total, 'category_id': None,
+                     'category': SALARY_CATEGORY, 'comment': f'Зарплата за месяц из раздела «Зарплата», сотрудников: '
+                     f'{sum(1 for v in people.values() if v)}', 'from_salary': False, 'linked': 'salary', 'created_by': None})
+    return rows
+
+
 def _entries(cur, body: Dict[str, Any]) -> List[Dict[str, Any]]:
     d_from = _date(body.get('date_from')) or '1900-01-01'
     d_to = _date(body.get('date_to')) or '2999-12-31'
     cur.execute(f'SELECT e.id, e.kind, e.entry_date, e.amount, e.category_id, c.name, e.comment, e.payment_id, e.created_by '
                 f'FROM {SCHEMA}.acc_entries e LEFT JOIN {SCHEMA}.acc_categories c ON c.id = e.category_id '
                 f'WHERE e.entry_date BETWEEN %s AND %s ORDER BY e.entry_date DESC, e.id DESC LIMIT 2000', (d_from, d_to))
-    return [{'id': r[0], 'kind': r[1], 'date': r[2], 'amount': _num(r[3]), 'category_id': r[4], 'category': r[5] or 'Без статьи',
-             'comment': r[6], 'from_salary': r[7] is not None, 'created_by': r[8]} for r in cur.fetchall()]
+    own = [{'id': r[0], 'kind': r[1], 'date': r[2], 'amount': _num(r[3]), 'category_id': r[4], 'category': r[5] or 'Без статьи',
+             'comment': r[6], 'from_salary': r[7] is not None, 'linked': None, 'created_by': r[8]} for r in cur.fetchall()]
+    return sorted(own + _linked(cur, d_from, d_to), key=lambda e: str(e['date']), reverse=True)
 
 
 def _profit(cur, body: Dict[str, Any]) -> Dict[str, Any]:
     d_from = _date(body.get('date_from')) or '1900-01-01'
     d_to = _date(body.get('date_to')) or '2999-12-31'
-    cur.execute(f"SELECT e.kind, COALESCE(c.name, 'Без статьи'), SUM(e.amount), COUNT(*) FROM {SCHEMA}.acc_entries e "
-                f'LEFT JOIN {SCHEMA}.acc_categories c ON c.id = e.category_id WHERE e.entry_date BETWEEN %s AND %s '
-                f'GROUP BY 1, 2 ORDER BY 3 DESC', (d_from, d_to))
-    rows = [{'kind': r[0], 'category': r[1], 'total': _num(r[2]), 'count': r[3]} for r in cur.fetchall()]
-    cur.execute(f"SELECT to_char(entry_date, 'YYYY-MM'), "
-                f"SUM(CASE WHEN kind = 'income' THEN amount ELSE 0 END), SUM(CASE WHEN kind = 'expense' THEN amount ELSE 0 END) "
-                f'FROM {SCHEMA}.acc_entries WHERE entry_date BETWEEN %s AND %s GROUP BY 1 ORDER BY 1', (d_from, d_to))
-    months = [{'month': r[0], 'income': _num(r[1]), 'expense': _num(r[2])} for r in cur.fetchall()]
-    income = sum(r['total'] for r in rows if r['kind'] == 'income')
-    expense = sum(r['total'] for r in rows if r['kind'] == 'expense')
-    return {'income': income, 'expense': expense, 'profit': income - expense,
-            'by_category': rows, 'by_month': months}
+    cats: Dict[tuple, Dict[str, Any]] = {}
+    months: Dict[str, Dict[str, Any]] = {}
+    for e in _entries(cur, {'date_from': d_from, 'date_to': d_to}):
+        key = (e['kind'], e['category'])
+        c = cats.setdefault(key, {'kind': e['kind'], 'category': e['category'], 'total': 0.0, 'count': 0,
+                                  'linked': e.get('linked')})
+        c['total'] = round(c['total'] + e['amount'], 2)
+        c['count'] += 1
+        m = months.setdefault(str(e['date'])[:7], {'month': str(e['date'])[:7], 'income': 0.0, 'expense': 0.0})
+        m[e['kind']] = round(m[e['kind']] + e['amount'], 2)
+    rows = sorted(cats.values(), key=lambda r: -r['total'])
+    income = round(sum(r['total'] for r in rows if r['kind'] == 'income'), 2)
+    expense = round(sum(r['total'] for r in rows if r['kind'] == 'expense'), 2)
+    return {'income': income, 'expense': expense, 'profit': round(income - expense, 2),
+            'by_category': rows, 'by_month': sorted(months.values(), key=lambda m: m['month'])}
 
 
 def _salary(cur, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -143,7 +212,14 @@ def _salary(cur, body: Dict[str, Any]) -> Dict[str, Any]:
     cur.execute(f"SELECT staff_id, SUM(amount) FROM {SCHEMA}.acc_payments WHERE period = %s OR "
                 f"(period IS NULL AND to_char(pay_date, 'YYYY-MM') = %s) GROUP BY 1", (period, period))
     pay_p = {r[0]: _num(r[1]) for r in cur.fetchall()}
+    sheet = _sheet_payroll(cur)
     for s in staff:
+        if s['pay_type'] == 'tabel' and s['profile_id']:
+            s['sheet'] = sheet.get(period, {}).get(s['profile_id'], 0.0)
+            acc_p[s['id']] = acc_p.get(s['id'], 0.0) + s['sheet']
+            acc_all[s['id']] = acc_all.get(s['id'], 0.0) + sum(m.get(s['profile_id'], 0.0) for m in sheet.values())
+        else:
+            s['sheet'] = None
         s['accrued'] = acc_p.get(s['id'], 0.0)
         s['paid'] = pay_p.get(s['id'], 0.0)
         s['debt'] = round(acc_all.get(s['id'], 0.0) - pay_all.get(s['id'], 0.0), 2)
@@ -242,6 +318,10 @@ def _edit(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
             return _err('Укажите ФИО сотрудника')
         if pay_type not in PAY_TYPES:
             return _err('Выберите способ оплаты')
+        if pay_type == 'tabel':
+            rate = Decimal(0)
+            if not body.get('profile_id'):
+                return _err('Для расчёта из раздела «Зарплата» выберите учётную запись сотрудника')
         if rate is None:
             return _err('Укажите ставку числом')
         if pay_type == 'percent' and rate > 100:
@@ -257,6 +337,18 @@ def _edit(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         _log(cur, user, 'Сотрудник (зарплата)', f'{name}: {pay_type} {rate}')
         return _resp(200, {'ok': True})
 
+    if action == 'staff_import':
+        cur.execute(f"SELECT p.id, p.full_name FROM {SCHEMA}.profiles p WHERE p.id IN "
+                    f"(SELECT profile_id FROM {SCHEMA}.salary_data UNION SELECT profile_id FROM {SCHEMA}.manager_data) "
+                    f"AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.acc_staff s WHERE s.profile_id = p.id) ORDER BY p.full_name")
+        added = 0
+        for pid, name in cur.fetchall():
+            cur.execute(f"INSERT INTO {SCHEMA}.acc_staff (name, profile_id, pay_type, rate) VALUES (%s, %s, 'tabel', 0)",
+                        (name or 'Сотрудник', pid))
+            added += 1
+        _log(cur, user, 'Сотрудники из «Зарплаты»', f'добавлено: {added}')
+        return _resp(200, {'ok': True, 'added': added})
+
     if action == 'accrual_save':
         cur.execute(f'SELECT name, pay_type, rate FROM {SCHEMA}.acc_staff WHERE id = %s', (body.get('staff_id'),))
         st = cur.fetchone()
@@ -266,6 +358,9 @@ def _edit(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         if not PERIOD_RE.match(period):
             return _err('Укажите месяц')
         pay_type = body.get('pay_type') or st[1]
+        if pay_type == 'tabel':
+            pay_type = 'salary'
+            body = {**body, 'rate': 0}
         if pay_type not in PAY_TYPES:
             return _err('Неизвестный способ оплаты')
         rate = _money(body.get('rate') if body.get('rate') not in (None, '') else st[2], allow_zero=True)
@@ -294,7 +389,7 @@ def _edit(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         return _resp(200, {'ok': True})
 
     if action == 'payment_save':
-        cur.execute(f'SELECT name FROM {SCHEMA}.acc_staff WHERE id = %s', (body.get('staff_id'),))
+        cur.execute(f'SELECT name, pay_type FROM {SCHEMA}.acc_staff WHERE id = %s', (body.get('staff_id'),))
         st = cur.fetchone()
         if not st:
             return _err('Сотрудник не найден', 404)
@@ -311,7 +406,7 @@ def _edit(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         cur.execute(f'INSERT INTO {SCHEMA}.acc_payments (staff_id, pay_date, amount, period, comment, created_by) '
                     f'VALUES (%s, %s, %s, %s, %s, %s) RETURNING id', (body['staff_id'], d, amount, period, comment, user['name']))
         pid = cur.fetchone()[0]
-        if body.get('to_expenses', True):
+        if body.get('to_expenses', True) and st[1] != 'tabel':
             cur.execute(f"INSERT INTO {SCHEMA}.acc_entries (kind, entry_date, amount, category_id, comment, payment_id, created_by) "
                         f"VALUES ('expense', %s, %s, %s, %s, %s, %s)",
                         (d, amount, _salary_category(cur), f'Зарплата: {st[0]} за {period}' + (f' — {comment}' if comment else ''),

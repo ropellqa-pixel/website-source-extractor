@@ -21,6 +21,7 @@ export default function EntriesTab({ from, to, canEdit, categories, onCategories
   const [kind, setKind] = useState<'all' | Kind>('all');
   const [cat, setCat] = useState('');
   const [search, setSearch] = useState('');
+  const [source, setSource] = useState<'all' | 'own' | 'collection' | 'salary'>('all');
   const [form, setForm] = useState<typeof EMPTY | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,7 +38,8 @@ export default function EntriesTab({ from, to, canEdit, categories, onCategories
 
   const list = useMemo(() => entries.filter((e) =>
     (kind === 'all' || e.kind === kind) && (!cat || String(e.category_id) === cat) &&
-    (!search || `${e.comment || ''} ${e.category}`.toLowerCase().includes(search.toLowerCase()))), [entries, kind, cat, search]);
+    (source === 'all' || (source === 'own' ? !e.linked : e.linked === source)) &&
+    (!search || `${e.comment || ''} ${e.category}`.toLowerCase().includes(search.toLowerCase()))), [entries, kind, cat, search, source]);
 
   const income = list.filter((e) => e.kind === 'income').reduce((s, e) => s + e.amount, 0);
   const expense = list.filter((e) => e.kind === 'expense').reduce((s, e) => s + e.amount, 0);
@@ -85,6 +87,12 @@ export default function EntriesTab({ from, to, canEdit, categories, onCategories
           ))}
         </select>
         <Input placeholder="Поиск по комментарию" value={search} onChange={(e) => setSearch(e.target.value)} className="h-9 w-56" />
+        <select value={source} onChange={(e) => setSource(e.target.value as typeof source)} className="h-9 rounded-md border bg-background px-3 text-sm">
+          <option value="all">Все источники</option>
+          <option value="own">Внесено вручную</option>
+          <option value="collection">Инкассация (факт)</option>
+          <option value="salary">Зарплата по месяцам</option>
+        </select>
         {canEdit && (
           <div className="ml-auto flex gap-2">
             <Button size="sm" variant="outline" onClick={() => { setForm({ ...EMPTY, kind: 'income', date: today() }); setError(null); }}>
@@ -123,18 +131,25 @@ export default function EntriesTab({ from, to, canEdit, categories, onCategories
               {list.map((e) => (
                 <tr key={e.id} className="border-b last:border-0 hover:bg-secondary/40">
                   <td className="whitespace-nowrap px-4 py-2.5 tabular-nums">{fmtDay(e.date)}</td>
-                  <td className="px-4 py-2.5">{e.category}</td>
+                  <td className="px-4 py-2.5">
+                    {e.category}
+                    {e.linked && (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">
+                        <Icon name="Link" size={11} />{e.linked === 'collection' ? 'из Инкассации' : 'из Зарплаты'}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-2.5 text-muted-foreground">{e.comment}</td>
                   <td className={`whitespace-nowrap px-4 py-2.5 text-right font-medium tabular-nums ${e.kind === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
                     {e.kind === 'income' ? '+' : '−'}{rub(e.amount)}
                   </td>
                   {canEdit && (
                     <td className="px-2 py-2.5 text-right">
-                      {e.from_salary ? (
+                      {e.linked ? null : e.from_salary ? (
                         <span title="Создано выплатой зарплаты" className="px-2 text-muted-foreground"><Icon name="Banknote" size={15} /></span>
                       ) : (
                         <div className="flex justify-end gap-1">
-                          <button onClick={() => { setForm({ id: e.id, kind: e.kind, date: e.date, amount: String(e.amount), category_id: e.category_id ? String(e.category_id) : '', comment: e.comment || '' }); setError(null); }}
+                          <button onClick={() => { setForm({ id: Number(e.id), kind: e.kind, date: e.date, amount: String(e.amount), category_id: e.category_id ? String(e.category_id) : '', comment: e.comment || '' }); setError(null); }}
                             className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="Pencil" size={14} /></button>
                           <button onClick={() => remove(e)} className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-red-600"><Icon name="Trash2" size={14} /></button>
                         </div>

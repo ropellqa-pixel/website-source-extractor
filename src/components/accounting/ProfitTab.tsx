@@ -19,7 +19,7 @@ function CategoryList({ title, kind, data }: { title: string; kind: Kind; data: 
             return (
               <div key={r.category}>
                 <div className="flex justify-between text-sm">
-                  <span>{r.category} <span className="text-xs text-muted-foreground">· {r.count}</span></span>
+                  <span>{r.category} <span className="text-xs text-muted-foreground">· {r.linked === 'collection' ? `${r.count} дн., факт` : r.linked === 'salary' ? `${r.count} мес., из «Зарплаты»` : r.count}</span></span>
                   <span className="tabular-nums">{rub(r.total)} <span className="text-xs text-muted-foreground">{pct.toFixed(0)}%</span></span>
                 </div>
                 <div className="mt-1 h-1.5 rounded-full bg-secondary"><div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} /></div>

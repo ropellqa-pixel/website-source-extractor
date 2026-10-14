@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { accCall, fmtDay, monthLabel, PAY_LABELS, rub, shiftMonth, today, type PayType, type SalaryData, type Staff } from '@/lib/accountingApi';
 
-const rateHint: Record<PayType, string> = { salary: 'Оклад в месяц, ₽', percent: 'Процент от выручки, %', hourly: 'Ставка за час, ₽' };
+const rateHint: Record<PayType, string> = { tabel: '', salary: 'Оклад в месяц, ₽', percent: 'Процент от выручки, %', hourly: 'Ставка за час, ₽' };
+const ACCRUAL_TYPES: PayType[] = ['salary', 'percent', 'hourly'];
 const rateText = (s: { pay_type: PayType; rate: number }) =>
-  s.pay_type === 'percent' ? `${s.rate}% от выручки` : s.pay_type === 'hourly' ? `${rub(s.rate)} / час` : `${rub(s.rate)} / мес`;
+  s.pay_type === 'tabel' ? 'часы и выручка за месяц' : s.pay_type === 'percent' ? `${s.rate}% от выручки` : s.pay_type === 'hourly' ? `${rub(s.rate)} / час` : `${rub(s.rate)} / мес`;
 
 type Modal =
   | { type: 'staff'; id: number; name: string; position: string; profile_id: string; pay_type: PayType; rate: string; active: boolean }
@@ -48,6 +49,13 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
     setModal(null); load();
   };
 
+  const importStaff = async () => {
+    const r = await accCall<{ added: number }>({ action: 'staff_import' });
+    if (r.error) { alert(r.error); return; }
+    alert(r.added ? `Добавлено сотрудников: ${r.added}` : 'Все сотрудники из раздела «Зарплата» уже есть в списке');
+    load();
+  };
+
   const del = async (action: string, id: number, text: string) => {
     if (!confirm(text)) return;
     const r = await accCall({ action, id });
@@ -79,7 +87,12 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
           <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />Показать уволенных
         </label>
         {canEdit && (
-          <Button size="sm" className="ml-auto" onClick={() => open({ type: 'staff', id: 0, name: '', position: '', profile_id: '', pay_type: 'salary', rate: '', active: true })}>
+          <Button size="sm" variant="outline" className="ml-auto" onClick={importStaff}>
+            <Icon name="Link" size={15} />Взять из «Зарплаты»
+          </Button>
+        )}
+        {canEdit && (
+          <Button size="sm" onClick={() => open({ type: 'staff', id: 0, name: '', position: '', profile_id: '', pay_type: 'salary', rate: '', active: true })}>
             <Icon name="UserPlus" size={15} />Сотрудник
           </Button>
         )}
@@ -117,7 +130,10 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
                     <div>{PAY_LABELS[s.pay_type]}</div>
                     <div className="text-xs text-muted-foreground">{rateText(s)}</div>
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{rub(s.accrued)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">
+                    {rub(s.accrued)}
+                    {s.sheet !== null && <div className="text-[11px] text-muted-foreground">из «Зарплаты»: {rub(s.sheet)}</div>}
+                  </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{rub(s.paid)}</td>
                   <td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${s.debt > 0 ? 'text-red-600' : s.debt < 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
                     {s.debt < 0 ? `аванс ${rub(-s.debt)}` : rub(s.debt)}
@@ -125,7 +141,7 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
                   <td className="px-2 py-2.5">
                     <div className="flex justify-end gap-1">
                       {canEdit && <>
-                        <Button size="sm" variant="outline" className="h-8" onClick={() => open({ type: 'accrual', staff: s, pay_type: s.pay_type, rate: String(s.rate), base: '', bonus: '', comment: '' })}>Начислить</Button>
+                        <Button size="sm" variant="outline" className="h-8" onClick={() => open({ type: 'accrual', staff: s, pay_type: s.pay_type === 'tabel' ? 'salary' : s.pay_type, rate: s.pay_type === 'tabel' ? '' : String(s.rate), base: '', bonus: '', comment: '' })}>Начислить</Button>
                         <Button size="sm" className="h-8" onClick={() => open({ type: 'payment', staff: s, date: today(), amount: s.debt > 0 ? String(s.debt) : '', comment: '', to_expenses: true })}>Выплатить</Button>
                       </>}
                       <button title="История за месяц" onClick={() => open({ type: 'history', staff: s })} className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="History" size={15} /></button>
@@ -162,14 +178,20 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
                 )}
                 <Field label="Должность"><Input value={modal.position} onChange={(e) => setModal({ ...modal, position: e.target.value })} /></Field>
                 <Field label="Способ оплаты">
-                  <div className="grid grid-cols-3 gap-1 rounded-lg bg-secondary p-0.5">
+                  <div className="grid grid-cols-2 gap-1 rounded-lg bg-secondary p-0.5">
                     {(Object.keys(PAY_LABELS) as PayType[]).map((k) => (
                       <button key={k} onClick={() => setModal({ ...modal, pay_type: k })}
                         className={`rounded-md py-1.5 text-xs font-medium ${modal.pay_type === k ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}>{PAY_LABELS[k]}</button>
                     ))}
                   </div>
                 </Field>
-                <Field label={rateHint[modal.pay_type]}><Input inputMode="decimal" value={modal.rate} onChange={(e) => setModal({ ...modal, rate: e.target.value })} /></Field>
+                {modal.pay_type === 'tabel' ? (
+                  <p className="rounded-xl bg-secondary px-3 py-2 text-xs text-muted-foreground">
+                    Начисление каждый месяц берётся автоматически из раздела «Зарплата» (часы, выручка, отпускные, удержания). Обязательно выберите учётную запись выше.
+                  </p>
+                ) : (
+                  <Field label={rateHint[modal.pay_type]}><Input inputMode="decimal" value={modal.rate} onChange={(e) => setModal({ ...modal, rate: e.target.value })} /></Field>
+                )}
                 {modal.id > 0 && (
                   <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={!modal.active} onChange={(e) => setModal({ ...modal, active: !e.target.checked })} />Уволен (скрыть из списка)
@@ -184,9 +206,14 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
               <DialogHeader><DialogTitle>Начисление: {modal.staff.name}</DialogTitle></DialogHeader>
               <p className="-mt-2 text-sm text-muted-foreground">за {monthLabel(period)}</p>
               <div className="space-y-3">
+                {modal.staff.pay_type === 'tabel' && (
+                  <p className="rounded-xl bg-secondary px-3 py-2 text-xs text-muted-foreground">
+                    Основная сумма ({rub(modal.staff.sheet || 0)}) уже берётся из раздела «Зарплата». Здесь — только дополнительное начисление.
+                  </p>
+                )}
                 <Field label="Способ оплаты">
                   <div className="grid grid-cols-3 gap-1 rounded-lg bg-secondary p-0.5">
-                    {(Object.keys(PAY_LABELS) as PayType[]).map((k) => (
+                    {ACCRUAL_TYPES.map((k) => (
                       <button key={k} onClick={() => setModal({ ...modal, pay_type: k })}
                         className={`rounded-md py-1.5 text-xs font-medium ${modal.pay_type === k ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}>{PAY_LABELS[k]}</button>
                     ))}
@@ -220,10 +247,12 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
                   <Field label="Сумма, ₽"><Input inputMode="decimal" value={modal.amount} onChange={(e) => setModal({ ...modal, amount: e.target.value })} /></Field>
                 </div>
                 <Field label="Комментарий (аванс, наличными, на карту…)"><Input value={modal.comment} onChange={(e) => setModal({ ...modal, comment: e.target.value })} /></Field>
-                <label className="flex items-center gap-2 text-sm">
+                {modal.staff.pay_type === 'tabel' ? (
+                  <p className="text-xs text-muted-foreground">Расход по зарплате уже учтён из раздела «Зарплата» — повторно в расходы не записывается.</p>
+                ) : <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={modal.to_expenses} onChange={(e) => setModal({ ...modal, to_expenses: e.target.checked })} />
                   Записать в расходы по статье «Зарплата»
-                </label>
+                </label>}
               </div>
             </>
           )}
@@ -234,6 +263,11 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
               <div className="space-y-4 text-sm">
                 <div>
                   <h4 className="mb-1.5 font-medium">Начисления</h4>
+                  {modal.staff.sheet !== null && (
+                    <div className="flex items-center justify-between border-b py-1.5">
+                      <div><div className="tabular-nums">{rub(modal.staff.sheet || 0)}</div><div className="text-xs text-muted-foreground">Из раздела «Зарплата» (автоматически)</div></div>
+                    </div>
+                  )}
                   {data.accruals.filter((a) => a.staff_id === modal.staff.id).map((a) => (
                     <div key={a.id} className="flex items-center justify-between border-b py-1.5 last:border-0">
                       <div>
@@ -245,7 +279,7 @@ export default function SalaryTab({ canEdit }: { canEdit: boolean }) {
                       {canEdit && <button onClick={() => del('accrual_delete', a.id, 'Удалить начисление?')} className="p-1 text-muted-foreground hover:text-red-600"><Icon name="Trash2" size={14} /></button>}
                     </div>
                   ))}
-                  {!data.accruals.some((a) => a.staff_id === modal.staff.id) && <p className="text-muted-foreground">Нет</p>}
+                  {!data.accruals.some((a) => a.staff_id === modal.staff.id) && modal.staff.sheet === null && <p className="text-muted-foreground">Нет</p>}
                 </div>
                 <div>
                   <h4 className="mb-1.5 font-medium">Выплаты</h4>

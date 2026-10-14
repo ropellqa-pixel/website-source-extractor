@@ -3,25 +3,25 @@ import func2url from '../../backend/func2url.json';
 const URL = (func2url as Record<string, string>)['accounting-api'];
 
 export type Kind = 'income' | 'expense';
-export type PayType = 'salary' | 'percent' | 'hourly';
+export type PayType = 'salary' | 'percent' | 'hourly' | 'tabel';
 export type Section = 'entries' | 'profit' | 'salary';
 
 export interface Category { id: number; kind: Kind; name: string; archived: boolean }
 
 export interface Entry {
-  id: number; kind: Kind; date: string; amount: number; category_id: number | null; category: string;
-  comment: string | null; from_salary: boolean; created_by: string | null;
+  id: number | string; kind: Kind; date: string; amount: number; category_id: number | null; category: string;
+  comment: string | null; from_salary: boolean; linked: 'collection' | 'salary' | null; created_by: string | null;
 }
 
 export interface ProfitData {
   income: number; expense: number; profit: number;
-  by_category: { kind: Kind; category: string; total: number; count: number }[];
+  by_category: { kind: Kind; category: string; total: number; count: number; linked?: 'collection' | 'salary' | null }[];
   by_month: { month: string; income: number; expense: number }[];
 }
 
 export interface Staff {
   id: number; name: string; profile_id: string | null; position: string | null; pay_type: PayType; rate: number;
-  active: boolean; accrued: number; paid: number; debt: number;
+  active: boolean; accrued: number; paid: number; debt: number; sheet: number | null;
 }
 
 export interface Accrual {
@@ -38,7 +38,7 @@ export interface SalaryData {
 
 export interface Me { can_edit: boolean; perms: Record<Section, boolean>; role: string; categories: Category[] }
 
-export const PAY_LABELS: Record<PayType, string> = { salary: 'Оклад', percent: 'Процент от выручки', hourly: 'По часам' };
+export const PAY_LABELS: Record<PayType, string> = { tabel: 'Из «Зарплаты»', salary: 'Оклад', percent: 'Процент от выручки', hourly: 'По часам' };
 
 export async function accCall<T = Record<string, unknown>>(body: Record<string, unknown>): Promise<T & { error?: string }> {
   let token = '';
