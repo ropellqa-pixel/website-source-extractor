@@ -400,6 +400,25 @@ def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автоз
     return {'added': added, 'skipped': skipped}
 
 
+PAY_METHODS = (('PAY_DOC_RU', '/v1/payments'), ('PAY_DOC_RU_INVOICE_ANY', '/v1/payments/from-invoice-any'))
+
+
+def _create_payment(cur, s: Dict[str, Any], token: str, pay: Dict[str, Any]):
+    """Создаёт черновик платёжки тем способом, который разрешён ключу: РПП (PAY_DOC_RU) или по свободным реквизитам (PAY_DOC_RU_INVOICE_ANY)."""
+    granted = set(str(s.get('scope_v2') or s.get('scope') or '').split())
+    order = sorted(PAY_METHODS, key=lambda m: (m[1] != s.get('pay_method'), m[0] not in granted))
+    resp = None
+    for service, path in order:
+        body = pay if path == '/v1/payments' else sber.invoice_any_body(pay)
+        resp = sber.api('POST', path, token, json=body, headers={'Content-Type': 'application/json'})
+        if resp.status_code != 403:
+            if resp.status_code in (200, 201) and s.get('pay_method') != path:
+                s['pay_method'] = path
+                _save_settings(cur, s, 'Автонастройка')
+            return resp
+    return resp
+
+
 def _refresh_statuses(cur) -> None:
     cur.execute(f"SELECT id, external_id, connection_id FROM {SCHEMA}.sber_requests WHERE status IN ('paying', 'signing') "
                 f"AND (bank_checked_at IS NULL OR bank_checked_at < now() - interval '2 minutes') LIMIT 20")
@@ -950,7 +969,7 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
         pay = sber.payment_body(r, conn['account'], org['name'], org['inn'], org.get('kpp') or '', ext,
                                 int(datetime.now().strftime('%j')) * 100 + n, today)
         try:
-            resp = sber.api('POST', '/v1/payments', token, json=pay, headers={'Content-Type': 'application/json'})
+            resp = _create_payment(cur, s, token, pay)
         except sber.SberError as e:
             cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'sent', bank_comment = %s WHERE id = %s", (str(e), r['id']))
             results.append({'id': r['id'], 'ok': False, 'error': str(e)})
@@ -962,8 +981,8 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
             results.append({'id': r['id'], 'ok': True, 'sign_url': _sign_url(s, ext, _back(body))})
             _log(cur, user, 'Оплата', f"{r['counterparty']} {r['amount']:.2f} ₽, счёт {r['requisites'].get('account')}, с {conn['account']}")
         elif resp.status_code == 403:
-            msg = ('Сбер не разрешил создавать платёжки: в приложении Sber API нет услуги «Платёжное поручение» (PAY_DOC_RU). '
-                   'Подключите её у менеджера Сбера и обновите ключи — заявка осталась на оплате')
+            msg = ('Сбер не разрешил создать платёжку ни одним способом (PAY_DOC_RU и PAY_DOC_RU_INVOICE_ANY). '
+                   'Обновите ключи подключения: при входе должны быть выданы эти услуги — заявка осталась на оплате')
             cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'sent', bank_comment = %s WHERE id = %s", (msg, r['id']))
             results.append({'id': r['id'], 'ok': False, 'error': msg})
             break

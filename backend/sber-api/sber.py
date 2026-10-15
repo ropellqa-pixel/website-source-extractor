@@ -311,6 +311,18 @@ def payment_body(req: Dict[str, Any], payer_account: str, payer_name: str, payer
     }
 
 
+def invoice_any_body(pay: Dict[str, Any]) -> Dict[str, Any]:
+    """Тело для POST /v1/payments/from-invoice-any (услуга PAY_DOC_RU_INVOICE_ANY): только реквизиты получателя, плательщик — организация из токена."""
+    keys = ('externalId', 'date', 'amount', 'operationCode', 'deliveryKind', 'priority', 'purpose', 'vat',
+            'payeeName', 'payeeInn', 'payeeKpp', 'payeeAccount', 'payeeBankBic', 'payeeBankCorrAccount')
+    out = {k: pay[k] for k in keys if pay.get(k) not in (None, '')}
+    if out.get('payeeKpp') and not (out['payeeKpp'] == '0' or (len(out['payeeKpp']) == 9 and out['payeeKpp'].isdigit())):
+        out.pop('payeeKpp')
+    if pay.get('number'):
+        out['paymentNumber'] = str(pay['number'])[-8:]
+    return out
+
+
 def check_account(account: str, bic: str) -> bool:
     """Контрольный ключ счёта по ЦБ (защита от опечаток в реквизитах)."""
     if not (len(account) == 20 and account.isdigit() and len(bic) == 9 and bic.isdigit()):
