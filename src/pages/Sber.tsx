@@ -7,6 +7,7 @@ import Icon from '@/components/ui/icon';
 import BankCard from '@/components/sber/BankCard';
 import CounterpartyForm from '@/components/sber/CounterpartyForm';
 import PayDialog from '@/components/sber/PayDialog';
+import CounterpartyPicker from '@/components/sber/CounterpartyPicker';
 import { monthLabel, recentMonths, rub, thisMonth } from '@/lib/accountingApi';
 import { useAuth } from '@/lib/auth';
 import { shiftWeek, sberCall, STATUS_STYLE, VAT_LABELS, weekLabel, type SberCp, type SberOverview, type SberRequest } from '@/lib/sberApi';
@@ -286,13 +287,10 @@ export default function Sber() {
           <DialogContent className="max-w-md">
             <DialogHeader><DialogTitle>{req.id ? 'Заявка на оплату' : 'Новая заявка'} · {weekLabel(data.week)}</DialogTitle></DialogHeader>
             <div className="space-y-3">
-              <label className="block space-y-1 text-sm">
+              <div className="block space-y-1 text-sm">
                 <span className="text-muted-foreground">Контрагент</span>
-                <select value={req.counterparty_id} onChange={(e) => pickCp(e.target.value)} className="h-10 w-full rounded-md border bg-background px-2 text-sm">
-                  <option value="">— выберите —</option>
-                  {ready.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </label>
+                <CounterpartyPicker items={ready} value={req.counterparty_id} onChange={pickCp} />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block space-y-1 text-sm">
                   <span className="text-muted-foreground">Статья расхода</span>
@@ -311,16 +309,6 @@ export default function Sber() {
               <label className="block space-y-1 text-sm">
                 <span className="text-muted-foreground">Сумма, ₽</span>
                 <Input inputMode="decimal" value={req.amount} onChange={(e) => setReq({ ...req, amount: e.target.value })} className="text-lg font-semibold" />
-              </label>
-              <label className="block space-y-1 text-sm">
-                <span className="text-muted-foreground">Назначение платежа</span>
-                <Input value={req.purpose} onChange={(e) => setReq({ ...req, purpose: e.target.value })} placeholder="Оплата по счёту № … от …" />
-              </label>
-              <label className="block space-y-1 text-sm">
-                <span className="text-muted-foreground">НДС</span>
-                <select value={req.vat_rate || 'none'} onChange={(e) => setReq({ ...req, vat_rate: e.target.value })} className="h-10 w-full rounded-md border bg-background px-2 text-sm">
-                  {Object.entries(VAT_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                </select>
               </label>
               {reqError && <p className="text-sm text-red-600">{reqError}</p>}
               <Button className="w-full" onClick={saveReq}>{can('sber.pay') ? 'Сохранить — появится кнопка «Оплатить»' : 'Сохранить черновик'}</Button>

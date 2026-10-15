@@ -815,7 +815,16 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
             return _err('Укажите сумму')
         purpose = str(body.get('purpose') or cp['default_purpose'] or '').strip()
         if len(purpose) < 5:
-            return _err('Укажите назначение платежа: за что платим')
+            cid = body.get('category_id') or cp['default_category_id']
+            cat_name = ''
+            if cid:
+                cur.execute(f'SELECT name FROM {SCHEMA}.acc_categories WHERE id = %s', (cid,))
+                row = cur.fetchone()
+                cat_name = row[0] if row else ''
+            per = str(body.get('period') or '')
+            months = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
+            per_txt = f' за {months[int(per[5:7]) - 1]} {per[:4]} г.' if re.match(r'^\d{4}-(0[1-9]|1[0-2])$', per) else ''
+            purpose = 'Оплата' + (f' ({cat_name.lower()})' if cat_name else '') + per_txt
         week = _week_start(date.fromisoformat(body['week']) if body.get('week') else date.today())
         if week > _week_start(date.today()) + timedelta(days=14):
             return _err('Планировать оплату можно максимум на 2 недели вперёд')
