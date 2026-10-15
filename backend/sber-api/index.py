@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 import psycopg2
 import requests
 
+import products
 import sber
 from access import current_user
 from bank import guess_category, period_from_text
@@ -547,6 +548,14 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
     can = user['actions']
     deputy = user['is_deputy']
     s = _settings(cur)
+
+    if action == 'products' or action.startswith('product_'):
+        if not deputy:
+            return _err('Только заместитель директора', 403)
+        try:
+            return _resp(200, products.handle(cur, SCHEMA, user, action, body, _vault_get, _vault_set, _log))
+        except PermissionError as e:
+            return _err(str(e), 403)
 
     if action == 'overview':
         try:
