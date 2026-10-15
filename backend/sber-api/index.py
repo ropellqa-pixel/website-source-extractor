@@ -15,6 +15,7 @@ import products
 import sber
 from access import current_user
 from bank import guess_category, period_from_text
+import salary_weekly
 
 SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 'public')
 CORS = {
@@ -257,13 +258,17 @@ def _week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
+_CP_COLS = ('id, name, kind, inn, kpp, account, bank_bic, bank_name, corr_account, default_purpose, vat_rate, '
+            'requisites_hash, requisites_updated_at, requisites_updated_by, archived, default_category_id, phone, comment')
+
+
 def _cp(cur, cp_id: int) -> Optional[Dict[str, Any]]:
-    cur.execute(f'SELECT id, name, kind, inn, kpp, account, bank_bic, bank_name, corr_account, default_purpose, vat_rate, '
-                f'requisites_hash, requisites_updated_at, requisites_updated_by, archived, default_category_id, phone, comment '
-                f'FROM {SCHEMA}.acc_counterparties WHERE id = %s', (cp_id,))
+    cur.execute(f'SELECT {_CP_COLS} FROM {SCHEMA}.acc_counterparties WHERE id = %s', (cp_id,))
     r = cur.fetchone()
-    if not r:
-        return None
+    return _cp_row(r) if r else None
+
+
+def _cp_row(r) -> Dict[str, Any]:
     return {'id': r[0], 'name': r[1], 'kind': r[2], 'inn': r[3] or '', 'kpp': r[4] or '', 'account': r[5] or '', 'bic': r[6] or '',
             'bank_name': r[7] or '', 'corr_account': r[8] or '', 'default_purpose': r[9] or '', 'vat_rate': r[10] or 'none',
             'requisites_hash': r[11], 'requisites_updated_at': r[12], 'requisites_updated_by': r[13], 'archived': r[14],
@@ -272,8 +277,8 @@ def _cp(cur, cp_id: int) -> Optional[Dict[str, Any]]:
 
 
 def _counterparties(cur) -> List[Dict[str, Any]]:
-    cur.execute(f'SELECT id FROM {SCHEMA}.acc_counterparties ORDER BY archived, name')
-    return [_cp(cur, r[0]) for r in cur.fetchall()]
+    cur.execute(f'SELECT {_CP_COLS} FROM {SCHEMA}.acc_counterparties ORDER BY archived, name')
+    return [_cp_row(r) for r in cur.fetchall()]
 
 
 def _requests(cur, where: str = '', args: tuple = ()) -> List[Dict[str, Any]]:
@@ -343,14 +348,14 @@ def _cat_id(cur, kind: str, name: str) -> Optional[int]:
     return r[0] if r else None
 
 
-def sync_all(cur, days: int = 3, who: str = 'Автозагрузка') -> Dict[str, Any]:
+def sync_all(cur, days: int = 3, who: str = 'Автозагрузка', back: int = 0) -> Dict[str, Any]:
     added = skipped = 0
     errors = []
     for c in _connections(cur, True):
         if not c['account']:
             continue
         try:
-            r = sync_statement(cur, c, days, who)
+            r = sync_statement(cur, c, days, who, back)
             added += r['added']
             skipped += r['skipped']
         except sber.SberError as e:
@@ -359,7 +364,7 @@ def sync_all(cur, days: int = 3, who: str = 'Автозагрузка') -> Dict[
     return {'added': added, 'skipped': skipped, 'errors': errors}
 
 
-def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автозагрузка') -> Dict[str, Any]:
+def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автозагрузка', back: int = 0) -> Dict[str, Any]:
     """Выписка по расчётному счёту подключения за последние дни → доходы/расходы бухгалтерии (без дублей)."""
     account = c['account']
     token = _token(cur, c['id'])
@@ -370,8 +375,14 @@ def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автоз
     closed = {x[0] for x in cur.fetchall()}
     cur.execute(f'SELECT id, name, inn, default_category_id FROM {SCHEMA}.acc_counterparties')
     cps = [{'id': x[0], 'name': x[1], 'inn': x[2], 'cat': x[3]} for x in cur.fetchall()]
+    d_lo = (date.today() - timedelta(days=days + back + 3)).isoformat()
+    cur.execute(f"SELECT source_key FROM {SCHEMA}.acc_entries WHERE source = 'bank' AND entry_date >= %s", (d_lo,))
+    seen = {x[0] for x in cur.fetchall()}
+    cur.execute(f'SELECT id, kind, name FROM {SCHEMA}.acc_categories WHERE NOT archived')
+    cat_ids = {(x[1], x[2].lower()): x[0] for x in cur.fetchall()}
     added = skipped = 0
-    for i in range(days, -1, -1):
+    touched: set = set()
+    for i in range(days + back, back - 1, -1):
         day = (date.today() - timedelta(days=i)).isoformat()
         page = 1
         while page <= 20:
@@ -404,10 +415,10 @@ def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автоз
                     name, inn = rc.get('payeeName') or '', rc.get('payeeInn') or ''
                 purpose = t.get('paymentPurpose') or ''
                 uid = t.get('uuid') or f"{op_date}|{kind}|{amount:.2f}|{t.get('number') or ''}|{inn or name[:40]}"
-                cur.execute(f"SELECT 1 FROM {SCHEMA}.acc_entries WHERE source = 'bank' AND source_key = %s", (uid,))
-                if cur.fetchone():
+                if uid in seen:
                     skipped += 1
                     continue
+                seen.add(uid)
                 ext = t.get('externalId') or ''
                 req_link = None
                 if ext:
@@ -426,7 +437,7 @@ def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автоз
                     cps.append(cp)
                 g = guess_category({'kind': kind, 'purpose': purpose, 'name': name})
                 cat = (req_link[2] if req_link and req_link[2] else None) or (cp['cat'] if cp and cp['cat'] else None) \
-                    or (_cat_id(cur, kind, g) if g else None)
+                    or (cat_ids.get((kind, g.lower())) if g else None)
                 period = (req_link[3] if req_link and req_link[3] else None) or period_from_text(purpose, op_date)
                 cur.execute(f"INSERT INTO {SCHEMA}.acc_entries (kind, entry_date, amount, category_id, comment, counterparty_id, period, "
                             f"source, source_key, bank_purpose, created_by, bank_connection_id) VALUES (%s, %s, %s, %s, %s, %s, %s, 'bank', %s, %s, %s, %s) "
@@ -438,13 +449,15 @@ def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автоз
                     cur.execute(f'UPDATE {SCHEMA}.sber_requests SET entry_id = %s WHERE id = %s', (new_entry[0], req_link[0]))
                 if new_entry:
                     added += 1
-                    cur.execute(f'UPDATE {SCHEMA}.acc_periods SET fingerprint = NULL WHERE period = %s', (period,))
+                    touched.add(period)
                     if period in closed:
                         cur.execute(f"UPDATE {SCHEMA}.acc_entries SET period = %s WHERE id = %s", (op_date[:7], new_entry[0]))
             links = data.get('_links') or []
             if not any((l.get('rel') == 'next') for l in links if isinstance(l, dict)):
                 break
             page += 1
+    if touched:
+        cur.execute(f'UPDATE {SCHEMA}.acc_periods SET fingerprint = NULL WHERE period = ANY(%s)', (list(touched),))
     cur.execute(f'UPDATE {SCHEMA}.sber_connections SET last_sync = now(), last_sync_result = %s, last_error = NULL WHERE id = %s',
                 (json.dumps({'added': added, 'skipped': skipped}), c['id']))
     return {'added': added, 'skipped': skipped}
@@ -519,6 +532,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if method == 'GET' and qs.get('tls') == 'check':
             return _resp(200, {'tls': sber.tls_check()})
         if method == 'GET' and qs.get('cron') is not None:
+            _CRON_QS.clear()
+            _CRON_QS.update(qs)
             return _cron(cur, qs.get('cron') or '')
         if method != 'POST':
             return _err('Метод не поддерживается', 405)
@@ -563,9 +578,46 @@ def _cron(cur, key: str) -> Dict[str, Any]:
     expected = s.get('cron_key')
     if not expected or key != expected:
         return _err('Нет доступа', 403)
-    res = sync_all(cur, days=3)
-    _refresh_statuses(cur)
+    qs = _CRON_QS
+    days = max(0, min(15, int(qs.get('days') or 1)))
+    back = max(0, min(120, int(qs.get('back') or 0)))
+    res = sync_all(cur, days=days, back=back)
+    res['recategorized'] = recategorize(cur)
+    try:
+        res.update(salary_weekly.run(cur, SCHEMA))
+    except Exception as e:
+        res['weekly_error'] = str(e)[:200]
+    try:
+        _refresh_statuses(cur)
+    except sber.SberError:
+        pass
     return _resp(200, {'ok': not res['errors'], **res})
+
+
+def recategorize(cur) -> int:
+    """Операции банка без статьи → статья по комментарию банка и получателю (ручной выбор не трогаем)."""
+    cur.execute(f"SELECT e.id, e.kind, COALESCE(e.bank_purpose, e.comment, ''), COALESCE(cp.name, ''), cp.default_category_id "
+                f"FROM {SCHEMA}.acc_entries e LEFT JOIN {SCHEMA}.acc_counterparties cp ON cp.id = e.counterparty_id "
+                f"WHERE e.source = 'bank' AND e.category_id IS NULL AND NOT e.void LIMIT 1000")
+    rows = cur.fetchall()
+    if not rows:
+        return 0
+    cur.execute(f'SELECT id, kind, name FROM {SCHEMA}.acc_categories WHERE NOT archived')
+    cat_ids = {(x[1], x[2].lower()): x[0] for x in cur.fetchall()}
+    pairs = []
+    for eid, kind, purpose, name, cp_cat in rows:
+        g = guess_category({'kind': kind, 'purpose': purpose, 'name': name})
+        cat = cp_cat or (cat_ids.get((kind, g.lower())) if g else None)
+        if cat:
+            pairs.append((int(eid), int(cat)))
+    if pairs:
+        cur.execute(f'UPDATE {SCHEMA}.acc_entries e SET category_id = v.cat, updated_at = now() '
+                    f'FROM unnest(%s::bigint[], %s::bigint[]) AS v(id, cat) WHERE e.id = v.id',
+                    ([p[0] for p in pairs], [p[1] for p in pairs]))
+    return len(pairs)
+
+
+_CRON_QS: Dict[str, str] = {}
 
 
 def _oauth_callback(cur, qs: Dict[str, str]) -> Dict[str, Any]:
@@ -822,6 +874,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         if 'sber.sync' not in can:
             return _err('Нет права обновлять выписку', 403)
         res = sync_all(cur, days=min(31, int(body.get('days') or 3)), who=user['name'])
+        res['recategorized'] = recategorize(cur)
         _refresh_statuses(cur)
         _log(cur, user, 'Выписка', f"добавлено {res['added']}")
         if res['errors'] and not res['added']:

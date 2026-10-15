@@ -10,7 +10,7 @@ import PayDialog from '@/components/sber/PayDialog';
 import CounterpartyPicker from '@/components/sber/CounterpartyPicker';
 import { monthLabel, recentMonths, rub, thisMonth } from '@/lib/accountingApi';
 import { useAuth } from '@/lib/auth';
-import { shiftWeek, sberCall, STATUS_STYLE, VAT_LABELS, weekLabel, type SberCp, type SberOverview, type SberRequest } from '@/lib/sberApi';
+import { openSberBusiness, SBBOL_WEB, shiftWeek, sberCall, STATUS_STYLE, VAT_LABELS, weekLabel, type SberCp, type SberOverview, type SberRequest } from '@/lib/sberApi';
 
 type Tab = 'requests' | 'counterparties';
 const EMPTY_REQ = { id: 0, counterparty_id: '', amount: '', purpose: '', vat_rate: '', category_id: '', period: thisMonth() };
@@ -67,6 +67,13 @@ export default function Sber() {
   const weekReady = toPay.filter((r) => !r.requisites_changed);
   const maxWeek = shiftWeek(currentWeek, 2);
   const paidSum = sum(reqs.filter((r) => ['paid', 'signing', 'paying'].includes(r.status)));
+  const toSign = reqs.filter((r) => r.status === 'signing');
+  const signOne = async (r: SberRequest) => {
+    const x = await sberCall<{ links: { id: number; url: string }[] }>({ action: 'sign_links', ids: [r.id], origin: window.location.origin });
+    if (x.error || !x.links?.[0]) { alert(x.error || 'Ссылка недоступна'); return; }
+    openSberBusiness(x.links[0].url);
+  };
+  const toggle = (id: number, on: boolean) => { const n = new Set(selected); if (on) n.add(id); else n.delete(id); setSelected(n); };
 
   const saveReq = async () => {
     if (!req) return;
@@ -90,14 +97,14 @@ export default function Sber() {
   };
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-auto p-4 md:p-6">
+    <div className="flex flex-col gap-4 p-3 sm:p-4 md:p-6">
       <div className="flex flex-wrap items-center gap-3">
         <div className="mr-auto">
           <h1 className="text-2xl font-semibold tracking-tight">СБЕР</h1>
           <p className="text-sm text-muted-foreground">Оплата контрагентам через СберБизнес и автозагрузка выписки</p>
         </div>
         {can('sber.pay') && tab === 'requests' && (
-          <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700" disabled={!data.bank.connected || weekReady.length === 0}
+          <Button size="lg" className="h-auto min-h-11 w-full whitespace-normal bg-emerald-600 py-2 hover:bg-emerald-700 sm:w-auto" disabled={!data.bank.connected || weekReady.length === 0}
             onClick={() => setPaying(weekReady)}>
             <Icon name="Landmark" size={18} />Оплатить за неделю{weekReady.length > 0 ? ` · ${weekReady.length} на ${rub(sum(weekReady))}` : ''}
           </Button>
@@ -105,8 +112,8 @@ export default function Sber() {
       </div>
 
       {notice && (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-800">
-          <Icon name="Info" size={16} />{notice}
+        <div className="flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-800">
+          <Icon name="Info" size={16} className="shrink-0" /><span className="min-w-0 flex-1">{notice}</span>
           <button onClick={() => setNotice(null)} className="ml-auto"><Icon name="X" size={15} /></button>
         </div>
       )}
@@ -116,7 +123,7 @@ export default function Sber() {
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap rounded-lg bg-secondary p-0.5">
           {([['requests', 'Оплаты по неделям', 'CalendarRange'], ['counterparties', 'Контрагенты и реквизиты', 'Building2']] as const).map(([k, l, i]) => (
-            <button key={k} onClick={() => setTab(k)} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${tab === k ? 'bg-card shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+            <button key={k} onClick={() => setTab(k)} className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium ${tab === k ? 'bg-card shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
               <Icon name={i} size={15} />{l}
             </button>
           ))}
@@ -137,11 +144,11 @@ export default function Sber() {
 
       {tab === 'requests' ? (
         <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4">
             <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Заявок за неделю</div><div className="mt-1 text-xl font-semibold">{reqs.length}</div></div>
-            <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Черновики</div><div className="mt-1 text-xl font-semibold tabular-nums">{rub(sum(reqs.filter((r) => r.status === 'draft')))}</div></div>
-            <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Ждут оплаты</div><div className="mt-1 text-xl font-semibold tabular-nums text-amber-600">{rub(sum(toPay))}</div></div>
-            <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Оплачено / в банке</div><div className="mt-1 text-xl font-semibold tabular-nums text-emerald-600">{rub(paidSum)}</div></div>
+            <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Черновики</div><div className="mt-1 break-words text-lg font-semibold tabular-nums sm:text-xl">{rub(sum(reqs.filter((r) => r.status === 'draft')))}</div></div>
+            <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Ждут оплаты</div><div className="mt-1 break-words text-lg font-semibold tabular-nums sm:text-xl text-amber-600">{rub(sum(toPay))}</div></div>
+            <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Оплачено / в банке</div><div className="mt-1 break-words text-lg font-semibold tabular-nums sm:text-xl text-emerald-600">{rub(paidSum)}</div></div>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -153,6 +160,11 @@ export default function Sber() {
             {can('sber.request') && drafts.length > 0 && (
               <Button variant="outline" onClick={() => act('send_week', { week: data.week }, `Отправить директору ${drafts.length} заявок на ${rub(sum(drafts))}?`)}>
                 <Icon name="Send" size={16} />Отправить директору ({drafts.length})
+              </Button>
+            )}
+            {can('sber.pay') && toSign.length > 1 && (
+              <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={() => openSberBusiness(SBBOL_WEB)}>
+                <Icon name="ShieldCheck" size={16} />Подписать все ({toSign.length}) · {rub(sum(toSign))}
               </Button>
             )}
             {can('sber.pay') && selected.size > 0 && (
@@ -168,7 +180,56 @@ export default function Sber() {
             {reqs.length === 0 ? (
               <div className="py-16 text-center text-sm text-muted-foreground"><Icon name="Inbox" size={32} className="mx-auto mb-2" />Заявок на эту неделю нет</div>
             ) : (
-              <table className="w-full text-sm">
+              <>
+              <div className="divide-y md:hidden">
+                {reqs.map((r) => (
+                  <div key={r.id} className="space-y-2 p-3.5">
+                    <div className="flex items-start gap-3">
+                      {can('sber.pay') && r.status === 'sent' && !r.requisites_changed && (
+                        <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={selected.has(r.id)} onChange={(e) => toggle(r.id, e.target.checked)} />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="break-words font-medium leading-snug">{r.counterparty}</div>
+                        <div className="text-xs text-muted-foreground">р/с •••• {r.requisites.account?.slice(-4)} · от {r.created_by}</div>
+                      </div>
+                      <div className="shrink-0 text-right font-semibold tabular-nums">{rub(r.amount)}</div>
+                    </div>
+                    <div className="whitespace-pre-wrap break-words text-sm">{r.purpose}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {VAT_LABELS[r.vat_rate] || r.vat_rate}
+                      {r.category_id && ` · ${data.categories.find((c) => c.id === r.category_id)?.name || ''}`}
+                      {r.period && ` · за ${monthLabel(r.period).toLowerCase()}`}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${STATUS_STYLE[r.status]}`}>{r.status_label}</span>
+                      {r.decided_by && ['paid', 'signing', 'paying'].includes(r.status) && <span className="text-xs text-muted-foreground">{r.decided_by}</span>}
+                    </div>
+                    {r.requisites_changed && <div className="text-xs text-red-600">реквизиты изменились — пересоздайте заявку</div>}
+                    {r.reject_reason && r.status === 'rejected' && <div className="break-words text-xs text-red-600">{r.reject_reason}</div>}
+                    {r.bank_comment && ['failed', 'sent'].includes(r.status) && <div className="break-words text-xs text-red-600">{r.bank_comment}</div>}
+                    <div className="flex flex-wrap gap-2">
+                      {can('sber.pay') && r.status === 'sent' && !r.requisites_changed && (
+                        <Button size="sm" className="h-9 flex-1 bg-emerald-600 hover:bg-emerald-700" disabled={!data.bank.connected} onClick={() => setPaying([r])}>Оплатить</Button>
+                      )}
+                      {can('sber.pay') && r.status === 'signing' && (
+                        <Button size="sm" className="h-9 flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => signOne(r)}>Подписать по СМС</Button>
+                      )}
+                      {can('sber.pay') && r.status === 'sent' && (
+                        <Button size="sm" variant="outline" className="h-9" onClick={() => { setRejecting(r); setReason(''); }}>Отклонить</Button>
+                      )}
+                      {(can('sber.request') || can('sber.pay')) && (['draft', 'rejected'].includes(r.status) || (r.status === 'sent' && can('sber.pay'))) && (r.created_by_user === user?.id || data.is_deputy || can('sber.pay')) && (
+                        <Button size="sm" variant="outline" className="h-9" onClick={() => { setReq({ id: r.id, counterparty_id: String(r.counterparty_id), amount: String(r.amount), purpose: r.purpose, vat_rate: r.vat_rate, category_id: r.category_id ? String(r.category_id) : '', period: r.period || thisMonth() }); setReqError(null); }}>
+                          <Icon name="Pencil" size={15} />Изменить
+                        </Button>
+                      )}
+                      {can('sber.request') && ['draft', 'rejected', 'sent'].includes(r.status) && (r.created_by_user === user?.id || data.is_deputy) && (
+                        <Button size="sm" variant="outline" className="h-9 text-red-600" onClick={() => act('request_delete', { id: r.id }, 'Отменить заявку?')}><Icon name="Trash2" size={15} /></Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <table className="hidden w-full text-sm md:table">
                 <thead className="text-left text-xs text-muted-foreground">
                   <tr className="border-b">
                     {can('sber.pay') && (
@@ -197,8 +258,8 @@ export default function Sber() {
                         <div className="font-medium">{r.counterparty}</div>
                         <div className="text-xs text-muted-foreground">р/с •••• {r.requisites.account?.slice(-4)} · от {r.created_by}</div>
                       </td>
-                      <td className="max-w-xs px-3 py-2.5">
-                        <div className="line-clamp-2">{r.purpose}</div>
+                      <td className="max-w-md px-3 py-2.5">
+                        <div className="whitespace-pre-wrap break-words">{r.purpose}</div>
                         <div className="text-xs text-muted-foreground">
                           {VAT_LABELS[r.vat_rate] || r.vat_rate}
                           {r.category_id && ` · ${data.categories.find((c) => c.id === r.category_id)?.name || ''}`}
@@ -222,11 +283,7 @@ export default function Sber() {
                             <Button size="sm" variant="ghost" className="h-8" onClick={() => { setRejecting(r); setReason(''); }}>Отклонить</Button>
                           )}
                           {can('sber.pay') && r.status === 'signing' && (
-                            <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={async () => {
-                              const x = await sberCall<{ links: { id: number; url: string }[] }>({ action: 'sign_links', ids: [r.id], origin: window.location.origin });
-                              if (x.error || !x.links?.[0]) { alert(x.error || 'Ссылка недоступна'); return; }
-                              window.location.href = x.links[0].url;
-                            }}>Подписать по СМС</Button>
+                            <Button size="sm" className="h-8 bg-emerald-600 hover:bg-emerald-700" onClick={() => signOne(r)}>Подписать по СМС</Button>
                           )}
                           {(can('sber.request') || can('sber.pay')) && (['draft', 'rejected'].includes(r.status) || (r.status === 'sent' && can('sber.pay'))) && (r.created_by_user === user?.id || data.is_deputy || can('sber.pay')) && (
                             <button title="Изменить" onClick={() => { setReq({ id: r.id, counterparty_id: String(r.counterparty_id), amount: String(r.amount), purpose: r.purpose, vat_rate: r.vat_rate, category_id: r.category_id ? String(r.category_id) : '', period: r.period || thisMonth() }); setReqError(null); }}
@@ -242,6 +299,7 @@ export default function Sber() {
                   ))}
                 </tbody>
               </table>
+              </>
             )}
           </div>
         </>
@@ -254,7 +312,22 @@ export default function Sber() {
               <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><Icon name="Lock" size={14} />Реквизиты меняет только заместитель директора</p>
             )}
           </div>
-          <div className="overflow-auto rounded-2xl border bg-card">
+          <div className="divide-y rounded-2xl border bg-card md:hidden">
+            {data.counterparties.map((c) => (
+              <div key={c.id} className={`flex items-start gap-2 p-3.5 text-sm ${c.archived ? 'opacity-50' : ''}`}>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="break-words font-medium leading-snug">{c.name}</div>
+                  <div className="text-xs text-muted-foreground">ИНН {c.inn || '—'}{c.kpp ? ` · КПП ${c.kpp}` : ''}</div>
+                  {c.ready ? (
+                    <><div className="break-all font-mono text-xs">{c.account}</div><div className="break-words text-xs text-muted-foreground">БИК {c.bic}{c.bank_name ? ` · ${c.bank_name}` : ''}</div></>
+                  ) : <div className="text-xs text-amber-700">реквизиты не заполнены — оплатить нельзя</div>}
+                  {c.requisites_updated_at && <div className="text-xs text-muted-foreground">изменены {new Date(c.requisites_updated_at).toLocaleDateString('ru-RU')} · {c.requisites_updated_by || ''}</div>}
+                </div>
+                {can('sber.edit_requisites') && <button onClick={() => setCp(c)} className="rounded-lg p-2.5 text-muted-foreground hover:bg-secondary"><Icon name="Pencil" size={17} /></button>}
+              </div>
+            ))}
+          </div>
+          <div className="hidden overflow-auto rounded-2xl border bg-card md:block">
             <table className="w-full text-sm">
               <thead className="text-left text-xs text-muted-foreground">
                 <tr className="border-b"><th className="px-4 py-2.5 font-medium">Контрагент</th><th className="px-4 py-2.5 font-medium">Реквизиты</th><th className="px-4 py-2.5 font-medium">Изменены</th><th className="w-12" /></tr>

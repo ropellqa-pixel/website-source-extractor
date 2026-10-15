@@ -10,6 +10,7 @@ import psycopg2
 from access import current_user
 from bank import guess_category, parse_file, period_from_text
 from formulas import compute_period, global_params, load_config
+import salary_weekly
 
 SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 'public')
 CORS = {
@@ -886,6 +887,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if 'accounting.view_salary' not in can:
                 return _err('Нет доступа к зарплате', 403)
             sync_range(cur, f'{period}-01', _last_day(period))
+            salary_weekly.run(cur, SCHEMA)
             if action == 'payslip':
                 return _resp(200, _payslip(cur, int(body.get('staff_id') or 0), period))
             return _resp(200, _salary(cur, period, 'accounting.edit_salary' in can))

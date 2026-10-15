@@ -77,3 +77,23 @@ export const STATUS_STYLE: Record<ReqStatus, string> = {
   paying: 'bg-sky-500/15 text-sky-700', signing: 'bg-sky-500/15 text-sky-700', paid: 'bg-emerald-500/15 text-emerald-700',
   failed: 'bg-red-500/10 text-red-700', cancelled: 'bg-secondary text-muted-foreground line-through',
 };
+const SBBOL_PACKAGE = 'ru.sberbank.sbbol';
+export const SBBOL_WEB = 'https://sbi.sberbank.ru:9443/';
+
+export function isAndroid() {
+  return /android/i.test(navigator.userAgent);
+}
+
+export function isMobile() {
+  return /android|iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /macintosh/i.test(navigator.userAgent));
+}
+
+/** На Android открывает установленное приложение СберБизнес (если его нет — страницу подписи в браузере). */
+export function openSberBusiness(fallbackUrl: string) {
+  if (isAndroid()) {
+    const fb = encodeURIComponent(fallbackUrl);
+    window.location.href = `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${SBBOL_PACKAGE};S.browser_fallback_url=${fb};end`;
+    return;
+  }
+  window.location.href = fallbackUrl;
+}

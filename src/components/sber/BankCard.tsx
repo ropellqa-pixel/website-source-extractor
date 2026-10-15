@@ -36,7 +36,7 @@ export default function BankCard({ bank, isDeputy, canSync, onChanged, connectio
           <div className="flex-1 space-y-2">
             <h2 className="text-lg font-semibold">Подключение СберБизнес</h2>
             <p className="text-sm text-muted-foreground">
-              После подключения выписка по расчётному счёту будет сама загружаться в бухгалтерию каждый день, а директор сможет оплачивать заявки прямо отсюда.
+              После подключения выписка по расчётному счёту будет сама загружаться в бухгалтерию каждый час, а директор сможет оплачивать заявки прямо отсюда.
             </p>
             {isDeputy ? (
               <>
@@ -71,11 +71,11 @@ export default function BankCard({ bank, isDeputy, canSync, onChanged, connectio
   return (
     <div className="rounded-2xl border bg-gradient-to-br from-emerald-600 to-emerald-700 p-5 text-white shadow-sm">
       <div className="flex flex-wrap items-start gap-4">
-        <div className="flex-1 min-w-[220px]">
+        <div className="min-w-0 flex-1 basis-full sm:basis-auto">
           <div className="flex items-center gap-2 text-sm text-emerald-100">
             <Icon name="ShieldCheck" size={16} />СберБизнес подключён{bank.test && ' · тестовый контур'}
           </div>
-          <div className="mt-1 text-xl font-semibold">{bank.org?.name}</div>
+          <div className="mt-1 break-words text-lg font-semibold sm:text-xl">{bank.org?.name}</div>
           <div className="text-sm text-emerald-100">ИНН {bank.org?.inn} · счёт •••• {bank.account?.slice(-4)}{connections > 1 && ` · подключений: ${connections}`}</div>
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
@@ -127,7 +127,7 @@ export default function BankCard({ bank, isDeputy, canSync, onChanged, connectio
             </div>
             {bank.cron_key && (
               <p className="text-xs text-emerald-100">
-                Ссылка ежедневной автозагрузки (вставьте в планировщик, раз в сутки): <code className="select-all break-all text-white">{sberUrl}?cron={bank.cron_key}</code>
+                Ссылка автозагрузки выписки — поставьте в планировщик (например, cron-job.org) запуск <b>каждый час</b>: <code className="select-all break-all text-white">{sberUrl}?cron={bank.cron_key}</code>
               </p>
             )}
           </div>

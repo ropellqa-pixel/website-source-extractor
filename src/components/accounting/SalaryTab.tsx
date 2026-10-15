@@ -100,10 +100,14 @@ export default function SalaryTab({ canEdit, reloadKey }: { canEdit: boolean; re
           Этот месяц раньше начала учёта ({monthLabel(data.start_period)}) — данные не учитываются. Начало учёта меняется в админ-панели → «Общие».
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Долг на начало месяца</div><div className="mt-1 text-xl font-semibold tabular-nums">{rub(data.total_debt_start)}</div></div>
-        <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Начислено за месяц</div><div className="mt-1 text-xl font-semibold tabular-nums">{rub(accrued)}</div></div>
-        <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Выплачено за месяц</div><div className="mt-1 text-xl font-semibold tabular-nums">{rub(paid)}</div></div>
+      <div className="flex items-start gap-2 rounded-xl bg-secondary px-3 py-2.5 text-sm">
+        <Icon name="CalendarClock" size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+        <span>Выплаты ставятся сами: каждое воскресенье каждому сотруднику добавляется сумма из столбца «НЕДЕЛЯ» раздела «Зарплата», а в последний день месяца — остаток, чтобы выплаты совпали с ИТОГО.</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4">
+        <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Долг на начало месяца</div><div className="mt-1 text-lg font-semibold tabular-nums sm:text-xl">{rub(data.total_debt_start)}</div></div>
+        <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Начислено за месяц</div><div className="mt-1 text-lg font-semibold tabular-nums sm:text-xl">{rub(accrued)}</div></div>
+        <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Выплачено за месяц</div><div className="mt-1 text-lg font-semibold tabular-nums sm:text-xl">{rub(paid)}</div></div>
         <div className="rounded-2xl border bg-card p-3.5"><div className="text-xs text-muted-foreground">Долг на конец месяца</div><div className={`mt-1 text-xl font-semibold tabular-nums ${data.total_debt > 0 ? 'text-red-600' : ''}`}>{rub(data.total_debt)}</div></div>
       </div>
 
@@ -140,10 +144,6 @@ export default function SalaryTab({ canEdit, reloadKey }: { canEdit: boolean; re
                   </td>
                   <td className="px-2 py-2.5">
                     <div className="flex justify-end gap-1">
-                      {canEdit && !data.closed && <>
-                        <Button size="sm" variant="outline" className="h-8" onClick={() => open({ type: 'accrual', staff: s, pay_type: s.pay_type === 'tabel' ? 'salary' : s.pay_type, rate: s.pay_type === 'tabel' ? '' : String(s.rate), base: '', bonus: '', comment: '' })}>Начислить</Button>
-                        <Button size="sm" className="h-8" onClick={() => open({ type: 'payment', staff: s, date: today(), amount: s.debt > 0 ? String(s.debt) : '', comment: '', to_expenses: true })}>Выплатить</Button>
-                      </>}
                       <button title="Расчётный листок" onClick={() => open({ type: 'slip', staff: s })} className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="FileText" size={15} /></button>
                       <button title="История за месяц" onClick={() => open({ type: 'history', staff: s })} className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><Icon name="History" size={15} /></button>
                       {canEdit && (

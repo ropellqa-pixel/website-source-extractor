@@ -141,7 +141,13 @@ def compute_period(cur, schema: str, my: str, cfg: Dict[str, Any], params: Dict[
             row = {'profile_id': rec[0], 'name': rec[1].strip(), 'extra': rec[2], **dict(zip(cols, rec[3:]))}
             env = {**base, **_row_env(row, fields)}
             raw = safe_eval(fx[tkey], env)
+            wkey = 'manager_week' if kind == 'mgr' else 'week'
+            try:
+                week = safe_eval(fx.get(wkey) or f'{tkey} / 4', {**env, tkey: raw})
+            except Exception:
+                week = raw / 4
             people.append({'profile_id': rec[0], 'name': row['name'], 'kind': kind, 'total': round(raw, 2), 'raw': raw,
+                           'week': round(week, 2),
                            'rate': round(base['manager_rate' if kind == 'mgr' else 'rate'], 4),
                            'values': {f['key']: env.get(f['var'], 0.0) for f in fields}})
     return {'base': base, 'people': people}
