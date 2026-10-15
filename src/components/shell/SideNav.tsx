@@ -39,7 +39,7 @@ export default function SideNav({ onNavigate }: { onNavigate?: () => void }) {
                 onClick={onNavigate}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-3 rounded-[10px] px-2.5 py-2 text-[13.6px] tracking-[-0.005em] transition-colors',
+                    'flex items-center gap-3 rounded-[10px] px-2.5 py-2.5 text-[15px] lg:py-2 lg:text-[13.6px] tracking-[-0.005em] transition-colors',
                     isActive
                       ? 'soft-shadow bg-card font-semibold text-foreground'
                       : 'text-muted-foreground hover:bg-card/70 hover:text-foreground',

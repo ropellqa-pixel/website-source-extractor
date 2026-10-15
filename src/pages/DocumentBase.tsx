@@ -183,7 +183,7 @@ export default function DocumentBase() {
       {/* Header */}
       <header className="bg-card backdrop-blur-sm border-b border-border sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
+          <div className="flex flex-wrap items-center justify-between gap-2 py-3 sm:h-16 sm:py-0">
             <div className="flex items-center gap-4">
               <a href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -213,9 +213,9 @@ export default function DocumentBase() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-6">
           <div className="bg-card rounded-xl p-4 border border-border">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center">
@@ -310,7 +310,7 @@ export default function DocumentBase() {
                         {canDelete && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id); }}
-                            className="p-1.5 text-muted-foreground hover:text-red-600 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                            className="p-1.5 text-muted-foreground hover:text-red-600 hover:bg-red-500/10 rounded-lg transition-all lg:opacity-0 lg:group-hover:opacity-100"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>

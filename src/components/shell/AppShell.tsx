@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import SideNav from './SideNav';
+import BottomNav from './BottomNav';
 import { useChatNotifications } from '@/hooks/useChatNotifications';
 
 interface Notice {
@@ -25,9 +26,9 @@ export default function AppShell({ children, notice }: { children: ReactNode; no
         <SideNav />
       </aside>
 
-      <header className="relative flex items-center justify-center gap-1 border-b border-border bg-card px-14 text-center text-[14.3px] tracking-[-0.01em] lg:border-b-0 lg:px-6 app-head">
+      <header className="relative flex items-center justify-center gap-1 border-b border-border bg-card px-14 pt-[env(safe-area-inset-top)] text-center text-[13px] sm:text-[14.3px] tracking-[-0.01em] lg:border-b-0 lg:px-6 app-head">
         <button
-          className="absolute left-3 rounded-full p-2 text-foreground hover:bg-secondary lg:hidden"
+          className="absolute bottom-2 left-2 rounded-full p-2.5 text-foreground hover:bg-secondary lg:hidden"
           onClick={() => setOpen(true)}
           aria-label="Открыть меню"
         >
@@ -43,10 +44,12 @@ export default function AppShell({ children, notice }: { children: ReactNode; no
         </span>
       </header>
 
-      <main className="min-w-0 overflow-y-auto overflow-x-hidden app-main">{children}</main>
+      <main className="min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain app-main">{children}</main>
+
+      <BottomNav onMore={() => setOpen(true)} />
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="left" className="w-[260px] bg-nav p-0">
+        <SheetContent side="left" className="w-[280px] max-w-[85vw] bg-nav p-0 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]">
           <SheetTitle className="sr-only">Разделы</SheetTitle>
           <SideNav onNavigate={() => setOpen(false)} />
         </SheetContent>

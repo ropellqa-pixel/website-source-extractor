@@ -528,7 +528,7 @@ export default function Collection() {
 
       <header className="bg-card backdrop-blur-sm border-b border-border sticky top-0 z-50">
         <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-14">
+          <div className="flex flex-wrap items-center justify-between gap-2 py-2 sm:h-14 sm:py-0">
             <div className="flex items-center gap-3">
               <button onClick={() => navigate('/dashboard')}
                 className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-all">

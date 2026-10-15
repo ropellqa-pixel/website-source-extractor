@@ -134,7 +134,7 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
         <Stat label="Доходы" value={rub(income)} cls="text-emerald-600" />
         <Stat label="Расходы" value={rub(expense)} cls="text-red-600" />
         <Stat label="Разница" value={rub(income - expense)} cls={income - expense >= 0 ? 'text-emerald-600' : 'text-red-600'} />

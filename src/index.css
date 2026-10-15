@@ -137,9 +137,10 @@
   .app-grid {
     position: fixed; inset: 0; display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: 56px 1fr;
-    grid-template-areas: "head" "main";
+    grid-template-rows: calc(56px + env(safe-area-inset-top)) 1fr calc(60px + env(safe-area-inset-bottom));
+    grid-template-areas: "head" "main" "tabs";
   }
+  .app-tabs { grid-area: tabs; padding-bottom: env(safe-area-inset-bottom); }
   .app-side { grid-area: side; }
   .app-head { grid-area: head; }
   .app-main { grid-area: main; }

@@ -139,7 +139,7 @@ export default function Documents() {
     <div className="min-h-full">
       <header className="bg-card backdrop-blur-sm border-b border-border sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
+          <div className="flex flex-wrap items-center justify-between gap-2 py-3 sm:h-16 sm:py-0">
             <div className="flex items-center gap-4">
               <a href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">

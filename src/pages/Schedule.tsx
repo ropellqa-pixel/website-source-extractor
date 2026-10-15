@@ -568,7 +568,7 @@ export default function Schedule() {
   return (
     <div className="min-h-full">
       <header className="bg-card backdrop-blur-sm border-b border-border sticky top-0 z-50">
-        <div className="max-w-full mx-auto px-4 h-14 flex items-center justify-between">
+        <div className="max-w-full mx-auto px-4 py-2 sm:h-14 sm:py-0 flex flex-wrap gap-2 items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={() => navigate('/dashboard')} className="p-2 text-muted-foreground hover:text-foreground rounded-lg">
               <ArrowLeft className="w-5 h-5" />
