@@ -69,7 +69,7 @@ export function weekLabel(iso: string) {
 export function shiftWeek(iso: string, n: number) {
   const d = new Date(iso + 'T00:00:00');
   d.setDate(d.getDate() + n * 7);
-  return d.toISOString().slice(0, 10);
+  return d.toLocaleDateString('sv-SE');
 }
 
 export const STATUS_STYLE: Record<ReqStatus, string> = {
