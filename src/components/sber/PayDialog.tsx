@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import Icon from '@/components/ui/icon';
 import { rub } from '@/lib/accountingApi';
 import { sberCall, VAT_LABELS, type SberConnection, type SberRequest } from '@/lib/sberApi';
@@ -9,7 +8,6 @@ import { sberCall, VAT_LABELS, type SberConnection, type SberRequest } from '@/l
 export default function PayDialog({ items, connections, onClose, onDone }: { items: SberRequest[]; connections: SberConnection[]; onClose: () => void; onDone: () => void }) {
   const live = connections.filter((c) => c.active && c.account);
   const [connId, setConnId] = useState<number | null>((live.find((c) => c.is_default) || live[0])?.id ?? null);
-  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<{ id: number; ok: boolean; error?: string; sign_url?: string }[] | null>(null);
@@ -17,8 +15,8 @@ export default function PayDialog({ items, connections, onClose, onDone }: { ite
 
   const pay = async () => {
     setBusy(true); setError(null);
-    const r = await sberCall<{ results: { id: number; ok: boolean; error?: string; sign_url?: string }[] }>({ action: 'pay', ids: items.map((x) => x.id), password, connection_id: connId, origin: window.location.origin });
-    setBusy(false); setPassword('');
+    const r = await sberCall<{ results: { id: number; ok: boolean; error?: string; sign_url?: string }[] }>({ action: 'pay', ids: items.map((x) => x.id), connection_id: connId, origin: window.location.origin });
+    setBusy(false);
     if (r.error) { setError(r.error); return; }
     setResults(r.results);
     onDone();
@@ -71,16 +69,11 @@ export default function PayDialog({ items, connections, onClose, onDone }: { ite
                 </select>
               </label>
             )}
-            <label className="block space-y-1 text-sm">
-              <span className="text-muted-foreground">Подтвердите паролем от вашей учётной записи</span>
-              <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && password && pay()} autoFocus />
-            </label>
             {error && <p className="text-sm text-red-600">{error}</p>}
-            <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={pay} disabled={busy || !password}>
+            <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={pay} disabled={busy}>
               <Icon name="ShieldCheck" size={16} />{busy ? 'Отправляю в банк…' : `Оплатить ${rub(total)}`}
             </Button>
-            <p className="text-center text-xs text-muted-foreground">Следующий шаг — подтверждение кодом из СМС от Сбера</p>
+            <p className="text-center text-xs text-muted-foreground">Платёж нужно будет подтвердить кодом из СМС от Сбера</p>
           </div>
         )}
       </DialogContent>

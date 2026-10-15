@@ -977,8 +977,6 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
         conn = _connection(cur, body.get('connection_id'))
     except sber.SberError as e:
         return _err(str(e))
-    if not _check_password(cur, user['id'], str(body.get('password') or '')):
-        return _err('Неверный пароль', 403)
     ids = [int(x) for x in (body.get('ids') or [])][:50]
     if not ids:
         return _err('Выберите заявки')
