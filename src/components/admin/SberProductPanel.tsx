@@ -2,19 +2,22 @@ import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/ui/icon';
-import { sberCall } from '@/lib/sberApi';
+import { sberCall, sberUrl } from '@/lib/sberApi';
 
 export type SberProduct = {
-  code: string; title: string; app: string; active: boolean; scope: string; redirect_uri: string;
+  code: string; title: string; app: string; active: boolean; main: boolean; scope: string; scope_v1: string; scope_v2: string;
+  client_id: string; redirect_uri: string; back_url: string;
   cert: { subject: string; org: string; valid_to: string; file_name: string; uploaded_at: string; uploaded_by: string } | null;
   configured: { client_id: boolean; client_secret: boolean };
   updated_at: string | null; updated_by: string | null;
 };
 
+const Ok = ({ on }: { on: boolean }) => <Icon name={on ? 'CircleCheck' : 'CircleDashed'} size={14} className={on ? 'text-emerald-600' : ''} />;
+
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 
 export default function SberProductPanel({ p, onSaved }: { p: SberProduct; onSaved: (list: SberProduct[]) => void }) {
-  const [form, setForm] = useState({ scope: p.scope, redirect_uri: p.redirect_uri, client_id: '', client_secret: '' });
+  const [form, setForm] = useState({ client_id: p.client_id, redirect_uri: p.redirect_uri, back_url: p.back_url, scope_v1: p.scope_v1, scope_v2: p.scope_v2 || p.scope, client_secret: '' });
   const [file, setFile] = useState<{ name: string; data: string } | null>(null);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -45,7 +48,7 @@ export default function SberProductPanel({ p, onSaved }: { p: SberProduct; onSav
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border bg-card p-4 lg:col-span-2">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600/10"><Icon name="Landmark" size={20} className="text-emerald-600" /></div>
         <div className="min-w-0 flex-1">
-          <div className="font-medium">Sber API: {p.app}</div>
+          <div className="flex items-center gap-2 font-medium">Sber API: {p.app}{p.main && <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] text-white">основная интеграция</span>}</div>
           <div className="text-sm text-muted-foreground">{p.title} · {ready ? 'настроено' : 'не все данные заполнены'}</div>
         </div>
         <label className="flex items-center gap-2 text-sm">
@@ -55,7 +58,7 @@ export default function SberProductPanel({ p, onSaved }: { p: SberProduct; onSav
       </div>
 
       <div className="space-y-3 rounded-2xl border bg-card p-5">
-        <div className="flex items-center gap-2"><Icon name="FileKey" fallback="KeyRound" size={18} className="text-emerald-600" /><h3 className="font-medium">Сертификат</h3></div>
+        <div className="flex items-center gap-2"><Icon name="FileKey" fallback="KeyRound" size={18} className="text-emerald-600" /><h3 className="font-medium">Сертификат шифрования</h3></div>
         {cert ? (
           <div className={`rounded-xl p-3 text-sm ${daysLeft !== null && daysLeft <= 30 ? 'bg-amber-500/10' : 'bg-emerald-500/10'}`}>
             <div className="font-medium">{cert.subject || cert.org}</div>
@@ -85,26 +88,33 @@ export default function SberProductPanel({ p, onSaved }: { p: SberProduct; onSav
       </div>
 
       <div className="space-y-3 rounded-2xl border bg-card p-5">
-        <div className="flex items-center gap-2"><Icon name="KeyRound" size={18} className="text-emerald-600" /><h3 className="font-medium">Ключи приложения</h3></div>
-        {(['client_id', 'client_secret'] as const).map((k) => (
+        <div className="flex items-center gap-2"><Icon name="KeyRound" size={18} className="text-emerald-600" /><h3 className="font-medium">Настройки приложения</h3></div>
+        <label className="block space-y-1 text-sm">
+          <span className="flex items-center gap-1.5 text-muted-foreground"><Ok on={!!p.client_id} />Client ID</span>
+          <Input value={form.client_id} placeholder="Вставьте из кабинета Sber API" onChange={(e) => setForm({ ...form, client_id: e.target.value })} className="font-mono text-xs" />
+        </label>
+        <label className="block space-y-1 text-sm">
+          <span className="flex items-center gap-1.5 text-muted-foreground"><Ok on={p.configured.client_secret} />Client Secret</span>
+          <Input type="password" autoComplete="off" placeholder={p.configured.client_secret ? 'Сохранён — введите, чтобы заменить' : 'Вставьте из кабинета Sber API'}
+            value={form.client_secret} onChange={(e) => setForm({ ...form, client_secret: e.target.value })} />
+        </label>
+        <label className="block space-y-1 text-sm">
+          <span className="flex items-center gap-1.5 text-muted-foreground"><Ok on={!!p.redirect_uri} />Redirect URI</span>
+          <Input value={form.redirect_uri} placeholder={sberUrl} onChange={(e) => setForm({ ...form, redirect_uri: e.target.value })} className="font-mono text-xs" />
+          {!form.redirect_uri && <button type="button" className="text-xs text-emerald-700 hover:underline" onClick={() => setForm({ ...form, redirect_uri: sberUrl })}>Подставить адрес системы</button>}
+        </label>
+        <label className="block space-y-1 text-sm">
+          <span className="flex items-center gap-1.5 text-muted-foreground"><Ok on={!!p.back_url} />Back URL — возврат после подписи платёжки</span>
+          <Input value={form.back_url} placeholder={`${window.location.origin}/sber`} onChange={(e) => setForm({ ...form, back_url: e.target.value })} className="font-mono text-xs" />
+          {!form.back_url && <button type="button" className="text-xs text-emerald-700 hover:underline" onClick={() => setForm({ ...form, back_url: `${window.location.origin}/sber` })}>Подставить адрес системы</button>}
+        </label>
+        {(['scope_v1', 'scope_v2'] as const).map((k) => (
           <label key={k} className="block space-y-1 text-sm">
-            <span className="flex items-center gap-1.5 text-muted-foreground">
-              <Icon name={p.configured[k] ? 'CircleCheck' : 'CircleDashed'} size={14} className={p.configured[k] ? 'text-emerald-600' : ''} />
-              {k === 'client_id' ? 'Client ID' : 'Client Secret'}
-            </span>
-            <Input type="password" autoComplete="off" placeholder={p.configured[k] ? 'Сохранён — введите, чтобы заменить' : 'Вставьте из кабинета Sber API'}
-              value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
+            <span className="flex items-center gap-1.5 text-muted-foreground"><Ok on={!!p[k]} />Scope для авторизации {k === 'scope_v1' ? 'v1' : 'v2 (используется для входа)'}</span>
+            <textarea value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} rows={3} placeholder="openid …"
+              className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" />
           </label>
         ))}
-        <label className="block space-y-1 text-sm">
-          <span className="text-muted-foreground">Redirect URI</span>
-          <Input value={form.redirect_uri} onChange={(e) => setForm({ ...form, redirect_uri: e.target.value })} className="font-mono text-xs" />
-        </label>
-        <label className="block space-y-1 text-sm">
-          <span className="text-muted-foreground">Scope (права доступа)</span>
-          <textarea value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })} rows={3} placeholder="openid GET_CLIENT_ACCOUNTS …"
-            className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" />
-        </label>
         <Button disabled={!!busy} onClick={async () => { if (await call('product_save', form, 'Сохранено')) setForm({ ...form, client_id: '', client_secret: '' }); }}>
           {busy === 'product_save' ? 'Сохраняю…' : 'Сохранить'}
         </Button>

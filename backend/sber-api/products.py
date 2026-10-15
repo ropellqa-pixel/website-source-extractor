@@ -1,17 +1,22 @@
 import base64
 import json
+import os
 from datetime import date, datetime
 from typing import Any, Callable, Dict
 
 import sber
 
+MAIN = 'b2bsaas'
 PRODUCTS = {
-    'company': {'title': 'Компаниям', 'app': '2907011706_Company'},
     'b2bsaas': {'title': 'Платформам', 'app': '2907011706_B2BSaaS'},
+    'pay': {'title': 'Моментальные платежи', 'app': '2907011706_PAY'},
+    'company': {'title': 'Компаниям', 'app': '2907011706_Company'},
     'holding': {'title': 'Холдингам', 'app': '2907011706_HOLDING'},
     'sbbid': {'title': 'СберБизнес ID', 'app': '2907011706_SBBID'},
 }
-SECRET_FIELDS = ('client_id', 'client_secret')
+SECRET_FIELDS = ('client_secret',)
+TEXT_FIELDS = ('client_id', 'redirect_uri', 'back_url')
+SCOPE_FIELDS = ('scope', 'scope_v1', 'scope_v2')
 
 
 def _load(cur, schema: str) -> Dict[str, Any]:
@@ -27,6 +32,51 @@ def _save(cur, schema: str, v: Dict[str, Any], who: str) -> None:
                 (json.dumps(v, ensure_ascii=False), who))
 
 
+def _migrate(cur, schema: str, saved: Dict[str, Any], vault_get: Callable, vault_set: Callable) -> bool:
+    changed = False
+    for code, p in saved.items():
+        if not p.get('client_id'):
+            old = vault_get(cur, f'p:{code}:client_id')
+            if old:
+                p['client_id'] = old
+                changed = True
+    if 'pay' not in saved:
+        cur.execute(f"SELECT value FROM {schema}.app_settings WHERE key = 'sber'")
+        r = cur.fetchone()
+        old = (r[0] if isinstance(r[0], dict) else json.loads(r[0])) if r else {}
+        p = {'active': True}
+        for f in ('scope', 'scope_v1', 'scope_v2', 'cert'):
+            if old.get(f):
+                p[f] = old[f]
+        for f in ('client_id', 'redirect_uri'):
+            v = (os.environ.get('SBER_' + f.upper()) or '').strip()
+            if v:
+                p[f] = v
+        for k in ('cert_p12', 'cert_password'):
+            v = vault_get(cur, k)
+            if v is not None:
+                vault_set(cur, f'p:pay:{k}', v)
+        sec = (os.environ.get('SBER_CLIENT_SECRET') or '').strip()
+        if sec:
+            vault_set(cur, 'p:pay:client_secret', sec)
+        saved['pay'] = p
+        changed = True
+    return changed
+
+
+def ensure(cur, schema: str, vault_get: Callable, vault_set: Callable) -> None:
+    saved = _load(cur, schema)
+    if _migrate(cur, schema, saved, vault_get, vault_set):
+        _save(cur, schema, saved, 'Система')
+
+
+def main_config(cur, schema: str, vault_get: Callable) -> Dict[str, Any]:
+    p = _load(cur, schema).get(MAIN) or {}
+    raw = vault_get(cur, f'p:{MAIN}:cert_p12')
+    return {**p, 'client_secret': vault_get(cur, f'p:{MAIN}:client_secret') or '',
+            'cert_p12': base64.b64decode(raw) if raw else None, 'cert_password': vault_get(cur, f'p:{MAIN}:cert_password') or ''}
+
+
 def overview(cur, schema: str, vault_get: Callable) -> Dict[str, Any]:
     saved = _load(cur, schema)
     out = []
@@ -35,10 +85,10 @@ def overview(cur, schema: str, vault_get: Callable) -> Dict[str, Any]:
         out.append({
             'code': code, 'title': meta['title'], 'app': meta['app'],
             'active': bool(p.get('active', True)),
-            'scope': p.get('scope') or '',
-            'redirect_uri': p.get('redirect_uri') or '',
+            'main': code == MAIN,
+            **{f: p.get(f) or '' for f in TEXT_FIELDS + SCOPE_FIELDS},
             'cert': p.get('cert'),
-            'configured': {f: bool(vault_get(cur, f'p:{code}:{f}')) for f in SECRET_FIELDS},
+            'configured': {'client_id': bool(p.get('client_id')), 'client_secret': bool(vault_get(cur, f'p:{code}:client_secret'))},
             'updated_at': p.get('updated_at'), 'updated_by': p.get('updated_by'),
         })
     return {'products': out}
@@ -60,10 +110,15 @@ def handle(cur, schema: str, user: Dict[str, Any], action: str, body: Dict[str, 
     if action == 'product_save':
         if 'active' in body:
             p['active'] = bool(body['active'])
-        if 'scope' in body:
-            p['scope'] = ' '.join(str(body.get('scope') or '').replace(',', ' ').split())[:2000]
-        if 'redirect_uri' in body:
-            p['redirect_uri'] = str(body.get('redirect_uri') or '').strip()[:500]
+        for f in SCOPE_FIELDS:
+            if f in body:
+                p[f] = ' '.join(str(body.get(f) or '').replace(',', ' ').split())[:2000]
+        for f in TEXT_FIELDS:
+            if f in body:
+                v = str(body.get(f) or '').strip()[:500]
+                if v and f != 'client_id' and not v.startswith('https://'):
+                    raise sber.SberError('Адрес должен начинаться с https://')
+                p[f] = v
         for f in SECRET_FIELDS:
             val = str(body.get(f) or '').strip()
             if val:
@@ -93,7 +148,8 @@ def handle(cur, schema: str, user: Dict[str, Any], action: str, body: Dict[str, 
         p.pop('cert', None)
         log(cur, user, f'Sber API «{title}»: сертификат удалён', '')
     elif action == 'product_keys_delete':
-        cur.execute(f"DELETE FROM {schema}.sber_vault WHERE key IN (%s, %s)", (f'p:{code}:client_id', f'p:{code}:client_secret'))
+        cur.execute(f"DELETE FROM {schema}.sber_vault WHERE key IN (%s, %s)", (f'p:{code}:client_secret', f'p:{code}:client_id'))
+        p.pop('client_id', None)
         log(cur, user, f'Sber API «{title}»: ключи удалены', '')
     else:
         raise sber.SberError('Неизвестное действие')

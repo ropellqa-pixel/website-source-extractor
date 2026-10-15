@@ -4,7 +4,8 @@ import SberTab from './SberTab';
 import SberProductPanel, { type SberProduct } from './SberProductPanel';
 
 export default function SberSection() {
-  const [sub, setSub] = useState('pay');
+  const [sub, setSub] = useState('b2bsaas');
+  const [ver, setVer] = useState(0);
   const [list, setList] = useState<SberProduct[]>([]);
 
   useEffect(() => {
@@ -12,7 +13,8 @@ export default function SberSection() {
   }, []);
 
   const current = list.find((p) => p.code === sub);
-  const tabs = [{ code: 'pay', label: 'PAY', hint: 'Моментальные платежи', active: true }, ...list.map((p) => ({ code: p.code, label: p.app.split('_')[1] || p.app, hint: p.title, active: p.active }))];
+  const tabs = list.map((p) => ({ code: p.code, label: p.app.split('_')[1] || p.app, hint: p.main ? `${p.title} · основная` : p.title, active: p.active }));
+  const saved = (l: SberProduct[]) => { setList(l); setVer((v) => v + 1); };
 
   return (
     <div className="space-y-4">
@@ -27,7 +29,8 @@ export default function SberSection() {
           </button>
         ))}
       </div>
-      {sub === 'pay' ? <SberTab /> : current && <SberProductPanel key={current.code} p={current} onSaved={setList} />}
+      {current && <SberProductPanel key={current.code} p={current} onSaved={saved} />}
+      {current?.main && <SberTab key={ver} />}
     </div>
   );
 }

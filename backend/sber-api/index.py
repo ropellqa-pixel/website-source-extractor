@@ -61,8 +61,15 @@ def _settings(cur) -> Dict[str, Any]:
     cur.execute(f"SELECT value FROM {SCHEMA}.app_settings WHERE key = 'sber'")
     r = cur.fetchone()
     v = r[0] if r and isinstance(r[0], dict) else json.loads(r[0]) if r else {}
-    return {'limit_payment': 300000, 'limit_day': 1000000,
-            'scope': 'openid GET_CLIENT_ACCOUNTS GET_STATEMENT_ACCOUNT GET_STATEMENT_TRANSACTION PAY_DOC_RU', **v}
+    out = {'limit_payment': 300000, 'limit_day': 1000000,
+           'scope': 'openid GET_CLIENT_ACCOUNTS GET_STATEMENT_ACCOUNT GET_STATEMENT_TRANSACTION PAY_DOC_RU', **v}
+    m = products.main_config(cur, SCHEMA, _vault_get)
+    for k in ('scope_v1', 'scope_v2', 'back_url', 'redirect_uri', 'client_id'):
+        out[k] = m.get(k) or ''
+    out['cert'] = m.get('cert')
+    if out['scope_v2'] or m.get('scope'):
+        out['scope'] = out['scope_v2'] or m.get('scope')
+    return out
 
 
 def _save_settings(cur, v: Dict[str, Any], who: str) -> None:
@@ -90,14 +97,19 @@ def _sign_url(s: Dict[str, Any], ext: str, back: str = '') -> str:
     return sber.sign_url(ext, back)
 
 
-def _back(body: Dict[str, Any]) -> str:
+def _back(body: Dict[str, Any], s: Optional[Dict[str, Any]] = None) -> str:
+    if s and s.get('back_url'):
+        u = str(s['back_url'])
+        return u + ('&' if '?' in u else '?') + 'signed=1'
     o = str(body.get('origin') or '')
     return (o + '/sber?signed=1') if re.match(r'^https://[a-z0-9.-]+(:\d+)?$', o) else ''
 
 
 def _load_cert(cur) -> None:
-    raw, pw = _vault_get(cur, 'cert_p12'), _vault_get(cur, 'cert_password')
-    sber.set_cert(base64.b64decode(raw) if raw else None, pw or '')
+    products.ensure(cur, SCHEMA, _vault_get, _vault_set)
+    m = products.main_config(cur, SCHEMA, _vault_get)
+    sber.set_cert(m['cert_p12'], m['cert_password'])
+    sber.set_config(m.get('client_id') or '', m['client_secret'], m.get('redirect_uri') or '')
 
 
 def _token(cur, conn_id: int) -> str:
@@ -652,7 +664,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
     if action == 'diagnose':
         if not deputy:
             return _err('Только заместитель директора', 403)
-        return _resp(200, {'steps': sber.diagnose(), 'redirect_uri': os.environ.get('SBER_REDIRECT_URI') or ''})
+        return _resp(200, {'steps': sber.diagnose(), 'redirect_uri': s.get('redirect_uri') or ''})
 
     if action == 'notify_save':
         if not deputy:
@@ -699,7 +711,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         if 'sber.pay' not in can:
             return _err('Нет права', 403)
         rows = _requests(cur, "WHERE r.id = ANY(%s) AND r.status IN ('paying', 'signing')", ([int(x) for x in body.get('ids') or []][:50],))
-        return _resp(200, {'links': [{'id': r['id'], 'url': _sign_url(s, r['external_id'], _back(body))} for r in rows if r['external_id']]})
+        return _resp(200, {'links': [{'id': r['id'], 'url': _sign_url(s, r['external_id'], _back(body, s))} for r in rows if r['external_id']]})
 
     if action in ('cert_upload', 'cert_delete'):
         if not deputy:
@@ -987,7 +999,7 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
             data = resp.json() if resp.content else {}
             cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'signing', bank_status = %s, bank_checked_at = now() WHERE id = %s",
                         (str(data.get('bankStatus') or 'CREATED'), r['id']))
-            results.append({'id': r['id'], 'ok': True, 'sign_url': _sign_url(s, ext, _back(body))})
+            results.append({'id': r['id'], 'ok': True, 'sign_url': _sign_url(s, ext, _back(body, s))})
             _log(cur, user, 'Оплата', f"{r['counterparty']} {r['amount']:.2f} ₽, счёт {r['requisites'].get('account')}, с {conn['account']}")
         elif resp.status_code == 403:
             msg = ('Сбер не разрешил создать платёжку ни одним способом (PAY_DOC_RU и PAY_DOC_RU_INVOICE_ANY). '

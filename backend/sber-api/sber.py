@@ -29,6 +29,17 @@ def _env(name: str) -> str:
     return (os.environ.get(name) or '').strip()
 
 
+_cfg: Dict[str, str] = {}
+
+
+def set_config(client_id: str, client_secret: str, redirect_uri: str) -> None:
+    _cfg.update({'client_id': client_id or '', 'client_secret': client_secret or '', 'redirect_uri': redirect_uri or ''})
+
+
+def _c(name: str) -> str:
+    return (_cfg.get(name) or '').strip()
+
+
 _cert_p12: Optional[bytes] = None
 _cert_pass: str = ''
 
@@ -42,8 +53,8 @@ def set_cert(p12: Optional[bytes], password: str) -> None:
 
 def configured() -> Dict[str, bool]:
     return {
-        'client_id': bool(_env('SBER_CLIENT_ID')),
-        'client_secret': bool(_env('SBER_CLIENT_SECRET')),
+        'client_id': bool(_c('client_id')),
+        'client_secret': bool(_c('client_secret')),
         'certificate': bool(_cert_p12),
     }
 
@@ -147,8 +158,8 @@ def diagnose() -> List[Dict[str, Any]]:
         return steps
     try:
         r = requests.post(f'{auth_base()}/ic/sso/api/v2/oauth/token', cert=(cp, kp), verify=_verify(), timeout=15,
-                          data={'grant_type': 'refresh_token', 'refresh_token': 'check', 'client_id': _env('SBER_CLIENT_ID'),
-                                'client_secret': _env('SBER_CLIENT_SECRET')})
+                          data={'grant_type': 'refresh_token', 'refresh_token': 'check', 'client_id': _c('client_id'),
+                                'client_secret': _c('client_secret')})
         body = r.text[:300]
         if 'No required SSL certificate' in body or 'SSL certificate' in body:
             steps.append({'step': 'Банк принял сертификат', 'ok': False, 'text': 'Банк не принял сертификат организации'})
@@ -230,16 +241,16 @@ def sign_url(external_id: str, back_url: str = '') -> str:
 
 
 def authorize_url(state: str, nonce: str, scope: str) -> str:
-    if not _env('SBER_REDIRECT_URI'):
-        raise SberError('Для входа через СберБизнес нужен секрет SBER_REDIRECT_URI — или вставьте Access/Refresh Token в админ-панели')
-    q = {'response_type': 'code', 'client_id': _env('SBER_CLIENT_ID'), 'redirect_uri': _env('SBER_REDIRECT_URI'),
+    if not _c('redirect_uri'):
+        raise SberError('Для входа через СберБизнес нужен Redirect URI (Админ-панель → СберБизнес) — или вставьте Access/Refresh Token в админ-панели')
+    q = {'response_type': 'code', 'client_id': _c('client_id'), 'redirect_uri': _c('redirect_uri'),
          'scope': scope, 'state': state, 'nonce': nonce}
     host = 'https://efs-sbbol-ift-web.testsbi.sberbank.ru:9443' if is_test() else 'https://sbi.sberbank.ru:9443'
     return f'{host}/ic/sso/api/v2/oauth/authorize?{urlencode(q)}'
 
 
 def _token_call(data: Dict[str, str]) -> Dict[str, Any]:
-    data = {**data, 'client_id': _env('SBER_CLIENT_ID'), 'client_secret': _env('SBER_CLIENT_SECRET')}
+    data = {**data, 'client_id': _c('client_id'), 'client_secret': _c('client_secret')}
     r = _request('POST', f'{auth_base()}/ic/sso/api/v2/oauth/token', data=data,
                  headers={'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'})
     if r.status_code != 200:
@@ -257,7 +268,7 @@ def _token_call(data: Dict[str, str]) -> Dict[str, Any]:
 
 
 def exchange_code(code: str) -> Dict[str, Any]:
-    return _token_call({'grant_type': 'authorization_code', 'code': code, 'redirect_uri': _env('SBER_REDIRECT_URI')})
+    return _token_call({'grant_type': 'authorization_code', 'code': code, 'redirect_uri': _c('redirect_uri')})
 
 
 def refresh(refresh_token: str) -> Dict[str, Any]:

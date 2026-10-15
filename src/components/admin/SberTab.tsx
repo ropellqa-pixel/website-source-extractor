@@ -1,17 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/ui/icon';
 import { sberCall, sberUrl, type SberConnection, type SberOverview } from '@/lib/sberApi';
 
-type Cert = { subject: string; org: string; serial: string; valid_from: string; valid_to: string; file_name: string; uploaded_at: string; uploaded_by: string };
-
-const fmtDate = (d: string) => new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 
 export default function SberTab() {
-  const [bank, setBank] = useState<(SberOverview['bank'] & { cert?: Cert | null; scope_v1?: string | null; scope_v2?: string | null; has_tokens?: boolean | null; sign_url_template?: string | null }) | null>(null);
-  const [scopes, setScopes] = useState({ scope_v1: '', scope_v2: '', sign_url_template: '' });
+  const [bank, setBank] = useState<SberOverview['bank'] | null>(null);
   const [tokens, setTokens] = useState<{ access_token: string; refresh_token: string; title: string; connection_id: number | null } | null>(null);
   const [conns, setConns] = useState<SberConnection[]>([]);
   const [notify, setNotify] = useState<SberOverview['notify']>(null);
@@ -26,37 +22,13 @@ export default function SberTab() {
   };
   const [msg2, setMsg2] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy2, setBusy2] = useState<string | null>(null);
-  const [file, setFile] = useState<{ name: string; data: string } | null>(null);
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-
   const load = useCallback(async () => {
     const r = await sberCall<SberOverview>({ action: 'overview' });
-    if (r.error) { setMsg({ ok: false, text: r.error }); return; }
+    if (r.error) { setMsg2({ ok: false, text: r.error }); return; }
     const b = r.bank as typeof bank;
     setBank(b); setConns(r.connections.filter((c) => c.active)); setNotify(r.notify);
-    setScopes({ scope_v1: b?.scope_v1 || '', scope_v2: b?.scope_v2 || '', sign_url_template: b?.sign_url_template || '' });
   }, []);
   useEffect(() => { load(); }, [load]);
-
-  const pick = (f: File) => {
-    const reader = new FileReader();
-    reader.onload = () => setFile({ name: f.name, data: String(reader.result) });
-    reader.readAsDataURL(f);
-  };
-
-  const upload = async () => {
-    if (!file) return;
-    setBusy(true); setMsg(null);
-    const r = await sberCall({ action: 'cert_upload', file_name: file.name, file: file.data, password });
-    setBusy(false);
-    if (r.error) { setMsg({ ok: false, text: r.error }); return; }
-    setFile(null); setPassword('');
-    setMsg({ ok: true, text: 'Сертификат загружен и проверен' });
-    load();
-  };
 
   const save2 = async (action: string, payload: Record<string, unknown>) => {
     setBusy2(action); setMsg2(null);
@@ -68,78 +40,15 @@ export default function SberTab() {
     load();
   };
 
-  const cert = bank?.cert;
-  const daysLeft = cert ? Math.ceil((new Date(cert.valid_to).getTime() - Date.now()) / 86400000) : null;
-  const keys: [string, string][] = [['client_id', 'SBER_CLIENT_ID'], ['client_secret', 'SBER_CLIENT_SECRET']];
-
   return (
     <div className="grid max-w-4xl gap-4 lg:grid-cols-2">
       <div className="space-y-3 rounded-2xl border bg-card p-5">
         <div className="flex items-center gap-2">
-          <Icon name="FileKey" fallback="KeyRound" size={18} className="text-emerald-600" />
-          <h3 className="font-medium">Сертификат организации</h3>
-        </div>
-        {cert ? (
-          <div className={`rounded-xl p-3 text-sm ${daysLeft !== null && daysLeft <= 30 ? 'bg-amber-500/10' : 'bg-emerald-500/10'}`}>
-            <div className="font-medium">{cert.subject || cert.org}</div>
-            <div className="text-muted-foreground">Действует до <b className="text-foreground">{fmtDate(cert.valid_to)}</b>
-              {daysLeft !== null && <> · {daysLeft > 0 ? `осталось ${daysLeft} дн.` : 'истёк'}</>}
-            </div>
-            <div className="mt-1 text-xs text-muted-foreground">{cert.file_name} · загрузил {cert.uploaded_by}, {fmtDate(cert.uploaded_at)}</div>
-            {daysLeft !== null && daysLeft <= 30 && (
-              <div className="mt-2 flex items-center gap-1.5 text-amber-800"><Icon name="TriangleAlert" size={15} />Скоро истекает — выпустите новый в СберБизнес и загрузите сюда</div>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">Сертификат ещё не загружен. Его выпускают в СберБизнес раз в год — файл <b>.p12</b> или <b>.pfx</b> с паролем.</p>
-        )}
-
-        <input ref={fileRef} type="file" accept=".p12,.pfx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ''; }} />
-        <button onClick={() => fileRef.current?.click()}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-5 text-sm text-muted-foreground hover:border-primary hover:text-foreground">
-          <Icon name={file ? 'FileCheck' : 'Upload'} size={18} />{file ? file.name : cert ? 'Выбрать новый файл сертификата' : 'Выбрать файл .p12 / .pfx'}
-        </button>
-        {file && (
-          <>
-            <Input type="password" autoComplete="new-password" placeholder="Пароль от сертификата" value={password} onChange={(e) => setPassword(e.target.value)} />
-            <div className="flex gap-2">
-              <Button onClick={upload} disabled={busy}>{busy ? 'Проверяю…' : 'Загрузить'}</Button>
-              <Button variant="ghost" onClick={() => { setFile(null); setPassword(''); }}>Отмена</Button>
-            </div>
-          </>
-        )}
-        {msg && <p className={`text-sm ${msg.ok ? 'text-emerald-600' : 'text-red-600'}`}>{msg.text}</p>}
-        <p className="text-xs text-muted-foreground">
-          Файл и пароль хранятся в зашифрованном виде и никому не показываются. Перед сохранением проверяется, что пароль подходит и срок не истёк.
-        </p>
-      </div>
-
-      <div className="space-y-3 rounded-2xl border bg-card p-5">
-        <div className="flex items-center gap-2">
           <Icon name="Landmark" size={18} className="text-emerald-600" />
-          <h3 className="font-medium">Подключение к банку</h3>
+          <h3 className="font-medium">Проверка связи с банком</h3>
         </div>
         {bank && (
           <>
-            <div className="space-y-1.5">
-              {keys.map(([k, n]) => (
-                <div key={k} className="flex items-center gap-2 text-sm">
-                  <Icon name={bank.configured[k] ? 'CircleCheck' : 'CircleDashed'} size={16} className={bank.configured[k] ? 'text-emerald-600' : 'text-muted-foreground'} />
-                  <code className="text-xs">{n}</code><span className="text-xs text-muted-foreground">— в секретах проекта</span>
-                </div>
-              ))}
-              <div className="flex items-center gap-2 text-sm">
-                <Icon name={cert ? 'CircleCheck' : 'CircleDashed'} size={16} className={cert ? 'text-emerald-600' : 'text-muted-foreground'} />
-                Сертификат <span className="text-xs text-muted-foreground">— загружается здесь</span>
-              </div>
-            </div>
-            <div className="space-y-2 rounded-xl bg-secondary p-3 text-xs text-muted-foreground">
-              <div>В кабинете Sber API в поле <b className="text-foreground">Redirect URI</b> и в секрет SBER_REDIRECT_URI вставьте:</div>
-              <code className="block select-all break-all rounded bg-background px-2 py-1 text-foreground">{sberUrl}</code>
-              <div>В поле <b className="text-foreground">Back URL</b> (возврат после подписи платёжки):</div>
-              <code className="block select-all break-all rounded bg-background px-2 py-1 text-foreground">{window.location.origin}/sber</code>
-              <div>Цепочка доверенных сертификатов Сбера уже встроена в систему — загружать её не нужно.</div>
-            </div>
             <Button variant="outline" onClick={runDiag} disabled={diagBusy}>
               <Icon name={diagBusy ? 'Loader2' : 'Stethoscope'} fallback="Activity" size={15} className={diagBusy ? 'animate-spin' : ''} />Проверить подключение к банку
             </Button>
@@ -152,7 +61,7 @@ export default function SberTab() {
                   </div>
                 ))}
                 {diag.redirect_uri && diag.redirect_uri !== sberUrl && (
-                  <div className="flex items-start gap-2 text-sm text-red-600"><Icon name="CircleX" size={16} className="mt-0.5" />SBER_REDIRECT_URI отличается от нужного адреса — исправьте секрет</div>
+                  <div className="flex items-start gap-2 text-sm text-red-600"><Icon name="CircleX" size={16} className="mt-0.5" />Redirect URI в настройках отличается от адреса системы</div>
                 )}
               </div>
             )}
@@ -165,28 +74,9 @@ export default function SberTab() {
         )}
       </div>
 
-      <div className="space-y-3 rounded-2xl border bg-card p-5">
-        <div className="flex items-center gap-2"><Icon name="ListChecks" size={18} className="text-emerald-600" /><h3 className="font-medium">Scope (права доступа)</h3></div>
-        <p className="text-xs text-muted-foreground">Скопируйте из кабинета Сбер API. Можно через пробел или запятую.</p>
-        <label className="block space-y-1 text-sm">
-          <span className="text-muted-foreground">Scope для авторизации v1</span>
-          <textarea value={scopes.scope_v1} onChange={(e) => setScopes({ ...scopes, scope_v1: e.target.value })} rows={3} className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" />
-        </label>
-        <label className="block space-y-1 text-sm">
-          <span className="text-muted-foreground">Scope для авторизации v2 (используется для входа)</span>
-          <textarea value={scopes.scope_v2} onChange={(e) => setScopes({ ...scopes, scope_v2: e.target.value })} rows={3} className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" />
-        </label>
-        <label className="block space-y-1 text-sm">
-          <span className="text-muted-foreground">Ссылка подписания платёжки — оставьте пустой</span>
-          <Input value={scopes.sign_url_template} placeholder="по умолчанию: ссылка из документации Сбера" onChange={(e) => setScopes({ ...scopes, sign_url_template: e.target.value })} className="font-mono text-xs" />
-          <span className="block text-xs text-muted-foreground">Система сама формирует ссылку на каждую платёжку и возвращает директора обратно после подписи по СМС.</span>
-        </label>
-        <Button size="sm" onClick={() => save2('scopes_save', scopes)} disabled={!!busy2}>Сохранить</Button>
-      </div>
-
       <div className="space-y-3 rounded-2xl border bg-card p-5 lg:col-span-2">
         <div className="flex items-center gap-2">
-          <Icon name="KeyRound" size={18} className="text-emerald-600" /><h3 className="font-medium">Подключения (ключи доступа)</h3>
+          <Icon name="KeyRound" size={18} className="text-emerald-600" /><h3 className="font-medium">Ключи доступа</h3>
           <Button size="sm" className="ml-auto" onClick={() => setTokens({ access_token: '', refresh_token: '', title: '', connection_id: null })}>
             <Icon name="Plus" size={15} />Добавить подключение
           </Button>
@@ -206,6 +96,7 @@ export default function SberTab() {
                     className="w-full bg-transparent font-medium outline-none focus:underline" />
                   <div className="text-xs text-muted-foreground">{c.org?.name} · ИНН {c.org?.inn}</div>
                 </div>
+                <span className="text-[10px] text-muted-foreground">№ {c.id}</span>
                 {c.is_default && <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] text-white">основное</span>}
               </div>
               <select value={c.account || ''} onChange={(e) => save2('connection_update', { id: c.id, account: e.target.value })}
@@ -227,8 +118,8 @@ export default function SberTab() {
           <div className="space-y-2 rounded-xl border border-dashed p-4">
             <div className="text-sm font-medium">{tokens.connection_id ? `Новые ключи для «${tokens.title}»` : 'Новое подключение'}</div>
             {!tokens.connection_id && <Input placeholder="Название, например «Основной счёт» или «ИП Иванов»" value={tokens.title} onChange={(e) => setTokens({ ...tokens, title: e.target.value })} />}
-            <Input type="password" autoComplete="off" placeholder="Access Token" value={tokens.access_token} onChange={(e) => setTokens({ ...tokens, access_token: e.target.value })} />
-            <Input type="password" autoComplete="off" placeholder="Refresh Token" value={tokens.refresh_token} onChange={(e) => setTokens({ ...tokens, refresh_token: e.target.value })} />
+            <Input type="password" autoComplete="off" placeholder="Ключ Access Token" value={tokens.access_token} onChange={(e) => setTokens({ ...tokens, access_token: e.target.value })} />
+            <Input type="password" autoComplete="off" placeholder="Ключ Refresh Token" value={tokens.refresh_token} onChange={(e) => setTokens({ ...tokens, refresh_token: e.target.value })} />
             <div className="flex gap-2">
               <Button size="sm" onClick={() => save2('tokens_save', tokens)} disabled={!!busy2 || !tokens.refresh_token}>
                 {busy2 === 'tokens_save' ? 'Проверяю в банке…' : 'Сохранить и подключить'}
