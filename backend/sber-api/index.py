@@ -330,6 +330,9 @@ def sync_statement(cur, c: Dict[str, Any], days: int = 3, who: str = 'Автоз
                 break
             if resp.status_code == 202:
                 break
+            if resp.status_code == 403:
+                raise sber.SberError('Сбер не дал доступ к выписке: в приложении Sber API нет услуги «Выписка» (GET_STATEMENT_TRANSACTION). '
+                                     'Подключите её у менеджера Сбера и обновите ключи подключения')
             if resp.status_code != 200:
                 raise sber.SberError(f'Банк не отдал выписку за {day} ({resp.status_code})')
             data = resp.json()
@@ -814,6 +817,8 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         if len(purpose) < 5:
             return _err('Укажите назначение платежа: за что платим')
         week = _week_start(date.fromisoformat(body['week']) if body.get('week') else date.today())
+        if week > _week_start(date.today()) + timedelta(days=14):
+            return _err('Планировать оплату можно максимум на 2 недели вперёд')
         vat = str(body.get('vat_rate') or cp['vat_rate'] or 'none')
         if vat not in VATS:
             vat = 'none'
@@ -826,6 +831,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
             return _err('Выберите статью расхода')
         direct = 'sber.pay' in can
         if body.get('id'):
+            cur.execute(f'UPDATE {SCHEMA}.sber_requests SET week_start = %s WHERE id = %s AND status IN (%s, %s, %s)', (week, body['id'], 'draft', 'rejected', 'sent'))
             cur.execute(f"UPDATE {SCHEMA}.sber_requests SET counterparty_id = %s, amount = %s, purpose = %s, vat_rate = %s, requisites = %s, "
                         f"requisites_hash = %s, category_id = %s, period = %s WHERE id = %s AND status IN ('draft', 'rejected', 'sent') "
                         f'AND (created_by_user = %s OR %s OR %s) RETURNING id', (cp['id'], amount, purpose[:200], vat, json.dumps(snap, ensure_ascii=False),
@@ -883,6 +889,11 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         return _resp(200, {'ok': True})
 
     if action == 'pay':
+        if body.get('week') and not body.get('ids'):
+            wk = _week_start(date.fromisoformat(body['week']))
+            body['ids'] = [r['id'] for r in _requests(cur, "WHERE r.week_start = %s AND r.status = 'sent'", (wk,)) if not r['requisites_changed']]
+            if not body['ids']:
+                return _err('На этой неделе нет заявок, готовых к оплате')
         return _pay(cur, user, body, s)
 
     return _err('Неизвестное действие')
@@ -941,6 +952,12 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
                         (str(data.get('bankStatus') or 'CREATED'), r['id']))
             results.append({'id': r['id'], 'ok': True, 'sign_url': _sign_url(s, ext, _back(body))})
             _log(cur, user, 'Оплата', f"{r['counterparty']} {r['amount']:.2f} ₽, счёт {r['requisites'].get('account')}, с {conn['account']}")
+        elif resp.status_code == 403:
+            msg = ('Сбер не разрешил создавать платёжки: в приложении Sber API нет услуги «Платёжное поручение» (PAY_DOC_RU). '
+                   'Подключите её у менеджера Сбера и обновите ключи — заявка осталась на оплате')
+            cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'sent', bank_comment = %s WHERE id = %s", (msg, r['id']))
+            results.append({'id': r['id'], 'ok': False, 'error': msg})
+            break
         else:
             try:
                 msg = resp.json().get('message') or resp.json().get('error') or ''

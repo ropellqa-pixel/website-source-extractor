@@ -52,6 +52,7 @@ export default function Sber() {
     params.delete('connect'); params.delete('reason'); setParams(params, { replace: true });
   }, [params, setParams]);
 
+  const currentWeek = (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toLocaleDateString('sv-SE'); })();
   const can = (a: string) => !!data && data.can.includes(a);
   const ready = useMemo(() => (data?.counterparties || []).filter((c) => c.ready && !c.archived), [data]);
 
@@ -62,6 +63,8 @@ export default function Sber() {
   const drafts = reqs.filter((r) => r.status === 'draft' && (r.created_by_user === user?.id || data.is_deputy));
   const toPay = reqs.filter((r) => r.status === 'sent');
   const sum = (list: SberRequest[]) => list.reduce((s, r) => s + r.amount, 0);
+  const weekReady = toPay.filter((r) => !r.requisites_changed);
+  const maxWeek = shiftWeek(currentWeek, 2);
   const paidSum = sum(reqs.filter((r) => ['paid', 'signing', 'paying'].includes(r.status)));
 
   const saveReq = async () => {
@@ -92,6 +95,12 @@ export default function Sber() {
           <h1 className="text-2xl font-semibold tracking-tight">СБЕР</h1>
           <p className="text-sm text-muted-foreground">Оплата контрагентам через СберБизнес и автозагрузка выписки</p>
         </div>
+        {can('sber.pay') && tab === 'requests' && (
+          <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700" disabled={!data.bank.connected || weekReady.length === 0}
+            onClick={() => setPaying(weekReady)}>
+            <Icon name="Landmark" size={18} />Оплатить за неделю{weekReady.length > 0 ? ` · ${weekReady.length} на ${rub(sum(weekReady))}` : ''}
+          </Button>
+        )}
       </div>
 
       {notice && (
@@ -115,7 +124,7 @@ export default function Sber() {
           <div className="flex items-center rounded-lg border">
             <button onClick={() => setWeek(shiftWeek(data.week, -1))} className="p-2 hover:bg-secondary"><Icon name="ChevronLeft" size={16} /></button>
             <span className="w-40 text-center text-sm font-medium">{weekLabel(data.week)}</span>
-            <button onClick={() => setWeek(shiftWeek(data.week, 1))} className="p-2 hover:bg-secondary"><Icon name="ChevronRight" size={16} /></button>
+            <button onClick={() => setWeek(shiftWeek(data.week, 1))} disabled={data.week >= maxWeek} className="p-2 hover:bg-secondary disabled:opacity-30"><Icon name="ChevronRight" size={16} /></button>
           </div>
         )}
         {tab === 'requests' && data.pending.filter((p) => p.week !== data.week).map((p) => (

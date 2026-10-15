@@ -98,6 +98,14 @@ def current_user(cur, schema: str, event: Dict[str, Any]) -> Optional[Dict[str, 
     else:
         sections = list(ROLE_SECTIONS.get(role, ROLE_SECTIONS['employee']))
         actions = set(ROLE_ACTIONS.get(role, set()))
+    if role == 'senior_employee':
+        actions |= {'sber.view', 'sber.request'}
+        if '/sber' not in sections:
+            sections.append('/sber')
+    elif role == 'director':
+        actions |= {'sber.view', 'sber.request', 'sber.pay', 'sber.sync'}
+        if '/sber' not in sections:
+            sections.append('/sber')
     if '/dashboard' not in sections:
         sections.insert(0, '/dashboard')
     return {'id': row[0], 'profile_id': prof[0] if prof else None, 'role': role,
