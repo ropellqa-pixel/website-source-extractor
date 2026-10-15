@@ -5,7 +5,7 @@ import Icon from '@/components/ui/icon';
 import { sberCall, sberUrl } from '@/lib/sberApi';
 
 export type SberProduct = {
-  code: string; title: string; app: string; active: boolean; main: boolean; scope: string; scope_v1: string; scope_v2: string;
+  code: string; title: string; app: string; active: boolean; main: boolean; in_use: boolean; scope: string; scope_v1: string; scope_v2: string;
   client_id: string; redirect_uri: string; back_url: string;
   cert: { subject: string; org: string; valid_to: string; file_name: string; uploaded_at: string; uploaded_by: string } | null;
   configured: { client_id: boolean; client_secret: boolean };
@@ -39,6 +39,7 @@ export default function SberProductPanel({ p, onSaved }: { p: SberProduct; onSav
     reader.readAsDataURL(f);
   };
 
+  const dirty = !!form.client_secret || (['client_id', 'redirect_uri', 'back_url', 'scope_v1', 'scope_v2'] as const).some((k) => form[k].trim() !== ((k === 'scope_v2' ? p.scope_v2 || p.scope : p[k]) || '').trim());
   const cert = p.cert;
   const daysLeft = cert ? Math.ceil((new Date(cert.valid_to).getTime() - Date.now()) / 86400000) : null;
   const ready = p.configured.client_id && p.configured.client_secret && !!cert;
@@ -50,6 +51,8 @@ export default function SberProductPanel({ p, onSaved }: { p: SberProduct; onSav
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 font-medium">Sber API: {p.app}{p.main && <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] text-white">основная интеграция</span>}</div>
           <div className="text-sm text-muted-foreground">{p.title} · {ready ? 'настроено' : 'не все данные заполнены'}</div>
+          {p.main && !p.in_use && <div className="mt-1 text-xs text-amber-700">Пока не заполнены Client ID, Client Secret и сертификат — банк работает через PAY</div>}
+          {p.main && p.in_use && <div className="mt-1 text-xs text-emerald-700">Сейчас система работает с банком через это приложение</div>}
         </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={p.active} onChange={(e) => call('product_save', { active: e.target.checked }, e.target.checked ? 'Активирован' : 'Отключён')} />
@@ -78,7 +81,8 @@ export default function SberProductPanel({ p, onSaved }: { p: SberProduct; onSav
           <>
             <Input type="password" autoComplete="new-password" placeholder="Пароль от сертификата" value={password} onChange={(e) => setPassword(e.target.value)} />
             <div className="flex gap-2">
-              <Button disabled={!!busy} onClick={async () => { if (await call('product_cert_upload', { file_name: file.name, file: file.data, password }, 'Сертификат загружен и проверен')) { setFile(null); setPassword(''); } }}>
+              {dirty && <p className="flex items-center gap-1.5 text-xs text-amber-700"><Icon name="TriangleAlert" size={14} />Есть несохранённые изменения — нажмите «Сохранить»</p>}
+        <Button disabled={!!busy} onClick={async () => { if (await call('product_cert_upload', { file_name: file.name, file: file.data, password }, 'Сертификат загружен и проверен')) { setFile(null); setPassword(''); } }}>
                 {busy === 'product_cert_upload' ? 'Проверяю…' : 'Загрузить'}
               </Button>
               <Button variant="ghost" onClick={() => { setFile(null); setPassword(''); }}>Отмена</Button>

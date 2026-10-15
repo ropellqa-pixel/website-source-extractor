@@ -70,22 +70,31 @@ def ensure(cur, schema: str, vault_get: Callable, vault_set: Callable) -> None:
         _save(cur, schema, saved, 'Система')
 
 
+def _config(cur, saved: Dict[str, Any], code: str, vault_get: Callable) -> Dict[str, Any]:
+    p = saved.get(code) or {}
+    raw = vault_get(cur, f'p:{code}:cert_p12')
+    return {**p, 'code': code, 'client_secret': vault_get(cur, f'p:{code}:client_secret') or '',
+            'cert_p12': base64.b64decode(raw) if raw else None, 'cert_password': vault_get(cur, f'p:{code}:cert_password') or ''}
+
+
 def main_config(cur, schema: str, vault_get: Callable) -> Dict[str, Any]:
-    p = _load(cur, schema).get(MAIN) or {}
-    raw = vault_get(cur, f'p:{MAIN}:cert_p12')
-    return {**p, 'client_secret': vault_get(cur, f'p:{MAIN}:client_secret') or '',
-            'cert_p12': base64.b64decode(raw) if raw else None, 'cert_password': vault_get(cur, f'p:{MAIN}:cert_password') or ''}
+    saved = _load(cur, schema)
+    m = _config(cur, saved, MAIN, vault_get)
+    if m.get('client_id') and m['client_secret'] and m['cert_p12']:
+        return m
+    return _config(cur, saved, 'pay', vault_get)
 
 
 def overview(cur, schema: str, vault_get: Callable) -> Dict[str, Any]:
     saved = _load(cur, schema)
+    in_use = main_config(cur, schema, vault_get)['code']
     out = []
     for code, meta in PRODUCTS.items():
         p = saved.get(code) or {}
         out.append({
             'code': code, 'title': meta['title'], 'app': meta['app'],
             'active': bool(p.get('active', True)),
-            'main': code == MAIN,
+            'main': code == MAIN, 'in_use': code == in_use,
             **{f: p.get(f) or '' for f in TEXT_FIELDS + SCOPE_FIELDS},
             'cert': p.get('cert'),
             'configured': {'client_id': bool(p.get('client_id')), 'client_secret': bool(vault_get(cur, f'p:{code}:client_secret'))},
