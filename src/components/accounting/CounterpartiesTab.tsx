@@ -126,7 +126,7 @@ export default function CounterpartiesTab({ canEdit, onChanged }: { canEdit: boo
               </div>
               {canEdit && (doc ? (
                 <div className="space-y-2 rounded-xl border p-3">
-                  <div className="flex rounded-lg bg-secondary p-0.5">
+                  <div className="flex flex-wrap rounded-lg bg-secondary p-0.5">
                     {([['in', 'Получили товар/услугу'], ['out', 'Отгрузили/оказали']] as const).map(([k, l]) => (
                       <button key={k} onClick={() => setDoc({ ...doc, direction: k })} className={`flex-1 rounded-md py-1.5 text-xs font-medium ${doc.direction === k ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}>{l}</button>
                     ))}

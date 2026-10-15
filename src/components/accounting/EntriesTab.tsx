@@ -203,7 +203,7 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
           <DialogHeader><DialogTitle>{form?.id ? 'Изменить операцию' : form?.kind === 'income' ? 'Новый доход' : 'Новый расход'}</DialogTitle></DialogHeader>
           {form && (
             <div className="space-y-3">
-              <div className="flex rounded-lg bg-secondary p-0.5">
+              <div className="flex flex-wrap rounded-lg bg-secondary p-0.5">
                 {([['income', 'Доход'], ['expense', 'Расход']] as const).map(([k, l]) => (
                   <button key={k} onClick={() => setForm({ ...form, kind: k, category_id: '' })}
                     className={`flex-1 rounded-md py-1.5 text-sm font-medium ${form.kind === k ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}>{l}</button>

@@ -134,7 +134,7 @@ export default function Skud() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="mr-2 flex rounded-lg bg-secondary p-0.5">
+        <div className="mr-2 flex flex-wrap rounded-lg bg-secondary p-0.5">
           {([['visits', 'Посещения с видео'], ['journal', 'Журнал']] as const).map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)}
               className={`rounded-md px-3 py-1 text-sm font-medium ${tab === k ? 'bg-card shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{l}</button>

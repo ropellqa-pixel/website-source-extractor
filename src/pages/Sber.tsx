@@ -114,7 +114,7 @@ export default function Sber() {
       <BankCard bank={data.bank} isDeputy={data.is_deputy} canSync={can('sber.sync')} onChanged={load} connections={data.connections.filter((c) => c.active && c.account).length} />
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-lg bg-secondary p-0.5">
+        <div className="flex flex-wrap rounded-lg bg-secondary p-0.5">
           {([['requests', 'Оплаты по неделям', 'CalendarRange'], ['counterparties', 'Контрагенты и реквизиты', 'Building2']] as const).map(([k, l, i]) => (
             <button key={k} onClick={() => setTab(k)} className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${tab === k ? 'bg-card shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
               <Icon name={i} size={15} />{l}
@@ -124,7 +124,7 @@ export default function Sber() {
         {tab === 'requests' && (
           <div className="flex items-center rounded-lg border">
             <button onClick={() => setWeek(shiftWeek(data.week, -1))} className="p-2 hover:bg-secondary"><Icon name="ChevronLeft" size={16} /></button>
-            <span className="w-40 text-center text-sm font-medium">{weekLabel(data.week)}</span>
+            <span className="w-36 text-center text-sm font-medium sm:w-40">{weekLabel(data.week)}</span>
             <button onClick={() => setWeek(shiftWeek(data.week, 1))} disabled={data.week >= maxWeek} className="p-2 hover:bg-secondary disabled:opacity-30"><Icon name="ChevronRight" size={16} /></button>
           </div>
         )}
@@ -291,7 +291,7 @@ export default function Sber() {
                 <span className="text-muted-foreground">Контрагент</span>
                 <CounterpartyPicker items={ready} value={req.counterparty_id} onChange={pickCp} />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="block space-y-1 text-sm">
                   <span className="text-muted-foreground">Статья расхода</span>
                   <select value={req.category_id} onChange={(e) => setReq({ ...req, category_id: e.target.value })} className="h-10 w-full rounded-md border bg-background px-2 text-sm">

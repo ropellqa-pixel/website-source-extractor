@@ -298,7 +298,7 @@ def now() -> int:
 
 
 def payment_body(req: Dict[str, Any], payer_account: str, payer_name: str, payer_inn: str, payer_kpp: str,
-                 external_id: str, doc_number: int, today: str) -> Dict[str, Any]:
+                 external_id: str, doc_number: int, today: str, payer_bic: str = '', payer_corr: str = '') -> Dict[str, Any]:
     r = req['requisites']
     vat = req.get('vat_rate') or 'none'
     amount = float(req['amount'])
@@ -313,13 +313,16 @@ def payment_body(req: Dict[str, Any], payer_account: str, payer_name: str, payer
     purpose = req['purpose'].strip()
     if 'ндс' not in purpose.lower():
         purpose = f'{purpose}. {purpose_vat}'
-    return {
-        'externalId': external_id, 'number': str(doc_number), 'date': today, 'amount': amount, 'operationCode': '01',
+    kpp = lambda v: v if (v == '0' or (len(v or '') == 9 and v.isdigit())) else '0'
+    body = {
+        'externalId': external_id, 'number': str(doc_number)[-8:], 'date': today, 'amount': round(amount, 2), 'operationCode': '01',
         'deliveryKind': 'электронно', 'priority': '5', 'purpose': purpose[:210], 'vat': vat_info,
-        'payerName': payer_name, 'payerInn': payer_inn, 'payerKpp': payer_kpp or '0', 'payerAccount': payer_account,
-        'payeeName': r['name'], 'payeeInn': r.get('inn') or '0', 'payeeKpp': r.get('kpp') or '0', 'payeeAccount': r['account'],
+        'payerName': payer_name[:160], 'payerInn': payer_inn, 'payerKpp': kpp(payer_kpp), 'payerAccount': payer_account,
+        'payerBankBic': payer_bic, 'payerBankCorrAccount': payer_corr,
+        'payeeName': r['name'][:160], 'payeeInn': r.get('inn') or '0', 'payeeKpp': kpp(r.get('kpp') or '0'), 'payeeAccount': r['account'],
         'payeeBankBic': r['bic'], 'payeeBankCorrAccount': r.get('corr_account') or '',
     }
+    return {k: v for k, v in body.items() if v not in ('', None)}
 
 
 def invoice_any_body(pay: Dict[str, Any]) -> Dict[str, Any]:

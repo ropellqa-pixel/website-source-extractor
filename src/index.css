@@ -169,3 +169,30 @@
 input, textarea, select { font-size: 16px; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 4px; }
+@media (max-width: 767px) {
+  table.m-cards, table.m-cards > tbody, table.m-cards > tfoot { display: block; width: 100%; }
+  table.m-cards > thead { display: none; }
+  table.m-cards > tbody > tr, table.m-cards > tfoot > tr {
+    display: block; margin: 8px; padding: 6px 12px;
+    border: 1px solid hsl(var(--border)); border-radius: 14px; background: hsl(var(--card));
+  }
+  table.m-cards > tbody > tr > td:not(.hidden), table.m-cards > tfoot > tr > td:not(.hidden) {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 6px 0 !important; border: 0 !important; text-align: right !important;
+    position: static !important; min-width: 0 !important; max-width: none !important; width: auto !important;
+    white-space: normal !important; overflow-wrap: anywhere; font-size: 14px;
+  }
+  table.m-cards td + td:not(.hidden) { border-top: 1px dashed hsl(var(--border)) !important; }
+  table.m-cards td::before {
+    content: attr(data-label); flex-shrink: 0; max-width: 45%;
+    text-align: left; font-size: 12px; color: hsl(var(--muted-foreground));
+  }
+  table.m-cards td[data-label=""]::before, table.m-cards td:not([data-label])::before { content: none; }
+  table.m-cards td[data-label=""] { justify-content: flex-end; }
+  table.m-cards td[colspan] { display: block !important; text-align: center !important; }
+  table.m-cards td:empty { display: none !important; }
+  table.m-cards td > * { min-width: 0; }
+  table.m-cards td input:not([type="checkbox"]), table.m-cards td select { max-width: 55%; }
+  .app-main [class*="whitespace-nowrap"]:is(button, a) { white-space: normal; height: auto; min-height: 2.5rem; text-align: center; }
+  .app-main img, .app-main video { max-width: 100%; }
+}

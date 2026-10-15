@@ -641,8 +641,44 @@ export default function Schedule() {
             {debugInfo && <p className="text-xs text-amber-600/60 mt-3 font-mono bg-card p-2 rounded max-w-lg mx-auto">{debugInfo}</p>}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
+          <div>
+            <div className="space-y-3 md:hidden">
+              {rows.map((row, rowIdx) => {
+                const counts = shiftCountsLocal(row.shifts);
+                return (
+                  <div key={row.profile_id} className="rounded-xl border border-border bg-card p-3">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <span className="font-medium text-foreground">{row.full_name}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        <b className="text-foreground">{counts['Д'] + counts['Н'] + counts['Дп'] + counts['Нп']}</b> смен ·{' '}
+                        <span className="text-green-600">Д {counts['Д']}</span> · <span className="text-blue-600">Н {counts['Н']}</span>
+                        {counts['Дп'] > 0 && <> · <span className="text-amber-600">Дп {counts['Дп']}</span></>}
+                        {counts['Нп'] > 0 && <> · <span className="text-purple-600">Нп {counts['Нп']}</span></>}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1">
+                      {Array.from({ length: days }, (_, dayIdx) => {
+                        const wd = new Date(selectedYear, selectedMonth, dayIdx + 1).getDay();
+                        return (
+                          <div key={dayIdx} className={`relative flex h-11 flex-col items-center justify-center rounded-md border border-border text-xs ${SHIFT_COLORS[row.shifts[dayIdx]] || ''}`}>
+                            <span className={`text-[10px] leading-none ${wd === 0 || wd === 6 ? 'text-red-500' : 'text-muted-foreground'}`}>{dayIdx + 1}</span>
+                            <span className="mt-0.5 font-semibold leading-none">{row.shifts[dayIdx] || '·'}</span>
+                            {canEdit && (
+                              <select value={row.shifts[dayIdx] || ''} onChange={e => handleShiftChange(rowIdx, dayIdx, e.target.value)}
+                                className="absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label={`${row.full_name}, ${dayIdx + 1} число`}>
+                                {SHIFT_OPTIONS.map(sh => <option key={sh} value={sh}>{sh || '—'}</option>)}
+                              </select>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          <div className="hidden overflow-x-auto md:block">
+            <table data-no-cards className="w-full border-collapse text-sm">
               <thead>
                 <tr className="bg-card">
                   <th className="px-3 py-2 text-left text-foreground/80 font-medium border border-border sticky left-0 bg-card z-10 min-w-[160px]">ФИО</th>
@@ -705,6 +741,7 @@ export default function Schedule() {
                 )}
               </tbody>
             </table>
+          </div>
 
             {showExcluded && excludedEmployees.length > 0 && (
               <div className="mt-4">

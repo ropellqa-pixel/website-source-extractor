@@ -6,7 +6,7 @@ import re
 import secrets
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
 import requests
@@ -149,6 +149,24 @@ def _store_tokens(cur, conn_id: int, t: Dict[str, Any]) -> None:
     _vault_set(cur, f'c{conn_id}:access_exp', str(sber.now() + int(t.get('expires_in') or 3600)))
     if t.get('refresh_token'):
         _vault_set(cur, f'c{conn_id}:refresh_token', t['refresh_token'])
+
+
+def _corr_ok(corr: str, bic: str) -> bool:
+    w = [7, 1, 3] * 8
+    return sum(int(c) * x for c, x in zip('0' + bic[4:6] + corr, w)) % 10 == 0
+
+
+def _payer_bank(cur, conn: Dict[str, Any]) -> Tuple[str, str]:
+    acc = next((a for a in (conn['org'] or {}).get('accounts') or [] if a.get('number') == conn['account']), {})
+    bic = str(acc.get('bic') or '')
+    corr = str(acc.get('corr') or '')
+    if bic and not corr:
+        cur.execute(f"SELECT corr_account FROM {SCHEMA}.acc_counterparties WHERE bank_bic = %s AND corr_account ~ '^[0-9]{{20}}$' LIMIT 1", (bic,))
+        r = cur.fetchone()
+        corr = r[0] if r else ''
+    if not corr and len(bic) == 9 and bic.isdigit() and bic[-3:] not in ('000', '001', '002'):
+        corr = next((c for c in (f'30101810{k}00000000{bic[-3:]}' for k in range(10)) if _corr_ok(c, bic)), '')
+    return bic, corr
 
 
 def _connections(cur, only_active: bool = False) -> List[Dict[str, Any]]:
@@ -310,7 +328,8 @@ def _org(cur, token: str, s: Dict[str, Any]) -> Dict[str, Any]:
     if r.status_code != 200:
         raise sber.SberError(f'Банк не вернул данные организации ({r.status_code})')
     info = r.json()
-    accounts = [{'number': a.get('number'), 'currency': a.get('currencyCode'), 'bic': a.get('bic'), 'state': a.get('state')}
+    accounts = [{'number': a.get('number'), 'currency': a.get('currencyCode'), 'bic': a.get('bic'), 'state': a.get('state'),
+                 'corr': a.get('corrAccount') or a.get('bankCorrAccount') or (a.get('bank') or {}).get('corrAccount') or ''}
                 for a in (info.get('accounts') or []) if a.get('number')]
     return {'name': info.get('shortName') or info.get('fullName') or '', 'inn': info.get('inn') or '', 'kpp': info.get('kpp') or '',
             'accounts': accounts}
@@ -994,6 +1013,7 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
         return _err('Превышен дневной лимит оплат. Его меняет замдиректора в разделе СБЕР.')
     token = _token(cur, conn['id'])
     org = conn['org']
+    payer_bic, payer_corr = _payer_bank(cur, conn)
     today = date.today().isoformat()
     cur.execute(f"SELECT count(*) FROM {SCHEMA}.sber_requests WHERE external_id IS NOT NULL AND decided_at::date = CURRENT_DATE")
     n = cur.fetchone()[0]
@@ -1007,7 +1027,7 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
         ext = row[0]
         n += 1
         pay = sber.payment_body(r, conn['account'], org['name'], org['inn'], org.get('kpp') or '', ext,
-                                int(datetime.now().strftime('%j')) * 100 + n, today)
+                                int(datetime.now().strftime('%j')) * 100 + n, today, payer_bic, payer_corr)
         try:
             resp = _create_payment(cur, s, token, pay)
         except sber.SberError as e:
@@ -1028,9 +1048,15 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
             break
         else:
             try:
-                msg = resp.json().get('message') or resp.json().get('error') or ''
+                j = resp.json()
+                msg = j.get('message') or j.get('error') or ''
+                bad = [str(f.get('fieldName') or f.get('field') or f.get('name') or '') + (': ' + str(f.get('message') or f.get('description') or '') if isinstance(f, dict) else '')
+                       if isinstance(f, dict) else str(f) for f in (j.get('fields') or j.get('checks') or j.get('fieldNames') or [])]
+                if bad:
+                    msg = f"{msg} ({'; '.join(bad)[:300]})"
             except ValueError:
                 msg = ''
+            print('SBER PAY ERROR', resp.status_code, resp.text[:1500])
             cur.execute(f"UPDATE {SCHEMA}.sber_requests SET status = 'failed', bank_comment = %s, bank_status = %s WHERE id = %s",
                         (f'{resp.status_code}: {msg}'[:500], 'ERROR', r['id']))
             results.append({'id': r['id'], 'ok': False, 'error': msg or f'Банк ответил {resp.status_code}'})
