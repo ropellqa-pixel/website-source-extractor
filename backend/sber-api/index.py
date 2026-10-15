@@ -78,15 +78,33 @@ def _save_settings(cur, v: Dict[str, Any], who: str) -> None:
                 (json.dumps(v, ensure_ascii=False), who))
 
 
+_VAULT: Optional[Dict[str, str]] = None
+
+
+def _vault_all(cur) -> Dict[str, str]:
+    global _VAULT
+    if _VAULT is None:
+        cur.execute(f'SELECT key, value FROM {SCHEMA}.sber_vault')
+        _VAULT = {k: v for k, v in cur.fetchall()}
+    return _VAULT
+
+
 def _vault_get(cur, key: str) -> Optional[str]:
-    cur.execute(f'SELECT value FROM {SCHEMA}.sber_vault WHERE key = %s', (key,))
-    r = cur.fetchone()
-    return sber.decrypt(r[0]) if r else None
+    raw = _vault_all(cur).get(key)
+    return sber.decrypt(raw) if raw is not None else None
+
+
+def _vault_del(cur, keys: List[str]) -> None:
+    cur.execute(f'DELETE FROM {SCHEMA}.sber_vault WHERE key = ANY(%s)', (keys,))
+    for k in keys:
+        _vault_all(cur).pop(k, None)
 
 
 def _vault_set(cur, key: str, value: str) -> None:
+    enc = sber.encrypt(value)
     cur.execute(f'INSERT INTO {SCHEMA}.sber_vault (key, value, updated_at) VALUES (%s, %s, now()) '
-                f'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()', (key, sber.encrypt(value)))
+                f'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()', (key, enc))
+    _vault_all(cur)[key] = enc
 
 
 def _sign_url(s: Dict[str, Any], ext: str, back: str = '') -> str:
@@ -472,6 +490,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     conn.autocommit = True
     cur = conn.cursor()
+    global _VAULT
+    _VAULT = None
+    products.reset()
     try:
         _load_cert(cur)
         if method == 'GET' and qs.get('state') and (qs.get('code') or qs.get('error')):
@@ -565,7 +586,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         if not deputy:
             return _err('Только заместитель директора', 403)
         try:
-            return _resp(200, products.handle(cur, SCHEMA, user, action, body, _vault_get, _vault_set, _log))
+            return _resp(200, products.handle(cur, SCHEMA, user, action, body, _vault_get, _vault_set, _log, _vault_del))
         except PermissionError as e:
             return _err(str(e), 403)
 
@@ -688,7 +709,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         if not r:
             return _err('Подключение не найдено', 404)
         if action == 'connection_delete':
-            cur.execute(f'DELETE FROM {SCHEMA}.sber_vault WHERE key LIKE %s', (f'c{cid}:%',))
+            _vault_del(cur, [k for k in _vault_all(cur) if k.startswith(f'c{cid}:')])
             cur.execute(f'UPDATE {SCHEMA}.sber_connections SET active = false, is_default = false WHERE id = %s', (cid,))
             cur.execute(f'SELECT count(*) FROM {SCHEMA}.sber_connections WHERE active AND is_default')
             if cur.fetchone()[0] == 0:
@@ -717,7 +738,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
         if not deputy:
             return _err('Сертификат загружает только заместитель директора', 403)
         if action == 'cert_delete':
-            cur.execute(f"DELETE FROM {SCHEMA}.sber_vault WHERE key IN ('cert_p12', 'cert_password')")
+            _vault_del(cur, ['cert_p12', 'cert_password'])
             s.pop('cert', None)
             _save_settings(cur, s, user['name'])
             _log(cur, user, 'Сертификат удалён', '')
@@ -757,7 +778,7 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
                         (state, nonce, user['id'], str(body.get('origin') or '')[:200]))
             return _resp(200, {'url': sber.authorize_url(state, nonce, s.get('scope_v2') or s['scope'])})
         if action == 'disconnect':
-            cur.execute(f"DELETE FROM {SCHEMA}.sber_vault WHERE key LIKE 'c%%:%%'")
+            _vault_del(cur, [k for k in _vault_all(cur) if re.match(r'^c\d+:', k)])
             cur.execute(f'UPDATE {SCHEMA}.sber_connections SET active = false, is_default = false')
             _log(cur, user, 'Отключён', '')
             return _resp(200, {'ok': True})

@@ -19,17 +19,29 @@ TEXT_FIELDS = ('client_id', 'redirect_uri', 'back_url')
 SCOPE_FIELDS = ('scope', 'scope_v1', 'scope_v2')
 
 
+_cache: Dict[str, Any] = {}
+
+
+def reset() -> None:
+    _cache.clear()
+
+
 def _load(cur, schema: str) -> Dict[str, Any]:
+    if 'saved' in _cache:
+        return _cache['saved']
     cur.execute(f"SELECT value FROM {schema}.app_settings WHERE key = 'sber_products'")
     r = cur.fetchone()
     v = (r[0] if isinstance(r[0], dict) else json.loads(r[0])) if r else {}
-    return v if isinstance(v, dict) else {}
+    _cache['saved'] = v if isinstance(v, dict) else {}
+    return _cache['saved']
 
 
 def _save(cur, schema: str, v: Dict[str, Any], who: str) -> None:
     cur.execute(f"INSERT INTO {schema}.app_settings (key, value, updated_by) VALUES ('sber_products', %s, %s) "
                 f'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()',
                 (json.dumps(v, ensure_ascii=False), who))
+    _cache['saved'] = v
+    _cache.pop('main', None)
 
 
 def _migrate(cur, schema: str, saved: Dict[str, Any], vault_get: Callable, vault_set: Callable) -> bool:
@@ -78,6 +90,13 @@ def _config(cur, saved: Dict[str, Any], code: str, vault_get: Callable) -> Dict[
 
 
 def main_config(cur, schema: str, vault_get: Callable) -> Dict[str, Any]:
+    if 'main' in _cache:
+        return _cache['main']
+    _cache['main'] = _pick(cur, schema, vault_get)
+    return _cache['main']
+
+
+def _pick(cur, schema: str, vault_get: Callable) -> Dict[str, Any]:
     saved = _load(cur, schema)
     m = _config(cur, saved, MAIN, vault_get)
     if m.get('client_id') and m['client_secret'] and m['cert_p12']:
@@ -104,7 +123,7 @@ def overview(cur, schema: str, vault_get: Callable) -> Dict[str, Any]:
 
 
 def handle(cur, schema: str, user: Dict[str, Any], action: str, body: Dict[str, Any],
-           vault_get: Callable, vault_set: Callable, log: Callable) -> Dict[str, Any]:
+           vault_get: Callable, vault_set: Callable, log: Callable, vault_del: Callable) -> Dict[str, Any]:
     if action == 'products':
         return overview(cur, schema, vault_get)
     code = str(body.get('code') or '')
@@ -149,15 +168,18 @@ def handle(cur, schema: str, user: Dict[str, Any], action: str, body: Dict[str, 
             raise sber.SberError(f"Сертификат уже истёк ({info['valid_to']}) — загрузите новый")
         vault_set(cur, f'p:{code}:cert_p12', base64.b64encode(raw).decode())
         vault_set(cur, f'p:{code}:cert_password', password)
+        _cache.pop('main', None)
         p['cert'] = {**info, 'file_name': name[:120], 'uploaded_at': datetime.now().isoformat(timespec='seconds'),
                      'uploaded_by': user['name']}
         log(cur, user, f'Sber API «{title}»: сертификат загружен', f"{info['subject']} до {info['valid_to']}")
     elif action == 'product_cert_delete':
-        cur.execute(f"DELETE FROM {schema}.sber_vault WHERE key IN (%s, %s)", (f'p:{code}:cert_p12', f'p:{code}:cert_password'))
+        vault_del(cur, [f'p:{code}:cert_p12', f'p:{code}:cert_password'])
+        _cache.pop('main', None)
         p.pop('cert', None)
         log(cur, user, f'Sber API «{title}»: сертификат удалён', '')
     elif action == 'product_keys_delete':
-        cur.execute(f"DELETE FROM {schema}.sber_vault WHERE key IN (%s, %s)", (f'p:{code}:client_secret', f'p:{code}:client_id'))
+        vault_del(cur, [f'p:{code}:client_secret', f'p:{code}:client_id'])
+        _cache.pop('main', None)
         p.pop('client_id', None)
         log(cur, user, f'Sber API «{title}»: ключи удалены', '')
     else:
