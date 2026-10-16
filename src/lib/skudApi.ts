@@ -97,7 +97,10 @@ export interface SkudClip {
   error: string | null;
 }
 
-export interface SkudMark { t: string; kind: string; name: string | null }
+export interface SkudMark { t: string; kind: string; name: string | null
+  inside?: string[];
+  count?: number;
+}
 
 export interface SkudOpening {
   id: number;

@@ -82,9 +82,17 @@ export default function VisitCard({ visit, onRetry }: { visit: SkudVisit; onRetr
                       {o.marks.map((m, k) => {
                         const st = MARK[m.kind] || { label: m.kind, icon: 'Info', cls: 'text-muted-foreground' };
                         return (
-                          <div key={k} className={`flex items-center gap-1.5 text-xs ${st.cls}`}>
-                            <Icon name={st.icon} fallback="Circle" size={12} />
-                            {fmtTime(m.t)} · {st.label}{m.name ? ` · ${m.name}` : ''}
+                          <div key={k} className={`text-xs ${st.cls}`}>
+                            <div className="flex items-center gap-1.5">
+                              <Icon name={st.icon} fallback="Circle" size={12} />
+                              {fmtTime(m.t)} · {m.kind === 'exit_button' ? 'выход по кнопке' : st.label}{m.name ? ` · ${m.name}` : ''}
+                            </div>
+                            {m.kind === 'exit_button' && m.inside && (
+                              <div className="ml-[18px] text-muted-foreground">
+                                {m.inside.length ? `На складе были: ${m.inside.join(', ')}` : 'По картам на складе никого не было'}
+                                {m.count != null && m.count > m.inside.length ? ` (по счёту ${m.count} чел.)` : ''}
+                              </div>
+                            )}
                           </div>
                         );
                       })}

@@ -1,0 +1,1 @@
+ALTER TABLE t_p59581145_website_source_extra.skud_visits ADD COLUMN IF NOT EXISTS people text;

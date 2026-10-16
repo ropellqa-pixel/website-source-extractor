@@ -7,6 +7,9 @@
 (в том числе кнопкой) относятся к одному посещению. Нажатие кнопки, когда по счёту внутри
 никого нет, в течение 30 минут после конца посещения дописывается к нему (вошли вдвоём по одной карте).
 
+Выход по кнопке: кто вышел — неизвестно (считыватель только на вход), поэтому к событию
+записывается, кто в этот момент был на складе (вошедшие по картам в этом посещении) и сколько человек.
+
 Весь разбор идёт в памяти, в базу — несколько запросов на пачку событий (у базы лимит запросов).
 """
 import json
@@ -34,6 +37,7 @@ class Engine:
         self.op: Optional[Dict[str, Any]] = None
         self.visit: Optional[Dict[str, Any]] = None
         self.last_door_clip: Dict[int, Dict[str, Any]] = {}
+        self.event_notes: List[tuple] = []
 
     def q(self, sql: str, args: tuple = ()):
         self.cur.execute(sql.replace('{S}', self.s), args)
@@ -48,7 +52,7 @@ class Engine:
                        'closed_at': None, 'assumed': False, 'dirty': False}
             self.openings.append(self.op)
             if op_row[1] not in self.visits:
-                self.q('SELECT id, status, started_at, ended_at, inside, entries, exits, alarm, note, inside_until '
+                self.q('SELECT id, status, started_at, ended_at, inside, entries, exits, alarm, note, inside_until, people '
                        'FROM {S}.skud_visits WHERE id = %s', (op_row[1],))
                 r = self.cur.fetchone()
                 if r:
@@ -56,7 +60,8 @@ class Engine:
 
     def _visit_from_row(self, r) -> Dict[str, Any]:
         v = {'id': r[0], 'status': r[1], 'started_at': r[2], 'ended_at': r[3], 'inside': r[4], 'entries': r[5],
-             'exits': r[6], 'alarm': r[7], 'note': r[8], 'inside_until': r[9], 'dirty': False, 'new': False}
+             'exits': r[6], 'alarm': r[7], 'note': r[8], 'inside_until': r[9], 'dirty': False, 'new': False,
+             'people': json.loads(r[10]) if len(r) > 10 and r[10] else []}
         self.visits[v['id']] = v
         return v
 
@@ -67,7 +72,7 @@ class Engine:
                (self.c['id'], t, note, until))
         vid = self.cur.fetchone()[0]
         v = {'id': vid, 'status': 'open', 'started_at': t, 'ended_at': None, 'inside': 0, 'entries': 0, 'exits': 0,
-             'alarm': False, 'note': note, 'inside_until': until, 'dirty': True, 'new': True}
+             'alarm': False, 'note': note, 'inside_until': until, 'dirty': True, 'new': True, 'people': []}
         self.visits[vid] = v
         self.visit = v
         return v
@@ -78,7 +83,7 @@ class Engine:
         if cand:
             v = max(cand, key=lambda x: x['ended_at'])
         else:
-            self.q("SELECT id, status, started_at, ended_at, inside, entries, exits, alarm, note, inside_until "
+            self.q("SELECT id, status, started_at, ended_at, inside, entries, exits, alarm, note, inside_until, people "
                    "FROM {S}.skud_visits WHERE controller_id = %s AND status = 'closed' AND ended_at >= %s "
                    'AND ended_at <= %s ORDER BY ended_at DESC LIMIT 1', (self.c['id'], t - REJOIN_WINDOW, t))
             r = self.cur.fetchone()
@@ -154,8 +159,21 @@ class Engine:
                 v = v or self._new_visit(t)
                 v['inside'] += 1
                 v['entries'] += 1
+                who = e['name'] or (f"карта {e['card']}" if e.get('card') else 'без имени')
+                if who not in v['people']:
+                    v['people'].append(who)
             elif kind in ('exit', 'exit_button'):
                 v = v or self._rejoin_or_new(t)
+                if kind == 'exit_button':
+                    mark['inside'] = list(v['people'])
+                    mark['count'] = v['inside']
+                    if e.get('id'):
+                        txt = ('На складе были: ' + ', '.join(v['people'])) if v['people'] else 'На складе по картам никого не было'
+                        if v['inside'] > len(v['people']):
+                            txt += f" (по счёту внутри {v['inside']} чел.)"
+                        self.event_notes.append((txt, e['id']))
+                elif e['name'] in v['people']:
+                    v['people'].remove(e['name'])
                 v['inside'] = max(v['inside'] - 1, 0)
                 v['exits'] += 1
             else:
@@ -211,9 +229,12 @@ class Engine:
         for v in self.visits.values():
             if v['dirty']:
                 self.q('UPDATE {S}.skud_visits SET status=%s, ended_at=%s, inside=%s, entries=%s, exits=%s, alarm=%s, '
-                       'note=%s, inside_until=%s WHERE id=%s',
+                       'note=%s, inside_until=%s, people=%s WHERE id=%s',
                        (v['status'], v['ended_at'], v['inside'], v['entries'], v['exits'], v['alarm'], v['note'],
-                        v['inside_until'], v['id']))
+                        v['inside_until'], json.dumps(v['people'], ensure_ascii=False), v['id']))
+        for txt, eid in self.event_notes:
+            self.q("UPDATE {S}.skud_events SET note = CASE WHEN note IS NULL OR note = '' OR note = 'Нажата кнопка выхода' "
+                   "THEN %s ELSE note || ' · ' || %s END WHERE id = %s", (txt, txt, eid))
         for op in self.openings:
             marks = json.dumps(op['marks'], ensure_ascii=False)
             if op['id'] is None:
@@ -242,7 +263,7 @@ def load_controller(cur, schema: str, ctrl_id: str) -> Optional[Dict[str, Any]]:
         f"EXISTS(SELECT 1 FROM {schema}.skud_events e WHERE e.controller_id = c.id AND e.event_kind = 'door_closed'), "
         f'(SELECT row_to_json(o) FROM (SELECT id, visit_id, opened_at, last_open_at, marks, held FROM {schema}.skud_openings '
         f"WHERE controller_id = c.id AND status = 'open' ORDER BY id DESC LIMIT 1) o), "
-        f'(SELECT row_to_json(v) FROM (SELECT id, status, started_at, ended_at, inside, entries, exits, alarm, note, inside_until '
+        f'(SELECT row_to_json(v) FROM (SELECT id, status, started_at, ended_at, inside, entries, exits, alarm, note, inside_until, people '
         f"FROM {schema}.skud_visits WHERE controller_id = c.id AND status = 'open' ORDER BY id DESC LIMIT 1) v) "
         f'FROM {schema}.skud_controllers c WHERE c.id = %s', (INSIDE_NAMES, ctrl_id))
     r = cur.fetchone()
@@ -277,9 +298,9 @@ def process(cur, schema: str, ctrl_id: str, now: Optional[datetime] = None) -> N
     eng.load(
         (o['id'], o['visit_id'], _ts(o['opened_at']), _ts(o['last_open_at']), o['marks'], o['held']) if o else None,
         (v['id'], v['status'], _ts(v['started_at']), _ts(v['ended_at']), v['inside'], v['entries'], v['exits'],
-         v['alarm'], v['note'], _ts(v['inside_until'])) if v else None)
+         v['alarm'], v['note'], _ts(v['inside_until']), v.get('people')) if v else None)
     for r in rows:
-        eng.apply({'time': r[1], 'kind': r[2], 'name': r[3], 'card': r[4]})
+        eng.apply({'id': r[0], 'time': r[1], 'kind': r[2], 'name': r[3], 'card': r[4]})
     eng.tick(now)
     eng.save()
     if rows:
