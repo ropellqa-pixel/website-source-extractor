@@ -27,6 +27,19 @@ export default function ControllerPanel({ open, onOpenChange, controller, camera
   const [pc, setPc] = useState(controller?.recorder_device || '');
   const [quality, setQuality] = useState(controller?.recorder_quality || 'sd');
   const [devices, setDevices] = useState<PcDevice[]>([]);
+  const [gateHost, setGateHost] = useState(controller?.gate_host || '');
+  const [gatePort, setGatePort] = useState(String(controller?.gate_port || 5000));
+  const [gateAddr, setGateAddr] = useState(String(controller?.gate_address || 1));
+  const [acting, setActing] = useState<string | null>(null);
+
+  const act = async (action: string, extra: Record<string, unknown> = {}, confirmText?: string) => {
+    if (!controller || (confirmText && !confirm(confirmText))) return;
+    setActing(action);
+    const r = await skudCall<{ controllers: SkudController[] }>({ action, id: controller.id, ...extra });
+    setActing(null);
+    if (r.error) { alert(r.error); return; }
+    onChanged(r.controllers);
+  };
 
   useEffect(() => {
     skudCall<{ devices: PcDevice[] }>({ action: 'devices' }).then((r) => { if (!r.error) setDevices(r.devices); });
@@ -37,6 +50,7 @@ export default function ControllerPanel({ open, onOpenChange, controller, camera
     const r = await skudCall<{ controllers: SkudController[] }>({
       action: 'controller_save', id: controller?.id, name, camera_id: cameraId, open_seconds: Number(secs) || 3,
       inside_camera_id: insideId, pre_seconds: Number(pre), post_seconds: Number(post), recorder_device: pc, recorder_quality: quality,
+      gate_host: gateHost.trim(), gate_port: Number(gatePort) || 5000, gate_address: Number(gateAddr) || 1,
     });
     setBusy(false);
     if (r.error) { alert(r.error); return; }
@@ -82,18 +96,62 @@ export default function ControllerPanel({ open, onOpenChange, controller, camera
             </div>
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium">Компьютер, который записывает видео</label>
+            <label className="mb-1.5 block text-sm font-medium">Компьютер склада (видео и связь с контроллером)</label>
             <select value={pc} onChange={(e) => setPc(e.target.value)} className="h-10 w-full rounded-md border bg-background px-3 text-sm">
               <option value="">— не выбран (видео не сохраняется) —</option>
               {devices.map((d) => <option key={d.code} value={d.code}>{d.name || 'Без сотрудника'} · {d.host || d.code}</option>)}
             </select>
             <p className="mt-1 text-xs text-muted-foreground">
-              Программа АБИЗ 3.7+ на этом ПК постоянно пишет камеры склада и хранит 3 часа, а отрывки посещений отправляет сюда. ПК должен быть включён.
+              Программа АБИЗ 3.9+ на этом ПК пишет камеры склада и связывается с контроллером двери по локальной сети. ПК должен быть включён.
             </p>
             {controller?.recorder_device && (
               <p className={`mt-1 text-xs ${controller.recorder_online ? 'text-emerald-600' : 'text-amber-600'}`}>
                 {controller.recorder_online ? `На связи: ${controller.recorder_status || 'работает'}` : 'Компьютер сейчас не на связи'}
               </p>
+            )}
+          </div>
+          <div className="space-y-3 rounded-xl border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium">Связь с контроллером</span>
+              {controller && (
+                <span className={`flex items-center gap-1.5 text-xs ${controller.gate_online && controller.online ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  <span className={`h-2 w-2 rounded-full ${controller.gate_online && controller.online ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  {controller.online ? 'на связи' : controller.gate_online ? 'ПК на связи, контроллер нет' : 'нет связи'}
+                </span>
+              )}
+            </div>
+            {controller?.gate_status && <p className="break-words text-xs text-muted-foreground">{controller.gate_status}</p>}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_90px_90px]">
+              <div>
+                <label className="mb-1 block text-xs font-medium">IP-адрес контроллера</label>
+                <Input placeholder="найдётся сам" value={gateHost} onChange={(e) => setGateHost(e.target.value)} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium">Порт</label>
+                <Input inputMode="numeric" value={gatePort} onChange={(e) => setGatePort(e.target.value)} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium">Номер</label>
+                <Input inputMode="numeric" value={gateAddr} onChange={(e) => setGateAddr(e.target.value)} />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">Если IP не указан, программа сама найдёт контроллер в сети склада. Номер контроллера с завода — 1.</p>
+            {controller && (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" disabled={!!acting} onClick={() => act('sync_clock')}>
+                  <Icon name="Clock" size={14} />{acting === 'sync_clock' ? 'Отправляю…' : 'Сверить часы'}
+                </Button>
+                <Button size="sm" variant="outline" disabled={!!acting} onClick={() => act('sync_cards')}>
+                  <Icon name="RefreshCw" size={14} />Перезаписать карты
+                </Button>
+                <Button size="sm" variant={controller.emergency_open ? 'default' : 'outline'} disabled={!!acting}
+                  className={controller.emergency_open ? 'bg-red-600 hover:bg-red-700' : 'text-red-600'}
+                  onClick={() => controller.emergency_open
+                    ? act('emergency', { on: false })
+                    : act('emergency', { on: true }, 'Аварийное открытие: дверь будет открыта постоянно, пока вы его не выключите. Включить?')}>
+                  <Icon name="Siren" fallback="TriangleAlert" size={14} />{controller.emergency_open ? 'Выключить аварийное открытие' : 'Аварийное открытие'}
+                </Button>
+              </div>
             )}
           </div>
           <div className="flex items-center gap-3 text-sm">

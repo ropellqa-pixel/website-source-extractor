@@ -148,6 +148,9 @@ def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event:
         process_visits(cur, SCHEMA, ctrl['id'])
         return _resp(200, {'ok': True, 'saved': saved})
     if action == 'bridge_poll':
+        cur.execute(f"UPDATE {SCHEMA}.skud_commands SET sent_at = now(), done_at = now(), result = 'не выполнена: контроллер был не на связи' "
+                    f"WHERE controller_id = %s AND sent_at IS NULL AND operation = 'open_door' AND created_at < now() - interval '60 seconds'",
+                    (ctrl['id'],))
         cur.execute(f'SELECT id, operation, payload FROM {SCHEMA}.skud_commands WHERE controller_id = %s AND sent_at IS NULL '
                     f'ORDER BY id LIMIT 20', (ctrl['id'],))
         cmds = [{'id': r[0], 'operation': r[1], 'payload': json.loads(r[2]) if r[2] else None} for r in cur.fetchall()]
@@ -169,10 +172,37 @@ def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event:
     return _resp(400, {'error': 'Неизвестное действие'})
 
 
+GATE_FIELDS = 'id, name, gate_host, gate_port, gate_address, open_seconds, emergency_open'
+
+
+def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
+    """Программа АБИЗ на ПК склада работает «мостом» к контроллеру Gate по локальной сети (TCP)."""
+    cur.execute(f'SELECT {GATE_FIELDS} FROM {SCHEMA}.skud_controllers WHERE active AND recorder_device = %s '
+                f'ORDER BY created_at LIMIT 1', (dev['code'],))
+    r = cur.fetchone()
+    if not r:
+        return _resp(200, {'gate': None})
+    ctrl = {'id': r[0], 'name': r[1]}
+    status = str(body.get('status') or '')[:300] or None
+    found = str(body.get('found_host') or '').strip()
+    if found and not r[2] and re.fullmatch(r'[0-9.]{7,15}', found):
+        cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET gate_host = %s, gate_port = %s WHERE id = %s',
+                    (found, int(body.get('found_port') or r[3] or 5000), r[0]))
+    cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET gate_status = %s, gate_seen_at = now() WHERE id = %s', (status, r[0]))
+    if not body.get('connected'):
+        out: Dict[str, Any] = {'ok': True}
+    else:
+        out = json.loads(_bridge(cur, ctrl, 'bridge_' + action[len('rec_gate_'):], body, event)['body'])
+    out['gate'] = {'controller_id': r[0], 'name': r[1], 'host': found if (found and not r[2]) else (r[2] or ''),
+                   'port': r[3] or 5000, 'address': r[4] or 1, 'open_tenths': (r[5] or 3) * 10, 'emergency': bool(r[6])}
+    return _resp(200, out)
+
+
 def _controllers(cur) -> List[Dict[str, Any]]:
     cur.execute(f'SELECT c.id, c.name, c.serial, c.model, c.camera_id, cam.name, c.open_seconds, c.last_seen_at, '
                 f'c.last_ip, c.fw_version, c.door_open, c.secret, c.inside_camera_id, c.pre_seconds, c.post_seconds, '
-                f'c.recorder_device, c.recorder_quality, c.recorder_seen_at, c.recorder_status, d.hostname '
+                f'c.recorder_device, c.recorder_quality, c.recorder_seen_at, c.recorder_status, d.hostname, '
+                f'c.gate_host, c.gate_port, c.gate_address, c.gate_status, c.gate_seen_at, c.emergency_open '
                 f'FROM {SCHEMA}.skud_controllers c LEFT JOIN {SCHEMA}.devices d ON d.device_code = c.recorder_device '
                 f'LEFT JOIN {SCHEMA}.cameras cam ON cam.id = c.camera_id WHERE c.active ORDER BY c.created_at')
     now = datetime.now(timezone.utc)
@@ -183,7 +213,9 @@ def _controllers(cur) -> List[Dict[str, Any]]:
                     'last_ip': r[8], 'fw': r[9], 'door_open': r[10], 'key': r[11], 'inside_camera_id': r[12],
                     'pre_seconds': r[13], 'post_seconds': r[14], 'recorder_device': r[15], 'recorder_quality': r[16],
                     'recorder_online': bool(r[17] and now - r[17] < timedelta(seconds=60)), 'recorder_status': r[18],
-                    'recorder_host': r[19]})
+                    'recorder_host': r[19], 'gate_host': r[20], 'gate_port': r[21], 'gate_address': r[22],
+                    'gate_status': r[23], 'gate_online': bool(r[24] and now - r[24] < timedelta(seconds=60)),
+                    'emergency_open': r[25]})
     return out
 
 
@@ -339,7 +371,14 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         pre = max(0, min(int(body.get('pre_seconds') if body.get('pre_seconds') is not None else 10), 120))
         post = max(0, min(int(body.get('post_seconds') if body.get('post_seconds') is not None else 10), 120))
         quality = 'hd' if body.get('recorder_quality') == 'hd' else 'sd'
+        g_host = str(body.get('gate_host') or '').strip()[:60] or None
+        if g_host and not re.fullmatch(r'\d{1,3}(\.\d{1,3}){3}', g_host):
+            return _resp(400, {'error': 'IP-адрес контроллера в виде 192.168.1.50 (или оставьте пустым — найдётся сам)'})
+        g_port = max(1, min(int(body.get('gate_port') or 5000), 65535))
+        g_addr = max(1, min(int(body.get('gate_address') or 1), 254))
         if body.get('id'):
+            cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET gate_host=%s, gate_port=%s, gate_address=%s WHERE id=%s',
+                        (g_host, g_port, g_addr, body['id']))
             cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET name=%s, camera_id=%s, open_seconds=%s, inside_camera_id=%s, '
                         f'pre_seconds=%s, post_seconds=%s, recorder_device=%s, recorder_quality=%s WHERE id=%s',
                         (name, body.get('camera_id') or None, secs, body.get('inside_camera_id') or None, pre, post,
@@ -362,6 +401,21 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
                                       'person': user['name'], 'note': 'Открыто кнопкой на сайте'}, 'site')
         process_visits(cur, SCHEMA, body['id'])
         return _resp(200, {'ok': True})
+    if action in ('emergency', 'sync_clock', 'gate_info'):
+        cur.execute(f'SELECT id FROM {SCHEMA}.skud_controllers WHERE id=%s', (body.get('id'),))
+        if not cur.fetchone():
+            return _resp(404, {'error': 'Контроллер не найден'})
+        if action == 'emergency':
+            on = bool(body.get('on'))
+            cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET emergency_open=%s WHERE id=%s', (on, body['id']))
+            _save_event(cur, body['id'], {'kind': 'remote_open' if on else 'other', 'time': datetime.now(timezone.utc).isoformat(),
+                                          'person': user['name'], 'note': 'Аварийное открытие: дверь открыта постоянно' if on
+                                          else 'Аварийное открытие выключено'}, 'site')
+            process_visits(cur, SCHEMA, body['id'])
+        else:
+            cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, created_by) VALUES (%s,%s,%s)',
+                        (body['id'], action, user['name']))
+        return _resp(200, {'ok': True, 'controllers': _controllers(cur)})
     if action == 'sync_cards':
         cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
         return _resp(200, {'ok': True})
@@ -405,6 +459,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return _resp(200, recorder.upload_part(body))
             if action == 'rec_done':
                 return _resp(200, recorder.done(cur, SCHEMA, body))
+            if action.startswith('rec_gate_'):
+                return _gate(cur, dev, action, body, event)
             return _resp(400, {'error': 'Неизвестное действие'})
         user = _site_user(cur, event)
         if not user:

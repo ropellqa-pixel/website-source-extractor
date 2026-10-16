@@ -111,6 +111,11 @@ export default function Skud() {
           <span className={`h-2 w-2 rounded-full ${ctrl?.online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
           {ctrl ? `${ctrl.name}: ${ctrl.online ? 'на связи' : 'не на связи'}` : 'Добавить контроллер'}
         </button>
+        {ctrl?.emergency_open && (
+          <button onClick={() => setCtrlOpen(true)} className="flex items-center gap-2 rounded-xl bg-red-600 px-3 py-2 text-sm font-medium text-white">
+            <Icon name="Siren" fallback="TriangleAlert" size={16} />Дверь открыта постоянно
+          </button>
+        )}
         <button onClick={() => setCardsOpen(true)} className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-secondary">
           <Icon name="IdCard" fallback="CreditCard" size={16} />Ключ-карты
         </button>

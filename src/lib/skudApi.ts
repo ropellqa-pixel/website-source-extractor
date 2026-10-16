@@ -54,6 +54,12 @@ export interface SkudController {
   recorder_online: boolean;
   recorder_status: string | null;
   recorder_host: string | null;
+  gate_host: string | null;
+  gate_port: number;
+  gate_address: number;
+  gate_status: string | null;
+  gate_online: boolean;
+  emergency_open: boolean;
 }
 
 export interface SkudClip {
