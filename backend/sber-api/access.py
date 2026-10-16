@@ -53,7 +53,7 @@ VIEW_ACTIONS: Set[str] = {a['key'] for a in ACTIONS if '.view' in a['key']}
 ROLE_SECTIONS = {
     'director': [s['path'] for s in SECTIONS],
     'senior_employee': ['/dashboard', '/documents', '/base', '/dto', '/chat', '/cameras', '/schedule', '/salary',
-                        '/collection', '/settings', '/sber'],
+                        '/collection', '/settings', '/sber', '/skud'],
     'employee': ['/dashboard', '/documents', '/base', '/dto', '/chat', '/cameras', '/schedule', '/salary',
                  '/collection', '/settings'],
 }
@@ -102,6 +102,8 @@ def current_user(cur, schema: str, event: Dict[str, Any]) -> Optional[Dict[str, 
         actions |= {'sber.view', 'sber.request'}
         if '/sber' not in sections:
             sections.append('/sber')
+        if '/skud' not in sections:
+            sections.append('/skud')
     elif role == 'director':
         actions |= {'sber.view', 'sber.request', 'sber.pay', 'sber.sync'}
         if '/sber' not in sections:

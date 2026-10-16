@@ -9,6 +9,7 @@ import psycopg2
 
 from visits import process as process_visits
 import recorder
+import alerts
 
 SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 'public')
 CORS = {
@@ -18,6 +19,10 @@ CORS = {
     'Access-Control-Max-Age': '86400',
 }
 MANAGER_ROLES = {'director', 'deputy_director'}
+CARD_ROLES = {'director', 'deputy_director', 'senior_employee'}
+CARD_ACTIONS = {'overview', 'cards', 'card_save', 'card_rewrite', 'card_check', 'enroll_start', 'enroll_poll', 'events', 'visits'}
+OUTPUTS_DEFAULT = [{'addr': 1, 'name': 'Реле 2'}, {'addr': 2, 'name': 'Выход SW2'}, {'addr': 3, 'name': 'Выход SW3'},
+                   {'addr': 4, 'name': 'Выход SW0'}, {'addr': 5, 'name': 'Выход SW1'}]
 KINDS = {
     'entry': 'Вход по карте', 'exit': 'Выход по карте', 'exit_button': 'Выход по кнопке',
     'denied': 'Отказ в доступе', 'denied_blocked': 'Заблокированная карта', 'remote_open': 'Открыта с сайта',
@@ -67,7 +72,7 @@ def _site_user(cur, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 f'ORDER BY (user_id = %s) DESC LIMIT 1', (row[0], row[1] or '', row[0]))
     prof = cur.fetchone()
     role = 'director' if row[2] else (prof[1] if prof else 'employee')
-    return {'id': row[0], 'role': role, 'name': prof[2] if prof else (row[1] or '')}
+    return {'id': row[0], 'role': role, 'name': prof[2] if prof else (row[1] or ''), 'profile_id': prof[0] if prof else None}
 
 
 def _controller_by_key(cur, event: Dict[str, Any], body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -96,7 +101,7 @@ def _parse_time(v: Any) -> datetime:
 
 
 def _card_owner(cur, card: str):
-    cur.execute(f'SELECT c.profile_id, c.status, p.full_name FROM {SCHEMA}.skud_cards c '
+    cur.execute(f'SELECT c.profile_id, c.status, COALESCE(p.full_name, c.label), c.card_type FROM {SCHEMA}.skud_cards c '
                 f'LEFT JOIN {SCHEMA}.profiles p ON p.id = c.profile_id WHERE c.card_number = %s', (card,))
     return cur.fetchone()
 
@@ -111,6 +116,8 @@ def _save_event(cur, ctrl_id: str, e: Dict[str, Any], source: str = 'controller'
             profile_id, name = owner[0], owner[2]
             if owner[1] == 'blocked' and kind in ('denied', 'other'):
                 kind = 'denied_blocked'
+            if owner[3] == 'guest' and kind in ('entry', 'exit'):
+                e = {**e, 'note': 'Гостевая карта' + (f" · {e['note']}" if e.get('note') and 'гост' not in str(e['note']).lower() else '')}
         else:
             cur.execute(f'UPDATE {SCHEMA}.skud_enroll SET card_number = %s, captured_at = now() '
                         f'WHERE id = 1 AND until_at > now()', (card,))
@@ -127,14 +134,31 @@ def _save_event(cur, ctrl_id: str, e: Dict[str, Any], source: str = 'controller'
         (ctrl_id, _parse_time(e.get('time')), e.get('code'), kind, direction, bool(granted), card, profile_id, name,
          (str(e.get('note'))[:300] if e.get('note') else None), source,
          json.dumps(e.get('raw'), ensure_ascii=False)[:2000] if e.get('raw') is not None else None))
-    return cur.rowcount > 0
+    saved = cur.rowcount > 0
+    if saved and kind in alerts.ALERT_KINDS:
+        cur.execute(f'SELECT name FROM {SCHEMA}.skud_controllers WHERE id = %s', (ctrl_id,))
+        d = cur.fetchone()
+        alerts.alarm(cur, SCHEMA, kind, d[0] if d else 'Склад', name or '', _parse_time(e.get('time')), card or '')
+    return saved
+
+
+def _schedules(cur) -> List[Dict[str, Any]]:
+    cur.execute(f'SELECT id, name, days, time_from, time_to FROM {SCHEMA}.skud_schedules ORDER BY id LIMIT 7')
+    return [{'id': r[0], 'name': r[1], 'days': r[2], 'from': r[3], 'to': r[4], 'zone': i} for i, r in enumerate(cur.fetchall())]
 
 
 def _cards_for_controller(cur) -> List[Dict[str, Any]]:
-    cur.execute(f'SELECT card_number FROM {SCHEMA}.skud_cards WHERE status = %s '
+    zone = {s['id']: s['zone'] for s in _schedules(cur)}
+    cur.execute(f'SELECT card_number, pin_code, schedule_id, card_type, written_at FROM {SCHEMA}.skud_cards WHERE status = %s '
                 f'AND (valid_from IS NULL OR valid_from <= current_date) AND (valid_to IS NULL OR valid_to >= current_date) '
                 f'ORDER BY card_number', ('active',))
-    return [{'card': r[0]} for r in cur.fetchall()]
+    now = datetime.now(timezone.utc)
+    out = []
+    for num, pin, sch, ctype, written in cur.fetchall():
+        if ctype == 'employee' and now >= alerts.card_dates(written)['removed']:
+            continue
+        out.append({'card': num, 'pin': pin or '', 'mask': (1 << zone[sch]) if sch in zone else 0x80, 'guest': ctype == 'guest'})
+    return out
 
 
 def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
@@ -161,6 +185,7 @@ def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event:
         out = {'commands': cmds, 'cards_changed': dirty}
         if dirty or body.get('want_cards'):
             out['cards'] = _cards_for_controller(cur)
+            out['zones'] = _schedules(cur)
         return _resp(200, out)
     if action == 'bridge_ack':
         for c in (body.get('done') or [])[:50]:
@@ -172,7 +197,7 @@ def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event:
     return _resp(400, {'error': 'Неизвестное действие'})
 
 
-GATE_FIELDS = 'id, name, gate_host, gate_port, gate_address, open_seconds, emergency_open'
+GATE_FIELDS = 'id, name, gate_host, gate_port, gate_address, open_seconds, emergency_open, antipassback'
 
 
 def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
@@ -194,7 +219,9 @@ def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Di
     else:
         out = json.loads(_bridge(cur, ctrl, 'bridge_' + action[len('rec_gate_'):], body, event)['body'])
     out['gate'] = {'controller_id': r[0], 'name': r[1], 'host': found if (found and not r[2]) else (r[2] or ''),
-                   'port': r[3] or 5000, 'address': r[4] or 1, 'open_tenths': (r[5] or 3) * 10, 'emergency': bool(r[6])}
+                   'port': r[3] or 5000, 'address': r[4] or 1, 'open_tenths': (r[5] or 3) * 10, 'emergency': bool(r[6]),
+                   'antipassback': bool(r[7])}
+    alerts.daily_once(cur, SCHEMA)
     return _resp(200, out)
 
 
@@ -202,7 +229,8 @@ def _controllers(cur) -> List[Dict[str, Any]]:
     cur.execute(f'SELECT c.id, c.name, c.serial, c.model, c.camera_id, cam.name, c.open_seconds, c.last_seen_at, '
                 f'c.last_ip, c.fw_version, c.door_open, c.secret, c.inside_camera_id, c.pre_seconds, c.post_seconds, '
                 f'c.recorder_device, c.recorder_quality, c.recorder_seen_at, c.recorder_status, d.hostname, '
-                f'c.gate_host, c.gate_port, c.gate_address, c.gate_status, c.gate_seen_at, c.emergency_open '
+                f'c.gate_host, c.gate_port, c.gate_address, c.gate_status, c.gate_seen_at, c.emergency_open, '
+                f'c.antipassback, c.outputs '
                 f'FROM {SCHEMA}.skud_controllers c LEFT JOIN {SCHEMA}.devices d ON d.device_code = c.recorder_device '
                 f'LEFT JOIN {SCHEMA}.cameras cam ON cam.id = c.camera_id WHERE c.active ORDER BY c.created_at')
     now = datetime.now(timezone.utc)
@@ -215,7 +243,8 @@ def _controllers(cur) -> List[Dict[str, Any]]:
                     'recorder_online': bool(r[17] and now - r[17] < timedelta(seconds=60)), 'recorder_status': r[18],
                     'recorder_host': r[19], 'gate_host': r[20], 'gate_port': r[21], 'gate_address': r[22],
                     'gate_status': r[23], 'gate_online': bool(r[24] and now - r[24] < timedelta(seconds=60)),
-                    'emergency_open': r[25]})
+                    'emergency_open': r[25], 'antipassback': r[26],
+                    'outputs': json.loads(r[27]) if r[27] else OUTPUTS_DEFAULT})
     return out
 
 
@@ -285,24 +314,39 @@ def _visits(cur, body: Dict[str, Any]) -> Dict[str, Any]:
 
 def _cards(cur) -> List[Dict[str, Any]]:
     cur.execute(f'SELECT c.id, c.card_number, c.profile_id, p.full_name, c.label, c.status, c.valid_from, c.valid_to, '
-                f'c.synced, c.created_at, (SELECT max(event_time) FROM {SCHEMA}.skud_events e WHERE e.card_number = c.card_number) '
+                f'c.synced, c.created_at, (SELECT max(event_time) FROM {SCHEMA}.skud_events e WHERE e.card_number = c.card_number), '
+                f'c.card_type, (c.pin_code IS NOT NULL), c.schedule_id, c.written_at, c.written_by '
                 f'FROM {SCHEMA}.skud_cards c LEFT JOIN {SCHEMA}.profiles p ON p.id = c.profile_id '
                 f'ORDER BY c.status, p.full_name NULLS LAST')
-    return [{'id': r[0], 'card': r[1], 'profile_id': r[2], 'name': r[3], 'label': r[4], 'status': r[5],
-             'valid_from': r[6], 'valid_to': r[7], 'synced': r[8], 'created_at': r[9], 'last_used': r[10]}
-            for r in cur.fetchall()]
+    now = datetime.now(timezone.utc)
+    out = []
+    for r in cur.fetchall():
+        x = {'id': r[0], 'card': r[1], 'profile_id': r[2], 'name': r[3], 'label': r[4], 'status': r[5],
+             'valid_from': r[6], 'valid_to': r[7], 'synced': r[8], 'created_at': r[9], 'last_used': r[10],
+             'card_type': r[11], 'has_pin': r[12], 'schedule_id': r[13], 'written_at': r[14], 'written_by': r[15]}
+        if r[11] == 'employee':
+            d = alerts.card_dates(r[14])
+            x.update({'expires_at': d['expires'], 'removed_at': d['removed'],
+                      'expiry_state': 'grace' if now >= d['expires'] else 'warn' if now >= d['warn_from'] else 'ok'})
+        out.append(x)
+    return out
 
 
 def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[str, Any]:
-    if user['role'] not in MANAGER_ROLES:
-        return _resp(403, {'error': 'Раздел СКУД доступен директору и заместителю директора'})
+    if user['role'] not in MANAGER_ROLES and not (user['role'] in CARD_ROLES and action in CARD_ACTIONS):
+        return _resp(403, {'error': 'Это доступно директору и заместителю директора'})
 
     if action == 'overview':
         cur.execute(f"SELECT id, full_name, department FROM {SCHEMA}.profiles WHERE status = 'active' ORDER BY full_name")
         emps = [{'id': r[0], 'name': r[1], 'department': r[2]} for r in cur.fetchall()]
         cur.execute(f"SELECT id, name FROM {SCHEMA}.cameras ORDER BY order_index")
         cams = [{'id': r[0], 'name': r[1]} for r in cur.fetchall()]
-        return _resp(200, {'controllers': _controllers(cur), 'cards': _cards(cur), 'employees': emps, 'cameras': cams})
+        ctrls = _controllers(cur)
+        if user['role'] not in MANAGER_ROLES:
+            ctrls = [{k: v for k, v in c.items() if k not in ('key', 'last_ip', 'gate_host')} for c in ctrls]
+        return _resp(200, {'controllers': ctrls, 'cards': _cards(cur), 'employees': emps, 'cameras': cams,
+                           'schedules': _schedules(cur), 'notify': alerts.settings(cur, SCHEMA),
+                           'is_manager': user['role'] in MANAGER_ROLES})
     if action == 'events':
         return _resp(200, _events(cur, body))
     if action == 'cards':
@@ -331,16 +375,47 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
             cur.execute(f'SELECT full_name FROM {SCHEMA}.profiles WHERE id = %s', (ex[1],))
             p = cur.fetchone()
             return _resp(400, {'error': f'Эта карта уже записана{" на " + p[0] if p else ""}'})
+        ctype = 'guest' if body.get('card_type') == 'guest' else 'employee'
+        if ctype == 'guest' and not body.get('valid_to'):
+            return _resp(400, {'error': 'Для гостевой карты укажите, до какого числа она действует'})
+        pin = str(body.get('pin') or '').strip()
+        if pin and not re.fullmatch(r'\d{6}', pin):
+            return _resp(400, {'error': 'Код для клавиатуры — ровно 6 цифр'})
+        sch = int(body['schedule_id']) if str(body.get('schedule_id') or '').isdigit() else None
+        if user['role'] not in MANAGER_ROLES:
+            pin = ''
+            body = {**body, 'pin_clear': False}
+            sch = None
+            if body.get('id'):
+                cur.execute(f'SELECT schedule_id FROM {SCHEMA}.skud_cards WHERE id=%s', (body['id'],))
+                x = cur.fetchone()
+                sch = x[0] if x else None
         vals = (card, body.get('profile_id') or None, (body.get('label') or '')[:100] or None,
-                body.get('valid_from') or None, body.get('valid_to') or None)
+                body.get('valid_from') or None, (body.get('valid_to') or None) if ctype == 'guest' else None, ctype, sch)
         if body.get('id'):
+            cur.execute(f'SELECT card_number FROM {SCHEMA}.skud_cards WHERE id=%s', (body['id'],))
+            old = cur.fetchone()
+            rewrite = bool(body.get('rewrite')) or (old and old[0] != card)
             cur.execute(f'UPDATE {SCHEMA}.skud_cards SET card_number=%s, profile_id=%s, label=%s, valid_from=%s, valid_to=%s, '
-                        f'synced=false, updated_at=now() WHERE id=%s', vals + (body['id'],))
+                        f'card_type=%s, schedule_id=%s, synced=false, updated_at=now()'
+                        f'{", written_at=now(), written_by=%s" if rewrite else ""} WHERE id=%s',
+                        vals + ((user['name'],) if rewrite else ()) + (body['id'],))
+            cid = body['id']
         else:
-            cur.execute(f'INSERT INTO {SCHEMA}.skud_cards (card_number, profile_id, label, valid_from, valid_to, created_by) '
-                        f'VALUES (%s,%s,%s,%s,%s,%s)', vals + (user['name'],))
+            cur.execute(f'INSERT INTO {SCHEMA}.skud_cards (card_number, profile_id, label, valid_from, valid_to, card_type, '
+                        f'schedule_id, created_by, written_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id',
+                        vals + (user['name'], user['name']))
+            cid = cur.fetchone()[0]
+        if body.get('pin_clear'):
+            cur.execute(f'UPDATE {SCHEMA}.skud_cards SET pin_code = NULL WHERE id = %s', (cid,))
+        elif pin:
+            cur.execute(f'UPDATE {SCHEMA}.skud_cards SET pin_code = %s WHERE id = %s', (pin, cid))
         cur.execute(f'UPDATE {SCHEMA}.skud_enroll SET until_at = NULL, card_number = NULL WHERE id = 1')
         return _resp(200, {'ok': True, 'card': card, 'cards': _cards(cur)})
+    if action == 'card_rewrite':
+        cur.execute(f"UPDATE {SCHEMA}.skud_cards SET written_at = now(), written_by = %s, synced = false, updated_at = now() "
+                    f"WHERE id = %s AND card_type = 'employee'", (user['name'], body.get('id')))
+        return _resp(200, {'ok': True, 'cards': _cards(cur)})
     if action == 'card_status':
         st = body.get('status')
         if st not in CARD_STATUSES:
@@ -401,6 +476,53 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
                                       'person': user['name'], 'note': 'Открыто кнопкой на сайте'}, 'site')
         process_visits(cur, SCHEMA, body['id'])
         return _resp(200, {'ok': True})
+    if action == 'schedule_save':
+        name = str(body.get('name') or '').strip()[:60]
+        days = int(body.get('days') or 0) & 0x7F
+        tf, tt = str(body.get('from') or ''), str(body.get('to') or '')
+        if not name or not days or not re.fullmatch(r'\d{2}:\d{2}', tf) or not re.fullmatch(r'\d{2}:\d{2}', tt) or tf >= tt:
+            return _resp(400, {'error': 'Укажите название, дни недели и время «с» меньше, чем «до»'})
+        if body.get('id'):
+            cur.execute(f'UPDATE {SCHEMA}.skud_schedules SET name=%s, days=%s, time_from=%s, time_to=%s WHERE id=%s',
+                        (name, days, tf, tt, body['id']))
+        else:
+            if len(_schedules(cur)) >= 7:
+                return _resp(400, {'error': 'Контроллер хранит не больше 7 расписаний'})
+            cur.execute(f'INSERT INTO {SCHEMA}.skud_schedules (name, days, time_from, time_to) VALUES (%s,%s,%s,%s)', (name, days, tf, tt))
+        cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
+        return _resp(200, {'ok': True, 'schedules': _schedules(cur), 'cards': _cards(cur)})
+    if action == 'schedule_delete':
+        cur.execute(f'UPDATE {SCHEMA}.skud_cards SET schedule_id = NULL, synced=false WHERE schedule_id = %s', (body.get('id'),))
+        cur.execute(f'DELETE FROM {SCHEMA}.skud_schedules WHERE id = %s', (body.get('id'),))
+        cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
+        return _resp(200, {'ok': True, 'schedules': _schedules(cur), 'cards': _cards(cur)})
+    if action == 'notify_save':
+        v = {'alarms_to_employees': bool(body.get('alarms_to_employees'))}
+        cur.execute(f"INSERT INTO {SCHEMA}.app_settings (key, value, updated_by) VALUES ('skud_notify', %s, %s) "
+                    f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()",
+                    (json.dumps(v), user['name']))
+        return _resp(200, {'ok': True, 'notify': v})
+    if action in ('antipassback', 'outputs_save', 'output'):
+        cur.execute(f'SELECT outputs FROM {SCHEMA}.skud_controllers WHERE id=%s', (body.get('id'),))
+        row = cur.fetchone()
+        if not row:
+            return _resp(404, {'error': 'Контроллер не найден'})
+        if action == 'antipassback':
+            cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET antipassback=%s WHERE id=%s', (bool(body.get('on')), body['id']))
+            cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
+        elif action == 'outputs_save':
+            outs = [{'addr': int(o.get('addr')), 'name': str(o.get('name') or '').strip()[:40] or f"Выход {o.get('addr')}"}
+                    for o in (body.get('outputs') or []) if str(o.get('addr')) in ('1', '2', '3', '4', '5', '6', '7')]
+            cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET outputs=%s WHERE id=%s', (json.dumps(outs, ensure_ascii=False), body['id']))
+        else:
+            mode = body.get('mode') if body.get('mode') in ('on', 'off', 'pulse') else 'pulse'
+            secs = max(1, min(int(body.get('seconds') or 5), 255))
+            addr = int(body.get('addr') or 0)
+            if not 1 <= addr <= 7:
+                return _resp(400, {'error': 'Неверный выход'})
+            cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, payload, created_by) VALUES (%s,%s,%s,%s)',
+                        (body['id'], 'output', json.dumps({'addr': addr, 'mode': mode, 'seconds': secs}), user['name']))
+        return _resp(200, {'ok': True, 'controllers': _controllers(cur)})
     if action in ('emergency', 'sync_clock', 'gate_info'):
         cur.execute(f'SELECT id FROM {SCHEMA}.skud_controllers WHERE id=%s', (body.get('id'),))
         if not cur.fetchone():
@@ -465,6 +587,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         user = _site_user(cur, event)
         if not user:
             return _resp(401, {'error': 'Нужно войти в систему'})
+        if action == 'notices':
+            alerts.daily_once(cur, SCHEMA)
+            return _resp(200, {'notices': alerts.notices_for(cur, SCHEMA, user)})
+        if action == 'notice_dismiss':
+            alerts.dismiss(cur, SCHEMA, user, str(body.get('card_id') or ''), str(body.get('cycle') or ''))
+            return _resp(200, {'ok': True})
         return _site(cur, user, action, body)
     finally:
         cur.close()

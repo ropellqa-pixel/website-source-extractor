@@ -30,6 +30,25 @@ export interface SkudCard {
   valid_to: string | null;
   synced: boolean;
   last_used: string | null;
+  card_type: 'employee' | 'guest';
+  has_pin: boolean;
+  schedule_id: number | null;
+  written_at: string;
+  written_by: string | null;
+  expires_at?: string;
+  removed_at?: string;
+  expiry_state?: 'ok' | 'warn' | 'grace';
+}
+
+export interface SkudSchedule { id: number; name: string; days: number; from: string; to: string; zone: number }
+export interface SkudOutput { addr: number; name: string }
+
+export const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+export function daysLabel(mask: number) {
+  if (mask === 127) return 'каждый день';
+  if (mask === 31) return 'будни';
+  if (mask === 96) return 'выходные';
+  return WEEKDAYS.filter((_, i) => mask & (1 << i)).join(', ');
 }
 
 export interface SkudController {
@@ -60,6 +79,8 @@ export interface SkudController {
   gate_status: string | null;
   gate_online: boolean;
   emergency_open: boolean;
+  antipassback: boolean;
+  outputs: SkudOutput[];
 }
 
 export interface SkudClip {

@@ -15,7 +15,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'ДТО', path: '/dto', icon: 'Briefcase', group: 1 },
   { label: 'Чат', path: '/chat', icon: 'MessageSquare', group: 1 },
   { label: 'Камеры', path: '/cameras', icon: 'Cctv', group: 1 },
-  { label: 'СКУД', path: '/skud', icon: 'DoorClosed', group: 1, roles: ['director', 'deputy_director'] },
+  { label: 'СКУД', path: '/skud', icon: 'DoorClosed', group: 1, roles: ['director', 'deputy_director', 'senior_employee'] },
   { label: 'Табель', path: '/schedule', icon: 'CalendarDays', group: 2 },
   { label: 'Зарплата', path: '/salary', icon: 'Banknote', group: 2 },
   { label: 'Инкассация', path: '/collection', icon: 'Coins', group: 2 },

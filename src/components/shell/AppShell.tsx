@@ -4,6 +4,7 @@ import Icon from '@/components/ui/icon';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import SideNav from './SideNav';
 import BottomNav from './BottomNav';
+import SkudNotices from './SkudNotices';
 import { useChatNotifications } from '@/hooks/useChatNotifications';
 
 interface Notice {
@@ -44,7 +45,7 @@ export default function AppShell({ children, notice }: { children: ReactNode; no
         </span>
       </header>
 
-      <main className="min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain app-main">{children}</main>
+      <main className="min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain app-main"><SkudNotices />{children}</main>
 
       <BottomNav onMore={() => setOpen(true)} />
 

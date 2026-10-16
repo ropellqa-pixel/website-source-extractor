@@ -3,19 +3,26 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
-import { fmtDate, skudCall, type Employee, type SkudCard } from '@/lib/skudApi';
+import { fmtDate, skudCall, type Employee, type SkudCard, type SkudSchedule } from '@/lib/skudApi';
 
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   cards: SkudCard[];
   employees: Employee[];
+  schedules: SkudSchedule[];
+  isManager: boolean;
   onChanged: (cards: SkudCard[]) => void;
 }
 
-const EMPTY = { id: '', card: '', profile_id: '', label: '', valid_to: '' };
+const EMPTY = { id: '', card: '', profile_id: '', label: '', valid_to: '', card_type: 'employee' as 'employee' | 'guest', schedule_id: '', pin: '', pin_clear: false, has_pin: false, rewrite: false };
 
-export default function CardsPanel({ open, onOpenChange, cards, employees, onChanged }: Props) {
+function daysTo(iso?: string) {
+  if (!iso) return 0;
+  return Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 864e5));
+}
+
+export default function CardsPanel({ open, onOpenChange, cards, employees, schedules, isManager, onChanged }: Props) {
   const [form, setForm] = useState(EMPTY);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -24,13 +31,12 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, onCha
   const [doorWait, setDoorWait] = useState(false);
   const cardRef = useRef<HTMLInputElement>(null);
 
-  const startAdd = (c?: SkudCard) => {
-    setForm(c ? { id: c.id, card: c.card, profile_id: c.profile_id || '', label: c.label || '', valid_to: c.valid_to || '' } : EMPTY);
-    setAdding(true); setError(null); setHint(null);
+  const startAdd = (c?: SkudCard, rewrite = false) => {
+    setForm(c ? { id: c.id, card: rewrite ? '' : c.card, profile_id: c.profile_id || '', label: c.label || '', valid_to: c.valid_to || '', card_type: c.card_type, schedule_id: c.schedule_id ? String(c.schedule_id) : '', pin: '', pin_clear: false, has_pin: c.has_pin, rewrite } : EMPTY);
+    setAdding(true); setError(null); setHint(rewrite ? 'Поднесите карту сотрудника (ту же или новую) — срок продлится на месяц' : null);
     setTimeout(() => cardRef.current?.focus(), 50);
   };
 
-  // Считыватель TS-RDR-USB-EM «печатает» номер карты и нажимает Enter — сразу проверяем номер.
   const check = async (val: string) => {
     if (!val.trim()) return;
     const r = await skudCall<{ card: string; valid: boolean; owner: string | null }>({ action: 'card_check', card: val });
@@ -41,7 +47,6 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, onCha
     setHint(r.owner && !form.id ? `Эта карта уже записана на ${r.owner}` : `Карта ${r.card} считана`);
   };
 
-  // Запасной способ — поднести карту к считывателю на двери склада.
   useEffect(() => {
     if (!doorWait) return;
     let stop = false;
@@ -57,7 +62,7 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, onCha
 
   const save = async () => {
     setBusy(true); setError(null);
-    const r = await skudCall<{ cards: SkudCard[] }>({ action: 'card_save', ...form });
+    const r = await skudCall<{ cards: SkudCard[] }>({ action: 'card_save', ...form, schedule_id: form.schedule_id || null });
     setBusy(false);
     if (r.error) { setError(r.error); return; }
     onChanged(r.cards); setAdding(false); setForm(EMPTY);
@@ -69,13 +74,23 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, onCha
     if (r.error) alert(r.error); else onChanged(r.cards);
   };
 
+  const guest = form.card_type === 'guest';
+
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) { setAdding(false); setDoorWait(false); } }}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-        <DialogHeader><DialogTitle>Ключ-карты сотрудников</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{adding ? (form.rewrite ? 'Перезапись карты' : form.id ? 'Карта' : 'Новая карта') : 'Ключ-карты'}</DialogTitle></DialogHeader>
 
         {adding ? (
           <div className="space-y-4">
+            {!form.rewrite && (
+              <div className="flex rounded-lg bg-secondary p-0.5">
+                {([['employee', 'Сотрудника'], ['guest', 'Гостевая (временная)']] as const).map(([k, l]) => (
+                  <button key={k} onClick={() => setForm({ ...form, card_type: k })}
+                    className={`flex-1 rounded-md py-1.5 text-sm font-medium ${form.card_type === k ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}>{l}</button>
+                ))}
+              </div>
+            )}
             <div>
               <label className="mb-1.5 block text-sm font-medium">Номер карты</label>
               <Input ref={cardRef} value={form.card} placeholder="Поднесите карту к USB-считывателю"
@@ -88,31 +103,61 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, onCha
                   {doorWait ? 'Отменить ожидание' : 'Или считать на двери склада'}
                 </button>
               </div>
-              {doorWait && <p className="mt-2 flex items-center gap-2 text-sm text-primary"><Icon name="Loader2" size={14} className="animate-spin" />Поднесите новую карту к считывателю на двери (2 мин)…</p>}
+              {doorWait && <p className="mt-2 flex items-center gap-2 text-sm text-primary"><Icon name="Loader2" size={14} className="animate-spin" />Поднесите карту к считывателю на двери (2 мин)…</p>}
               {hint && <p className="mt-2 text-sm text-emerald-600">{hint}</p>}
             </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium">Сотрудник</label>
-              <select value={form.profile_id} onChange={(e) => setForm({ ...form, profile_id: e.target.value })}
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm">
-                <option value="">— не привязана (гостевая / запасная) —</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.name}{e.department ? ` · ${e.department}` : ''}</option>)}
-              </select>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-1.5 block text-sm font-medium">Подпись <span className="text-muted-foreground">(необязательно)</span></label>
-                <Input value={form.label} placeholder="Например: брелок синий" onChange={(e) => setForm({ ...form, label: e.target.value })} />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium">Действует до <span className="text-muted-foreground">(необязательно)</span></label>
-                <Input type="date" value={form.valid_to} onChange={(e) => setForm({ ...form, valid_to: e.target.value })} />
-              </div>
-            </div>
+            {!form.rewrite && (
+              <>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium">{guest ? 'Кому выдана (необязательно)' : 'Сотрудник'}</label>
+                  <select value={form.profile_id} onChange={(e) => setForm({ ...form, profile_id: e.target.value })}
+                    className="h-10 w-full rounded-md border bg-background px-3 text-sm">
+                    <option value="">{guest ? '— гость —' : '— не привязана (запасная) —'}</option>
+                    {employees.map((e) => <option key={e.id} value={e.id}>{e.name}{e.department ? ` · ${e.department}` : ''}</option>)}
+                  </select>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium">{guest ? 'Имя гостя / подпись' : 'Подпись'} <span className="text-muted-foreground">(необязательно)</span></label>
+                    <Input value={form.label} placeholder={guest ? 'Например: электрик Иван' : 'Например: брелок синий'} onChange={(e) => setForm({ ...form, label: e.target.value })} />
+                  </div>
+                  {guest ? (
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium">Действует до</label>
+                      <Input type="date" value={form.valid_to} onChange={(e) => setForm({ ...form, valid_to: e.target.value })} />
+                    </div>
+                  ) : (
+                    <div className="rounded-lg bg-secondary px-3 py-2 text-xs text-muted-foreground">
+                      Карта сотрудника действует 1 месяц с записи + 5 резервных дней. Потом удаляется — её нужно перезаписать.
+                    </div>
+                  )}
+                </div>
+                {isManager && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium">Расписание доступа</label>
+                      <select value={form.schedule_id} onChange={(e) => setForm({ ...form, schedule_id: e.target.value })}
+                        className="h-10 w-full rounded-md border bg-background px-3 text-sm">
+                        <option value="">Без ограничений (всегда)</option>
+                        {schedules.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.from}–{s.to}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium">Код на клавиатуре <span className="text-muted-foreground">(6 цифр)</span></label>
+                      <Input inputMode="numeric" maxLength={6} value={form.pin} placeholder={form.has_pin && !form.pin_clear ? 'код задан — введите новый' : 'без кода'}
+                        onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, ''), pin_clear: false })} />
+                      {form.has_pin && !form.pin_clear && (
+                        <button onClick={() => setForm({ ...form, pin: '', pin_clear: true })} className="mt-1 text-xs text-destructive hover:underline">Убрать код</button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setAdding(false)}>Отмена</Button>
-              <Button onClick={save} disabled={busy || !form.card}>{busy ? 'Сохраняю…' : form.id ? 'Сохранить' : 'Записать карту'}</Button>
+              <Button onClick={save} disabled={busy || !form.card}>{busy ? 'Сохраняю…' : form.rewrite ? 'Перезаписать' : form.id ? 'Сохранить' : 'Записать карту'}</Button>
             </div>
           </div>
         ) : (
@@ -120,31 +165,55 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, onCha
             <Button onClick={() => startAdd()} className="w-full"><Icon name="Plus" size={16} />Записать новую карту</Button>
             {cards.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Карт пока нет</p>}
             <div className="divide-y rounded-xl border">
-              {cards.map((c) => (
-                <div key={c.id} className={`flex items-center gap-3 px-3 py-2.5 ${c.status === 'blocked' ? 'opacity-60' : ''}`}>
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${c.status === 'blocked' ? 'bg-red-500/10 text-red-600' : 'bg-primary/10 text-primary'}`}>
-                    <Icon name={c.status === 'blocked' ? 'Ban' : 'IdCard'} fallback="CreditCard" size={17} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">{c.name || 'Не привязана'}{c.label ? <span className="font-normal text-muted-foreground"> · {c.label}</span> : null}</div>
-                    <div className="text-xs text-muted-foreground">
-                      <span className="font-mono">{c.card}</span>
-                      {c.status === 'blocked' && <span className="ml-2 text-red-600">заблокирована</span>}
-                      {c.valid_to && <span className="ml-2">до {fmtDate(c.valid_to)}</span>}
-                      {c.last_used && <span className="ml-2">проход {fmtDate(c.last_used)}</span>}
-                      {!c.synced && <span className="ml-2 text-amber-600">ждёт отправки на дверь</span>}
+              {cards.map((c) => {
+                const exp = c.expiry_state;
+                const sch = schedules.find((s) => s.id === c.schedule_id);
+                return (
+                  <div key={c.id} className={`flex flex-wrap items-center gap-3 px-3 py-2.5 sm:flex-nowrap ${c.status === 'blocked' ? 'opacity-60' : ''}`}>
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${c.status === 'blocked' ? 'bg-red-500/10 text-red-600' : c.card_type === 'guest' ? 'bg-violet-500/10 text-violet-600' : 'bg-primary/10 text-primary'}`}>
+                      <Icon name={c.status === 'blocked' ? 'Ban' : c.card_type === 'guest' ? 'UserRound' : 'IdCard'} fallback="CreditCard" size={17} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="break-words font-medium">
+                        {c.name || c.label || 'Не привязана'}
+                        {c.card_type === 'guest' && <span className="ml-1.5 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-normal text-violet-700">гость</span>}
+                        {c.label && c.name ? <span className="font-normal text-muted-foreground"> · {c.label}</span> : null}
+                      </div>
+                      <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+                        <span className="font-mono">{c.card}</span>
+                        {c.status === 'blocked' && <span className="text-red-600">заблокирована</span>}
+                        {c.card_type === 'guest' && c.valid_to && <span>до {fmtDate(c.valid_to)}</span>}
+                        {c.card_type === 'employee' && c.expires_at && (
+                          <span className={exp === 'grace' ? 'font-medium text-red-600' : exp === 'warn' ? 'font-medium text-amber-600' : ''}>
+                            {exp === 'grace' ? `резерв: удалится через ${daysTo(c.removed_at)} дн.` : `действует до ${fmtDate(c.expires_at)}${exp === 'warn' ? ` (${daysTo(c.expires_at)} дн.)` : ''}`}
+                          </span>
+                        )}
+                        {sch && <span>{sch.name}</span>}
+                        {c.has_pin && <span>с кодом</span>}
+                        {c.last_used && <span>проход {fmtDate(c.last_used)}</span>}
+                        {!c.synced && <span className="text-amber-600">ждёт отправки на дверь</span>}
+                      </div>
+                    </div>
+                    <div className="ml-auto flex items-center">
+                      {c.card_type === 'employee' && (
+                        <Button size="sm" variant={exp === 'ok' ? 'ghost' : 'default'} className="h-8" onClick={() => startAdd(c, true)}>
+                          <Icon name="RefreshCw" size={14} />Перезаписать
+                        </Button>
+                      )}
+                      <button title="Изменить" onClick={() => startAdd(c)} className="rounded-lg p-2 hover:bg-secondary"><Icon name="Pencil" size={15} /></button>
+                      {isManager && (c.status === 'active' ? (
+                        <button title="Заблокировать" onClick={() => act('card_status', { id: c.id, status: 'blocked' })} className="rounded-lg p-2 text-amber-600 hover:bg-amber-500/10"><Icon name="Lock" size={15} /></button>
+                      ) : (
+                        <button title="Разблокировать" onClick={() => act('card_status', { id: c.id, status: 'active' })} className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-500/10"><Icon name="LockOpen" size={15} /></button>
+                      ))}
+                      {isManager && (
+                        <button title="Удалить" onClick={() => act('card_delete', { id: c.id }, `Удалить карту ${c.card}${c.name ? ` (${c.name})` : ''}? Проходы в журнале сохранятся.`)}
+                          className="rounded-lg p-2 text-destructive hover:bg-destructive/10"><Icon name="Trash2" size={15} /></button>
+                      )}
                     </div>
                   </div>
-                  <button title="Изменить" onClick={() => startAdd(c)} className="rounded-lg p-2 hover:bg-secondary"><Icon name="Pencil" size={15} /></button>
-                  {c.status === 'active' ? (
-                    <button title="Заблокировать" onClick={() => act('card_status', { id: c.id, status: 'blocked' })} className="rounded-lg p-2 text-amber-600 hover:bg-amber-500/10"><Icon name="Lock" size={15} /></button>
-                  ) : (
-                    <button title="Разблокировать" onClick={() => act('card_status', { id: c.id, status: 'active' })} className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-500/10"><Icon name="LockOpen" size={15} /></button>
-                  )}
-                  <button title="Удалить" onClick={() => act('card_delete', { id: c.id }, `Удалить карту ${c.card}${c.name ? ` (${c.name})` : ''}? Проходы в журнале сохранятся.`)}
-                    className="rounded-lg p-2 text-destructive hover:bg-destructive/10"><Icon name="Trash2" size={15} /></button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

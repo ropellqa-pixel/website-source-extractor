@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import AccessPanel from '@/components/skud/AccessPanel';
 import Icon from '@/components/ui/icon';
 import { Input } from '@/components/ui/input';
 import EventsTable from '@/components/skud/EventsTable';
 import CardsPanel from '@/components/skud/CardsPanel';
 import ControllerPanel from '@/components/skud/ControllerPanel';
 import VisitCard from '@/components/skud/VisitCard';
-import { fmtDate, fmtTime, mskDay, skudCall, type Employee, type SkudCard, type SkudController, type SkudEvent, type SkudVisit } from '@/lib/skudApi';
+import { fmtDate, fmtTime, mskDay, skudCall, type Employee, type SkudCard, type SkudController, type SkudEvent, type SkudSchedule, type SkudVisit } from '@/lib/skudApi';
 
 type Kind = 'all' | 'pass' | 'alarm';
 
@@ -32,7 +34,12 @@ export default function Skud() {
   const [controllers, setControllers] = useState<SkudController[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [cardsOpen, setCardsOpen] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const [cardsOpen, setCardsOpen] = useState(params.get('cards') === '1');
+  const [accessOpen, setAccessOpen] = useState(false);
+  const [schedules, setSchedules] = useState<SkudSchedule[]>([]);
+  const [notify, setNotify] = useState({ alarms_to_employees: false });
+  const [isManager, setIsManager] = useState(false);
   const [ctrlOpen, setCtrlOpen] = useState(false);
   const [opening, setOpening] = useState(false);
   const [tab, setTab] = useState<'visits' | 'journal'>('visits');
@@ -42,9 +49,10 @@ export default function Skud() {
   const warehouseCam = ctrl?.camera_id || cameras.find((c) => /склад/i.test(c.name))?.id || null;
 
   const loadOverview = useCallback(async () => {
-    const r = await skudCall<{ controllers: SkudController[]; cards: SkudCard[]; employees: Employee[]; cameras: { id: string; name: string }[] }>({ action: 'overview' });
+    const r = await skudCall<{ controllers: SkudController[]; cards: SkudCard[]; employees: Employee[]; cameras: { id: string; name: string }[]; schedules: SkudSchedule[]; notify: { alarms_to_employees: boolean }; is_manager: boolean }>({ action: 'overview' });
     if (r.error) { setError(r.error); setLoading(false); return; }
     setControllers(r.controllers); setCards(r.cards); setEmployees(r.employees); setCameras(r.cameras);
+    setSchedules(r.schedules || []); if (r.notify) setNotify(r.notify); setIsManager(!!r.is_manager);
   }, []);
 
   const loadEvents = useCallback(async () => {
@@ -106,7 +114,7 @@ export default function Skud() {
           <h1 className="text-2xl font-semibold tracking-tight">СКУД</h1>
           <p className="text-sm text-muted-foreground">Контроль доступа на склад</p>
         </div>
-        <button onClick={() => setCtrlOpen(true)}
+        <button onClick={() => isManager && setCtrlOpen(true)}
           className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-secondary">
           <span className={`h-2 w-2 rounded-full ${ctrl?.online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
           {ctrl ? `${ctrl.name}: ${ctrl.online ? 'на связи' : 'не на связи'}` : 'Добавить контроллер'}
@@ -118,8 +126,14 @@ export default function Skud() {
         )}
         <button onClick={() => setCardsOpen(true)} className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-secondary">
           <Icon name="IdCard" fallback="CreditCard" size={16} />Ключ-карты
+          {cards.some((c) => c.expiry_state && c.expiry_state !== 'ok') && <span className="h-2 w-2 rounded-full bg-red-500" />}
         </button>
-        <button onClick={openDoor} disabled={!ctrl || opening}
+        {isManager && (
+          <button onClick={() => setAccessOpen(true)} className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm hover:bg-secondary">
+            <Icon name="ShieldCheck" size={16} />Доступ и тревоги
+          </button>
+        )}
+        <button onClick={openDoor} disabled={!ctrl || opening || !isManager}
           className="flex items-center gap-2 rounded-xl bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
           <Icon name="DoorOpen" size={16} />{opening ? 'Открываю…' : 'Открыть дверь'}
         </button>
@@ -190,7 +204,12 @@ export default function Skud() {
       </div>
       )}
 
-      <CardsPanel open={cardsOpen} onOpenChange={setCardsOpen} cards={cards} employees={employees} onChanged={setCards} />
+      <CardsPanel open={cardsOpen} onOpenChange={(v) => { setCardsOpen(v); if (!v && params.get('cards')) { params.delete('cards'); setParams(params, { replace: true }); } }}
+        cards={cards} employees={employees} schedules={schedules} isManager={isManager} onChanged={setCards} />
+      {accessOpen && (
+        <AccessPanel open={accessOpen} onOpenChange={setAccessOpen} controller={ctrl} schedules={schedules} notify={notify}
+          onSchedules={(s, c) => { setSchedules(s); setCards(c); }} onControllers={setControllers} onNotify={setNotify} />
+      )}
       {ctrlOpen && (
         <ControllerPanel open={ctrlOpen} onOpenChange={setCtrlOpen} controller={ctrl} cameras={cameras} onChanged={setControllers} />
       )}
