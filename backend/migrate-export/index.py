@@ -81,6 +81,12 @@ def handler(event: dict, context) -> dict:
     if hashlib.sha256(headers.get('x-export-key', '').encode()).hexdigest() != KEY_HASH:
         return _resp(403, {'error': 'Нет доступа'})
     body = json.loads(event.get('body') or '{}')
+    if body.get('action') == 'put_part':
+        import boto3
+        name = ''.join(ch for ch in str(body.get('name') or '') if ch.isalnum() or ch in '-_.')
+        s3 = boto3.client('s3', endpoint_url='https://bucket.poehali.dev', aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'], aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'])
+        s3.put_object(Bucket='files', Key=f'exports/{name}', Body=base64.b64decode(body.get('data') or ''), ContentType='application/octet-stream')
+        return _resp(200, {'ok': True, 'name': name})
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     conn.set_session(readonly=True, autocommit=True)
     cur = conn.cursor()

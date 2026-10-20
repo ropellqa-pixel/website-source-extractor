@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
 import { db } from '@/lib/sdk';
+import VkBroadcastPanel from '@/components/dto/VkBroadcastPanel';
 import {
   FileText, Search, Download, Eye, Calendar,
   LayoutGrid, List, ChevronDown, X, Plus, Filter, Pencil, Trash2
@@ -192,6 +193,7 @@ export default function Dto() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <VkBroadcastPanel />
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
           <button
             onClick={() => setSelectedCategoryId('all')}
