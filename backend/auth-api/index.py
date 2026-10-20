@@ -150,12 +150,28 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
                 cur.execute(f'SELECT count(*) FROM {SCHEMA}.auth_users')
                 is_first = cur.fetchone()[0] == 0
+                creator = None
+                if not is_first:
+                    hdrs = event.get('headers') or {}
+                    ctoken = (hdrs.get('X-Authorization') or hdrs.get('x-authorization') or '').replace('Bearer ', '').strip()
+                    creator = get_user_by_token(cur, ctoken) if ctoken else None
+                    allowed = bool(creator and creator['is_admin'])
+                    if creator and not allowed:
+                        cur.execute(f"SELECT role FROM {SCHEMA}.profiles WHERE user_id = %s OR lower(email) = lower(%s) "
+                                    f"ORDER BY (user_id = %s) DESC LIMIT 1", (creator['id'], creator['email'] or '', creator['id']))
+                        pr = cur.fetchone()
+                        allowed = bool(pr and pr[0] in ('director', 'deputy_director'))
+                    if not allowed:
+                        return _resp(403, {'error': 'Регистрация закрыта. Аккаунт выдаёт директор в разделе «Сотрудники»'})
 
                 user_id = str(uuidlib.uuid4())
                 cur.execute(
                     f'INSERT INTO {SCHEMA}.auth_users (id, email, password_hash, is_admin) VALUES (%s, %s, %s, %s)',
                     (user_id, email, hash_password(password), is_first),
                 )
+                if creator:
+                    conn.commit()
+                    return _resp(200, {'user': {'id': user_id, 'email': email}, 'is_admin': False})
                 token = create_session(cur, user_id)
                 conn.commit()
                 return _resp(200, {'user': {'id': user_id, 'email': email}, 'token': token, 'is_admin': is_first})

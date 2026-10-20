@@ -226,8 +226,15 @@ export const auth = {
     }
   },
   async signUpWithPassword({ email, password }: { email: string; password: string }) {
-    const json = await callAuthApi({ action: 'signup', email, password });
-    setToken(json.token);
+    const current = getToken();
+    const res = await fetch(AUTH_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(current ? { 'X-Authorization': current } : {}) },
+      body: JSON.stringify({ action: 'signup', email, password }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Ошибка запроса');
+    if (json.token) setToken(json.token);
     return { user: json.user, needs_email_confirmation: false };
   },
   async signOut() {

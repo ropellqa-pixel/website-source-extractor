@@ -10,7 +10,6 @@ import Admin from "./pages/Admin";
 import Sber from "./pages/Sber";
 import AppShell from "./components/shell/AppShell";
 import Login from "./pages/Login";
-import Register from "./pages/Register";
 import PinLogin from "./pages/PinLogin";
 import PinAuth from "./pages/PinAuth";
 import DeviceLogin from "./pages/DeviceLogin";
@@ -71,7 +70,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
+            <Route path="/register" element={<Navigate to="/login" replace />} />
             <Route path="/pin-login" element={<PinLogin />} />
             <Route path="/pin-auth" element={<PinAuth />} />
             <Route path="/device-login" element={<DeviceLogin />} />

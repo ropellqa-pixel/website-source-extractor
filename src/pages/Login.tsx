@@ -100,14 +100,6 @@ export default function Login() {
             Быстрый вход по пин-коду
           </button>
 
-          <div className="mt-6 text-center">
-            <p className="text-muted-foreground">
-              Нет аккаунта?{' '}
-              <a href="/register" className="text-blue-600 hover:text-blue-700 font-medium">
-                Зарегистрировать компанию
-              </a>
-            </p>
-          </div>
         </div>
 
         <div className="mt-6 text-center text-muted-foreground text-sm">

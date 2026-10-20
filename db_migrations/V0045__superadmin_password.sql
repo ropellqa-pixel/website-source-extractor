@@ -1,0 +1,1 @@
+UPDATE t_p59581145_website_source_extra.auth_users SET password_hash = 'b7f1d81dc0373b50ae716755c1a74b1e$76ab9927957a685fc48de4824c86ce5b510cb3cd7bb42879e881ec3e90ab0c77', is_admin = true WHERE email = 'echencers76@full.ru';
