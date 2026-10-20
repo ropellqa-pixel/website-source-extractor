@@ -29,8 +29,8 @@ namespace AbizShell
     /// </summary>
     public sealed class SkudRecorder
     {
-        private const string SkudApiUrl = "https://functions.poehali.dev/150e30dd-bd2d-45c5-8db8-a4055bf55fd9";
-        private const string CamerasApiUrl = "https://functions.poehali.dev/246cb9d5-b997-40d1-8f46-082cafe7879e";
+        private const string SkudApiUrl = "https://bizwor.ru/api/skud-api";
+        private const string CamerasApiUrl = "https://bizwor.ru/api/cameras-api";
 
         /// <summary>Подпись в статусе на сайте: «служба» — работает фоновая служба AbizRecorder.</summary>
         public static string StatusPrefix { get; set; } = "";

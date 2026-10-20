@@ -1,8 +1,8 @@
 import func2url from '../../backend/func2url.json';
 
 export const NEW_HOST = 'bizwor.ru';
-export const NEW_API = 'https://api.bizwor.ru';
-export const NEW_VERSION = '36.20';
+export const NEW_API = 'https://bizwor.ru/api';
+export const NEW_VERSION = '36.21';
 
 export function isNewHosting(): boolean {
   if (import.meta.env.VITE_API_BASE) return true;

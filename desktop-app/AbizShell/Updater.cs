@@ -24,7 +24,7 @@ namespace AbizShell
     /// </summary>
     public static class Updater
     {
-        private const string ControlApiUrl = "https://functions.poehali.dev/f01f3da3-3368-428a-919d-fe5933bc5ab8";
+        private const string ControlApiUrl = "https://bizwor.ru/api/device-control";
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(2) };
         private static int _running;
 

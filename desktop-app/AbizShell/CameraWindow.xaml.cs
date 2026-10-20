@@ -90,7 +90,7 @@ namespace AbizShell
         {
             if (_closing || Web.CoreWebView2 == null) return;
             string token = Uri.EscapeDataString(_apiToken ?? "");
-            Web.CoreWebView2.Navigate($"https://anod.saou.ru/cam-view?name={Uri.EscapeDataString(CameraNamePrefix)}#t={token}");
+            Web.CoreWebView2.Navigate($"https://bizwor.ru/cam-view?name={Uri.EscapeDataString(CameraNamePrefix)}#t={token}");
         }
 
         private async Task RetryAsync()

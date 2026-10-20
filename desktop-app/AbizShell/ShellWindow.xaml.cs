@@ -30,7 +30,7 @@ namespace AbizShell
 
         private RemoteAgent? _remoteAgent;
 
-        public const string HomePage = "https://anod.saou.ru/";
+        public const string HomePage = "https://bizwor.ru/";
         private const string RuDesktopAcceptId = "2364029";
 
         private DispatcherTimer? _networkTimer, _remoteDesktopTimer, _notificationTimer;
@@ -357,7 +357,7 @@ namespace AbizShell
             }
             string? code = await AnodBizClient.RequestLoginLinkAsync(ApiToken);
             NavigateBrowser(!string.IsNullOrEmpty(code)
-                ? $"https://anod.saou.ru/device-login?code={code}"
+                ? $"https://bizwor.ru/device-login?code={code}"
                 : HomePage);
         }
 
@@ -492,8 +492,8 @@ namespace AbizShell
         public void OpenCamerasSection()
         {
             string cur = Browser?.Source ?? "";
-            if (cur.StartsWith("https://anod.saou.ru/", StringComparison.OrdinalIgnoreCase) && !cur.Contains("/login"))
-                NavigateBrowser("https://anod.saou.ru/cameras");
+            if (cur.StartsWith("https://bizwor.ru/", StringComparison.OrdinalIgnoreCase) && !cur.Contains("/login"))
+                NavigateBrowser("https://bizwor.ru/cameras");
             else
                 _ = OpenSitePageLoggedInAsync("/cameras");
         }
@@ -502,8 +502,8 @@ namespace AbizShell
         {
             string? code = string.IsNullOrEmpty(ApiToken) ? null : await AnodBizClient.RequestLoginLinkAsync(ApiToken);
             NavigateBrowser(!string.IsNullOrEmpty(code)
-                ? $"https://anod.saou.ru/device-login?code={code}&next={Uri.EscapeDataString(path)}"
-                : "https://anod.saou.ru" + path);
+                ? $"https://bizwor.ru/device-login?code={code}&next={Uri.EscapeDataString(path)}"
+                : "https://bizwor.ru" + path);
         }
 
         /// <summary>Загрузить пароли из файла, выгруженного из Яндекс Браузера (или Chrome/Edge).</summary>
@@ -638,11 +638,11 @@ namespace AbizShell
             if (sender is not Button btn) return;
             string url = (btn.Tag?.ToString() ?? "") switch
             {
-                "schedule" => "https://anod.saou.ru/schedule",
-                "salary" => "https://anod.saou.ru/salary",
-                "collection" => "https://anod.saou.ru/collection",
-                "documents" => "https://anod.saou.ru/documents",
-                "chat" => "https://anod.saou.ru/chat",
+                "schedule" => "https://bizwor.ru/schedule",
+                "salary" => "https://bizwor.ru/salary",
+                "collection" => "https://bizwor.ru/collection",
+                "documents" => "https://bizwor.ru/documents",
+                "chat" => "https://bizwor.ru/chat",
                 _ => HomePage,
             };
             NavigateBrowser(url);

@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 namespace AbizShell
 {
     /// <summary>
-    /// Клиент сервера anod.saou.ru. Два вида методов:
+    /// Клиент сервера bizwor.ru. Два вида методов:
     /// — статические (RegisterDeviceAsync, CheckDeviceStatusAsync, RequestLoginLinkAsync,
     ///   CheckNetworkAsync) — не требуют токена сотрудника, вызываются как AnodBizClient.Метод(...);
     /// — методы экземпляра (QueryAsync, SearchEmployeesAsync) — требуют токен,
@@ -21,8 +21,8 @@ namespace AbizShell
     {
         private readonly HttpClient _http;
 
-        private const string DataApiUrl = "https://functions.poehali.dev/e40aca0d-1c72-49c0-84a1-cf57b44984ec";
-        private const string AuthApiUrl = "https://functions.poehali.dev/0cc75331-123f-465b-a6da-01ba5f142bfa";
+        private const string DataApiUrl = "https://bizwor.ru/api/data-api";
+        private const string AuthApiUrl = "https://bizwor.ru/api/auth-api";
 
         public AnodBizClient(string apiToken)
         {

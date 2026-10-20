@@ -16,7 +16,7 @@ namespace AbizShell
     /// </summary>
     public static class RecorderService
     {
-        private const string SkudApiUrl = "https://functions.poehali.dev/150e30dd-bd2d-45c5-8db8-a4055bf55fd9";
+        private const string SkudApiUrl = "https://bizwor.ru/api/skud-api";
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
         private static string? _handedToken;
 

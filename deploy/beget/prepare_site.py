@@ -14,7 +14,7 @@ import requests
 ICON = 'https://cdn.poehali.dev/projects/451dcdd9-845e-4f12-82d1-0501056cd61b/files/favicon-1790446602264.jpg'
 OG = 'https://cdn.poehali.dev/projects/451dcdd9-845e-4f12-82d1-0501056cd61b/files/og-image-1791114521100.png'
 SITE = 'https://bizwor.ru'
-API = 'https://api.bizwor.ru'
+API = 'https://bizwor.ru/api'
 HTACCESS = '''Options -Indexes
 DirectoryIndex index.html
 <IfModule mod_rewrite.c>
