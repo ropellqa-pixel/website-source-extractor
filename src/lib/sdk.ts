@@ -30,7 +30,52 @@ function authHeaders(): Record<string, string> {
   return token ? { 'X-Authorization': token } : {};
 }
 
-async function callDataApi(body: Record<string, unknown>): Promise<Result> {
+type Pending = { body: Record<string, unknown>; resolve: (r: Result) => void };
+let pendingBatch: Pending[] = [];
+let batchTimer: ReturnType<typeof setTimeout> | null = null;
+let batchSupported = true;
+const BATCH_MAX = 40;
+
+function callDataApi(body: Record<string, unknown>): Promise<Result> {
+  if (!batchSupported) return callDataApiSingle(body);
+  return new Promise(resolve => {
+    pendingBatch.push({ body, resolve });
+    if (pendingBatch.length >= BATCH_MAX) flushBatch();
+    else if (!batchTimer) batchTimer = setTimeout(flushBatch, 10);
+  });
+}
+
+async function flushBatch() {
+  if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
+  const items = pendingBatch;
+  pendingBatch = [];
+  if (!items.length) return;
+  if (items.length === 1) { items[0].resolve(await callDataApiSingle(items[0].body)); return; }
+  try {
+    const res = await fetch(DATA_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ batch: items.map(i => i.body) }),
+    });
+    const json = await res.json();
+    if (Array.isArray(json?.results) && json.results.length === items.length) {
+      items.forEach((it, i) => it.resolve(json.results[i] as Result));
+      return;
+    }
+    if (res.status === 401) {
+      items.forEach(it => it.resolve(json as Result));
+      return;
+    }
+    batchSupported = false;
+  } catch (e: any) {
+    const err = { data: null, error: { message: e?.message || 'Сетевая ошибка' } };
+    items.forEach(it => it.resolve(err));
+    return;
+  }
+  for (const it of items) it.resolve(await callDataApiSingle(it.body));
+}
+
+async function callDataApiSingle(body: Record<string, unknown>): Promise<Result> {
   try {
     const res = await fetch(DATA_API_URL, {
       method: 'POST',

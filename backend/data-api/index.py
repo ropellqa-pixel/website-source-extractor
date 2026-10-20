@@ -157,11 +157,98 @@ def _authenticate(cur, token: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _run(cur, conn, body: Dict[str, Any]) -> tuple:
+    """Выполняет одну операцию {table, op, ...}. Возвращает (status, payload)."""
+    table = body.get('table')
+    if not table or table not in ALLOWED_TABLES:
+        return 200, {'data': None, 'error': {'message': f'Недопустимая или отсутствующая таблица: {table}'}}
+
+    op = body.get('op', 'select')
+    filters = body.get('filters', [])
+    order = body.get('order')
+    limit = body.get('limit')
+    single_mode = body.get('single_mode')
+    payload = body.get('payload')
+    full_table = f'"{SCHEMA}"."{table}"'
+
+    if op == 'select':
+        where_sql = ''
+        params: List[Any] = []
+        clauses: List[str] = []
+        if filters:
+            clauses, params = _build_where(filters)
+        if table == 'profiles':
+            clauses = list(clauses) + ["id <> 'demo-director-profile'"]
+        elif table in ('schedule_config', 'employee_schedule_settings', 'salary_data'):
+            clauses = list(clauses) + ["profile_id IS DISTINCT FROM 'demo-director-profile'"]
+        if clauses:
+            where_sql = ' WHERE ' + ' AND '.join(clauses)
+        order_sql = ''
+        if order:
+            col = _check_ident(order['col'])
+            direction = 'ASC' if order.get('ascending', True) else 'DESC'
+            order_sql = f' ORDER BY "{col}" {direction}'
+        limit_sql = f' LIMIT {int(limit)}' if limit else ''
+        cur.execute(f'SELECT * FROM {full_table}{where_sql}{order_sql}{limit_sql}', params)
+        colnames = [d[0] for d in cur.description]
+        rows = [_row_to_dict(r, colnames) for r in cur.fetchall()]
+        conn.commit()
+        if single_mode:
+            if not rows:
+                if single_mode == 'maybe':
+                    return 200, {'data': None, 'error': None}
+                return 200, {'data': None, 'error': {'message': 'Запись не найдена', 'code': 'PGRST116'}}
+            return 200, {'data': rows[0], 'error': None}
+        return 200, {'data': rows, 'error': None}
+
+    if op == 'insert':
+        items = payload if isinstance(payload, list) else [payload]
+        inserted_rows = []
+        for item in items:
+            item = dict(item or {})
+            if 'id' not in item or not item['id']:
+                item['id'] = str(uuidlib.uuid4())
+            cols = list(item.keys())
+            for c in cols:
+                _check_ident(c)
+            placeholders = ','.join(['%s'] * len(cols))
+            col_sql = ','.join(f'"{c}"' for c in cols)
+            vals = [json.dumps(v) if isinstance(v, (dict, list)) else v for v in item.values()]
+            cur.execute(f'INSERT INTO {full_table} ({col_sql}) VALUES ({placeholders}) RETURNING *', vals)
+            colnames = [d[0] for d in cur.description]
+            inserted_rows.append(_row_to_dict(cur.fetchone(), colnames))
+        conn.commit()
+        if single_mode == 'single' and inserted_rows:
+            return 200, {'data': inserted_rows[0], 'error': None}
+        return 200, {'data': inserted_rows, 'error': None}
+
+    if op in ('update', 'delete'):
+        if not filters:
+            return 400, {'error': f'{op} требует хотя бы один фильтр'}
+        clauses, params = _build_where(filters)
+        where_sql = ' WHERE ' + ' AND '.join(clauses)
+        if op == 'update':
+            item = dict(payload or {})
+            for c in item.keys():
+                _check_ident(c)
+            set_sql = ','.join(f'"{c}" = %s' for c in item.keys())
+            set_vals = [json.dumps(v) if isinstance(v, (dict, list)) else v for v in item.values()]
+            cur.execute(f'UPDATE {full_table} SET {set_sql}{where_sql} RETURNING *', set_vals + params)
+        else:
+            cur.execute(f'DELETE FROM {full_table}{where_sql} RETURNING *', params)
+        colnames = [d[0] for d in cur.description] if cur.description else []
+        rows = [_row_to_dict(r, colnames) for r in cur.fetchall()] if colnames else []
+        conn.commit()
+        return 200, {'data': rows, 'error': None}
+
+    return 400, {'error': f'Неизвестная операция: {op}'}
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Универсальный REST-бэкенд для CRUD-операций над таблицами компании: сотрудники,
-    табель, зарплата, документы, чат, шаблоны ДТО и т.д. Доступ только для авторизованных
-    запросов: обычная сессия сайта (X-Authorization: session-токен) либо постоянный
-    API-токен десктоп-приложения (X-Authorization: api-токен, выданный auth-api).'''
+    табель, зарплата, документы, чат, шаблоны ДТО и т.д. Поддерживает пакетный режим
+    {batch: [...]} — много операций одним запросом. Доступ только по сессии сайта
+    или API-токену десктоп-приложения (X-Authorization).'''
     method = event.get('httpMethod', 'GET')
 
     if method == 'OPTIONS':
@@ -175,117 +262,36 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception:
         return _resp(400, {'error': 'Некорректный JSON'})
 
-    table = body.get('table')
-    if not table or table not in ALLOWED_TABLES:
-        return _resp(200, {'data': None, 'error': {'message': f'Недопустимая или отсутствующая таблица: {table}'}})
-
-    op = body.get('op', 'select')
-    filters = body.get('filters', [])
-    order = body.get('order')  # {col, ascending}
-    limit = body.get('limit')
-    single_mode = body.get('single_mode')  # 'single' | 'maybe' | None
-    payload = body.get('payload')
+    batch = body.get('batch')
+    if batch is None and (not body.get('table') or body.get('table') not in ALLOWED_TABLES):
+        return _resp(200, {'data': None, 'error': {'message': f"Недопустимая или отсутствующая таблица: {body.get('table')}"}})
 
     token = _extract_token(event, body)
-
+    conn = None
     try:
         conn = _conn()
         conn.autocommit = False
-        full_table = f'"{SCHEMA}"."{table}"'
         with conn.cursor() as cur:
             user = _authenticate(cur, token)
+            conn.commit()
             if not user:
-                conn.commit()
                 return _resp(401, {'data': None, 'error': {'message': 'Не авторизован: нужен действующий токен входа'}})
 
-            if op == 'select':
-                where_sql = ''
-                params: List[Any] = []
-                clauses: List[str] = []
-                if filters:
-                    clauses, params = _build_where(filters)
-                # Отключённый демо-аккаунт не показываем нигде (сотрудники, табель, зарплата).
-                if table == 'profiles':
-                    clauses = list(clauses) + ["id <> 'demo-director-profile'"]
-                elif table in ('schedule_config', 'employee_schedule_settings', 'salary_data'):
-                    clauses = list(clauses) + ["profile_id IS DISTINCT FROM 'demo-director-profile'"]
-                if clauses:
-                    where_sql = ' WHERE ' + ' AND '.join(clauses)
-                order_sql = ''
-                if order:
-                    col = _check_ident(order['col'])
-                    direction = 'ASC' if order.get('ascending', True) else 'DESC'
-                    order_sql = f' ORDER BY "{col}" {direction}'
-                limit_sql = f' LIMIT {int(limit)}' if limit else ''
-                sql = f'SELECT * FROM {full_table}{where_sql}{order_sql}{limit_sql}'
-                cur.execute(sql, params)
-                colnames = [d[0] for d in cur.description]
-                rows = [_row_to_dict(r, colnames) for r in cur.fetchall()]
-                conn.commit()
+            if batch is not None:
+                results = []
+                for q in batch if isinstance(batch, list) else []:
+                    try:
+                        _, payload = _run(cur, conn, q or {})
+                    except Exception as e:
+                        conn.rollback()
+                        payload = {'data': None, 'error': {'message': str(e)}}
+                    results.append(payload)
+                return _resp(200, {'results': results})
 
-                if single_mode:
-                    if not rows:
-                        if single_mode == 'maybe':
-                            return _resp(200, {'data': None, 'error': None})
-                        return _resp(200, {'data': None, 'error': {'message': 'Запись не найдена', 'code': 'PGRST116'}})
-                    return _resp(200, {'data': rows[0], 'error': None})
-                return _resp(200, {'data': rows, 'error': None})
-
-            elif op == 'insert':
-                items = payload if isinstance(payload, list) else [payload]
-                now = datetime.now(timezone.utc).isoformat()
-                inserted_rows = []
-                for item in items:
-                    item = dict(item or {})
-                    if 'id' not in item or not item['id']:
-                        item['id'] = str(uuidlib.uuid4())
-                    cols = list(item.keys())
-                    for c in cols:
-                        _check_ident(c)
-                    placeholders = ','.join(['%s'] * len(cols))
-                    col_sql = ','.join(f'"{c}"' for c in cols)
-                    vals = [json.dumps(v) if isinstance(v, (dict, list)) else v for v in item.values()]
-                    sql = f'INSERT INTO {full_table} ({col_sql}) VALUES ({placeholders}) RETURNING *'
-                    cur.execute(sql, vals)
-                    colnames = [d[0] for d in cur.description]
-                    inserted_rows.append(_row_to_dict(cur.fetchone(), colnames))
-                conn.commit()
-                if single_mode == 'single' and inserted_rows:
-                    return _resp(200, {'data': inserted_rows[0], 'error': None})
-                return _resp(200, {'data': inserted_rows, 'error': None})
-
-            elif op == 'update':
-                if not filters:
-                    return _resp(400, {'error': 'update требует хотя бы один фильтр'})
-                clauses, params = _build_where(filters)
-                where_sql = ' WHERE ' + ' AND '.join(clauses)
-                item = dict(payload or {})
-                for c in item.keys():
-                    _check_ident(c)
-                set_cols = list(item.keys())
-                set_sql = ','.join(f'"{c}" = %s' for c in set_cols)
-                set_vals = [json.dumps(v) if isinstance(v, (dict, list)) else v for v in item.values()]
-                sql = f'UPDATE {full_table} SET {set_sql}{where_sql} RETURNING *'
-                cur.execute(sql, set_vals + params)
-                colnames = [d[0] for d in cur.description] if cur.description else []
-                rows = [_row_to_dict(r, colnames) for r in cur.fetchall()] if colnames else []
-                conn.commit()
-                return _resp(200, {'data': rows, 'error': None})
-
-            elif op == 'delete':
-                if not filters:
-                    return _resp(400, {'error': 'delete требует хотя бы один фильтр'})
-                clauses, params = _build_where(filters)
-                where_sql = ' WHERE ' + ' AND '.join(clauses)
-                sql = f'DELETE FROM {full_table}{where_sql} RETURNING *'
-                cur.execute(sql, params)
-                colnames = [d[0] for d in cur.description] if cur.description else []
-                rows = [_row_to_dict(r, colnames) for r in cur.fetchall()] if colnames else []
-                conn.commit()
-                return _resp(200, {'data': rows, 'error': None})
-
-            else:
-                return _resp(400, {'error': f'Неизвестная операция: {op}'})
-
+            status, payload = _run(cur, conn, body)
+            return _resp(status, payload)
     except Exception as e:
         return _resp(200, {'data': None, 'error': {'message': str(e)}})
+    finally:
+        if conn is not None:
+            conn.close()

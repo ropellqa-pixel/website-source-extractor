@@ -88,7 +88,7 @@ export default function VkBroadcastPanel() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Ошибка отправки');
-      setResult(`✓ Отправлено ${data.sent} из ${items.length}` + (data.failed ? `. Не доставлено: ${data.failed}` : ''));
+      setResult(`✓ Отправлено ${data.sent} из ${items.length}` + (data.failed ? `. Не доставлено: ${data.failed}` : '') + (data.photo_error ? `. Фото не прикрепилось (ВК: ${data.photo_error})` : ''));
       if (!data.failed) { setText(''); setPhoto(null); }
     } catch (e) {
       setResult('✗ ' + (e instanceof Error ? e.message : 'Ошибка отправки'));

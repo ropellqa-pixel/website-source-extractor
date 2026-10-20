@@ -121,8 +121,8 @@ def unbind(profile_id: str) -> None:
         conn.close()
 
 
-def upload_photo_attachment(photo_base64: str) -> Optional[str]:
-    server = vk_call('photos.getMessagesUploadServer', {})
+def upload_photo_attachment(photo_base64: str, peer_id: Optional[int] = None) -> Optional[str]:
+    server = vk_call('photos.getMessagesUploadServer', {'peer_id': peer_id} if peer_id else {})
     upload_url = server['upload_url']
     img_bytes = base64.b64decode(photo_base64.split(',')[-1])
     r = requests.post(upload_url, files={'photo': ('tabel.png', img_bytes, 'image/png')}, timeout=20)
@@ -136,13 +136,16 @@ def upload_photo_attachment(photo_base64: str) -> Optional[str]:
     return f"photo{photo['owner_id']}_{photo['id']}"
 
 
-def send_broadcast(items: List[Dict[str, Any]], photo_base64: Optional[str]) -> Dict[str, int]:
+def send_broadcast(items: List[Dict[str, Any]], photo_base64: Optional[str]) -> Dict[str, Any]:
     attachment = None
+    photo_error = None
     if photo_base64:
         try:
-            attachment = upload_photo_attachment(photo_base64)
-        except Exception:
+            first = next((int(i['vk_user_id']) for i in items if i.get('vk_user_id')), None)
+            attachment = upload_photo_attachment(photo_base64, first)
+        except Exception as e:
             attachment = None
+            photo_error = str(e)[:200]
 
     sent = 0
     failed = 0
@@ -159,7 +162,7 @@ def send_broadcast(items: List[Dict[str, Any]], photo_base64: Optional[str]) -> 
             sent += 1
         except Exception:
             failed += 1
-    return {'sent': sent, 'failed': failed}
+    return {'sent': sent, 'failed': failed, 'photo_error': photo_error}
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

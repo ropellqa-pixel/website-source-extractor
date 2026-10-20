@@ -222,11 +222,11 @@ export default function Salary() {
         setManagerRows([]);
       }
 
-      if ((!rowsRes.data || rowsRes.data.length === 0) && profilesRes.data && profilesRes.data.length > 0) {
+      if (!rowsRes.error && Array.isArray(rowsRes.data) && rowsRes.data.length === 0 && profilesRes.data && profilesRes.data.length > 0) {
         await copyRowsFromPreviousPeriod(profilesRes.data);
       }
 
-      if ((!managerRowsRes.data || managerRowsRes.data.length === 0) && profilesRes.data) {
+      if (!managerRowsRes.error && Array.isArray(managerRowsRes.data) && managerRowsRes.data.length === 0 && profilesRes.data) {
         await copyManagerRowsFromPreviousPeriod(profilesRes.data);
       }
     } catch (e) {

@@ -511,9 +511,10 @@ export default function Schedule() {
       setBroadcastResult(
         '✓ Табель (фото) отправлен в VK: ' + result.sent + ' из ' + items.length +
         (skipped > 0 ? '. Без VK: ' + skipped + '.' : '.') +
-        (result.failed > 0 ? ' Не доставлено: ' + result.failed + '.' : '')
+        (result.failed > 0 ? ' Не доставлено: ' + result.failed + '.' : '') +
+        (result.photo_error ? ' Фото не прикрепилось (ВК: ' + result.photo_error + ') — проверьте право «Фотографии» у ключа сообщества.' : '')
       );
-      setTimeout(() => setBroadcastResult(''), 8000);
+      setTimeout(() => setBroadcastResult(''), result.photo_error ? 20000 : 8000);
     } catch (e) {
       console.error('Schedule broadcast error:', e);
       setBroadcastResult('✗ Ошибка при отправке рассылки');
