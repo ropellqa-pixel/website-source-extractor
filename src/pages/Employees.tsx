@@ -1223,7 +1223,7 @@ export default function Employees() {
               </button>
             </div>
             <p className="text-sm text-muted-foreground mb-4">
-              Новый пароль для входа сотрудника «{passwordDevice.profile_name}» на сайте anod.saou.ru.
+              Новый пароль для входа сотрудника «{passwordDevice.profile_name}» на сайте АнодБИЗ.
             </p>
             <input
               type="password"

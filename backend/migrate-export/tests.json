@@ -1,0 +1,1 @@
+{"tests": [{"name": "Без ключа доступ запрещён", "method": "POST", "path": "/", "expectedStatus": 403}]}

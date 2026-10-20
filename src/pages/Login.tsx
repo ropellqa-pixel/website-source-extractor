@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { Lock, User, LogIn, Zap } from 'lucide-react';
 import AnodBizLogo from '../components/AnodBizLogo';
+import { SITE_VERSION } from '@/lib/apiUrls';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -110,7 +111,7 @@ export default function Login() {
         </div>
 
         <div className="mt-6 text-center text-muted-foreground text-sm">
-          © 2026 АнодБИЗ. Все права защищены.
+          © 2026 АнодБИЗ. Все права защищены.{SITE_VERSION && <span className="block mt-1 text-xs">Версия {SITE_VERSION}</span>}
         </div>
       </div>
     </div>

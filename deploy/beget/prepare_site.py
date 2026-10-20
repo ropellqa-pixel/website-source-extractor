@@ -14,6 +14,23 @@ import requests
 ICON = 'https://cdn.poehali.dev/projects/451dcdd9-845e-4f12-82d1-0501056cd61b/files/favicon-1790446602264.jpg'
 OG = 'https://cdn.poehali.dev/projects/451dcdd9-845e-4f12-82d1-0501056cd61b/files/og-image-1791114521100.png'
 SITE = 'https://bizwor.ru'
+API = 'https://api.bizwor.ru'
+HTACCESS = '''Options -Indexes
+DirectoryIndex index.html
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.html [L]
+</IfModule>
+<IfModule mod_headers.c>
+<FilesMatch "index\\.html$">
+Header set Cache-Control "no-cache"
+</FilesMatch>
+</IfModule>
+'''
 FUNCTIONS = {
     '2685bd53-f16f-4cc2-9db7-1c023c825cdb': 'sber-api',
     'b105a470-7b26-48ea-8129-af36d5557d4e': 'admin-api',
@@ -59,6 +76,7 @@ def main():
         html = html.replace(OG, SITE + '/og-image.png')
 
     open(path, 'w', encoding='utf-8').write(html)
+    open(os.path.join(root, '.htaccess'), 'w').write(HTACCESS)
     left = re.findall(r'[^"\'\s]*poehali[^"\'\s]*', html)
     print('index.html очищен.' if not left else 'Остались ссылки: ' + ', '.join(left))
 
@@ -71,15 +89,15 @@ def main():
             text = open(p, encoding='utf-8', errors='ignore').read()
             if 'poehali.dev' not in text:
                 continue
-            new = text
+            new = re.sub(r'"migrate-export":`https://functions\.poehali\.dev/[0-9a-f-]+`,', '', text)
             for fid, name in FUNCTIONS.items():
-                new = new.replace(f'https://functions.poehali.dev/{fid}', f'{SITE}/api/{name}')
+                new = new.replace(f'https://functions.poehali.dev/{fid}', f'{API}/{name}')
             if new != text:
                 open(p, 'w', encoding='utf-8').write(new)
                 fixed += 1
             if 'poehali.dev' in new:
                 left.append(f)
-    print('Адреса сервера заменены на bizwor.ru в файлах:', fixed)
+    print('Адреса сервера заменены на api.bizwor.ru в файлах:', fixed)
     if left:
         print('ВНИМАНИЕ, ещё есть упоминания в:', ', '.join(left))
 

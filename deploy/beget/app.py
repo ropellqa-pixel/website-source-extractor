@@ -2,7 +2,7 @@
 АнодБИЗ — единый сервер для хостинга Beget (Passenger / WSGI).
 
 Все серверные функции проекта (backend/<имя>/index.py) работают внутри одного
-приложения без изменений: запрос https://bizwor.ru/api/<имя> превращается в тот же
+приложения без изменений: запрос https://api.bizwor.ru/<имя> превращается в тот же
 event, что давала облачная платформа, и передаётся в handler(event, context).
 Всё остальное (страницы сайта) отдаётся из public_html/index.html.
 """
@@ -22,6 +22,7 @@ BACKEND_DIR = os.environ.get('ANOD_BACKEND_DIR') or os.path.join(ROOT, 'backend'
 PUBLIC_DIR = os.environ.get('ANOD_PUBLIC_DIR') or os.path.join(ROOT, 'public_html')
 REQUEST_TIMEOUT_MS = int(os.environ.get('ANOD_TIMEOUT_MS') or 30000)
 MAX_BODY = 60 * 1024 * 1024
+VERSION = '36.20'
 
 STATUS_TEXT = {
     200: 'OK', 201: 'Created', 204: 'No Content', 301: 'Moved Permanently', 302: 'Found',
@@ -207,9 +208,12 @@ def _serve_static(path, start_response):
 
 def application(environ, start_response):
     path = environ.get('PATH_INFO', '/') or '/'
-    if path.startswith('/api/'):
-        name = path[5:].strip('/').split('/')[0]
-        if name == 'health':
-            return _json(start_response, 200, {'ok': True, 'functions': sorted(HANDLERS)})
+    rest = path[5:] if path.startswith('/api/') else path
+    name = rest.strip('/').split('/')[0]
+    if name == 'health':
+        return _json(start_response, 200, {'ok': True, 'version': VERSION, 'functions': sorted(HANDLERS)})
+    if name in HANDLERS:
         return _call_function(name, environ, start_response)
+    if path.startswith('/api/'):
+        return _json(start_response, 404, {'error': f'Функция {name} не найдена'})
     return _serve_static(path, start_response)
