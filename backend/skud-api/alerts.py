@@ -97,7 +97,7 @@ def expiring(cur, schema: str) -> List[Dict[str, Any]]:
     now = datetime.now(timezone.utc)
     cur.execute(f"SELECT c.id, c.card_number, c.profile_id, COALESCE(p.full_name, c.label, 'без имени'), c.written_at "
                 f"FROM {schema}.skud_cards c LEFT JOIN {schema}.profiles p ON p.id = c.profile_id "
-                f"WHERE c.card_type = 'employee' AND c.status = 'active'")
+                f"WHERE c.card_type = 'employee' AND c.status = 'active' AND COALESCE(p.role, 'employee') = 'employee'")
     out = []
     for cid, num, pid, name, written in cur.fetchall():
         d = card_dates(written)

@@ -72,6 +72,19 @@ export async function getAllVkBindings(): Promise<Record<string, string>> {
   }
 }
 
+/** Все привязки VK (любого статуса) одним запросом — для страницы Сотрудники. */
+export async function getAllVkStatuses(): Promise<Array<{ profile_id: string; vk_user_id: number | null; vk_link: string | null; status: string; message: string | null }>> {
+  try {
+    const res = await fetch(`${VK_API_URL}?action=statuses_all`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.bindings || [];
+  } catch (e) {
+    console.error('[VkBind] statuses_all error:', e);
+    return [];
+  }
+}
+
 /** Отвязывает VK на сервере и очищает ссылку в профиле. */
 export async function unbindVk(profileId: string): Promise<void> {
   await fetch(VK_API_URL, {

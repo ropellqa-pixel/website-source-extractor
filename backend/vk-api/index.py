@@ -110,6 +110,17 @@ def get_all_bindings() -> List[Dict[str, Any]]:
         conn.close()
 
 
+def get_all_statuses() -> List[Dict[str, Any]]:
+    conn = _db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT profile_id, vk_user_id, vk_link, status, message FROM {SCHEMA}.vk_bindings")
+            rows = cur.fetchall()
+        return [{'profile_id': r[0], 'vk_user_id': r[1], 'vk_link': r[2], 'status': r[3], 'message': r[4]} for r in rows]
+    finally:
+        conn.close()
+
+
 def unbind(profile_id: str) -> None:
     conn = _db_conn()
     try:
@@ -186,6 +197,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
             if action == 'bindings_list':
                 return _resp(200, {'bindings': get_all_bindings()})
+
+            if action == 'statuses_all':
+                return _resp(200, {'bindings': get_all_statuses()})
 
             return _resp(400, {'error': 'Неизвестное действие'})
 

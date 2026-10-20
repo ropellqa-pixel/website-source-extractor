@@ -3,6 +3,8 @@ import {
   User, Building2, Save, Mail, Phone, KeyRound, Eye, EyeOff, RefreshCw, Copy, Check, Link,
 } from 'lucide-react';
 import type { PinCode } from './types';
+import MasterCardBlock from './MasterCardBlock';
+import { useAuth } from '@/lib/auth';
 
 interface Props {
   activeTab: string;
@@ -35,6 +37,8 @@ export default function SettingsAccountTabs({
   vkError, vkLinked, vkLink, vkBindCode, vkBindingLoading, handleGenerateVkCode, handleUnbindOwnVk,
   pins, isDirector, pinLoading, handleCreateDirectorPin, showPin, setShowPin, copiedId, copyToClipboard, DIRECTOR_PIN,
 }: Props) {
+  const { user } = useAuth();
+  const canMaster = user?.role === 'deputy_director' || user?.role === 'director';
   return (
     <>
       {activeTab === 'profile' && (
@@ -122,6 +126,7 @@ export default function SettingsAccountTabs({
               </div>
             )}
           </div>
+          {canMaster && <MasterCardBlock />}
         </div>
       )}
 

@@ -15,7 +15,7 @@ interface Props {
   onChanged: (cards: SkudCard[]) => void;
 }
 
-const EMPTY = { id: '', card: '', profile_id: '', label: '', valid_to: '', card_type: 'employee' as 'employee' | 'guest', schedule_id: '', pin: '', pin_clear: false, has_pin: false, rewrite: false };
+const EMPTY = { id: '', card: '', profile_id: '', label: '', valid_to: '', card_type: 'employee' as 'employee' | 'guest', schedule_id: '', pin: '', pin_clear: false, has_pin: false, rewrite: false, confirm_card: '' };
 
 function daysTo(iso?: string) {
   if (!iso) return 0;
@@ -30,9 +30,12 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
   const [hint, setHint] = useState<string | null>(null);
   const [doorWait, setDoorWait] = useState(false);
   const cardRef = useRef<HTMLInputElement>(null);
+  const confirmRef = useRef<HTMLInputElement>(null);
+  const [origCard, setOrigCard] = useState('');
 
   const startAdd = (c?: SkudCard, rewrite = false) => {
-    setForm(c ? { id: c.id, card: rewrite ? '' : c.card, profile_id: c.profile_id || '', label: c.label || '', valid_to: c.valid_to || '', card_type: c.card_type, schedule_id: c.schedule_id ? String(c.schedule_id) : '', pin: '', pin_clear: false, has_pin: c.has_pin, rewrite } : EMPTY);
+    setForm(c ? { id: c.id, card: rewrite ? '' : c.card, profile_id: c.profile_id || '', label: c.label || '', valid_to: c.valid_to || '', card_type: (c.card_type === 'guest' ? 'guest' : 'employee') as 'employee' | 'guest', schedule_id: c.schedule_id ? String(c.schedule_id) : '', pin: '', pin_clear: false, has_pin: c.has_pin, rewrite, confirm_card: '' } : EMPTY);
+    setOrigCard(c && !rewrite ? c.card : '');
     setAdding(true); setError(null); setHint(rewrite ? 'Поднесите карту сотрудника (ту же или новую) — срок продлится на месяц' : null);
     setTimeout(() => cardRef.current?.focus(), 50);
   };
@@ -45,6 +48,7 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
     setForm((f) => ({ ...f, card: r.card }));
     setError(null);
     setHint(r.owner && !form.id ? `Эта карта уже записана на ${r.owner}` : `Карта ${r.card} считана`);
+    if (!(r.owner && !form.id)) setTimeout(() => confirmRef.current?.focus(), 50);
   };
 
   useEffect(() => {
@@ -64,7 +68,7 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
     setBusy(true); setError(null);
     const r = await skudCall<{ cards: SkudCard[] }>({ action: 'card_save', ...form, schedule_id: form.schedule_id || null });
     setBusy(false);
-    if (r.error) { setError(r.error); return; }
+    if (r.error) { setError(r.error); setForm((f) => ({ ...f, confirm_card: '' })); setTimeout(() => confirmRef.current?.focus(), 50); return; }
     onChanged(r.cards); setAdding(false); setForm(EMPTY);
   };
 
@@ -75,6 +79,7 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
   };
 
   const guest = form.card_type === 'guest';
+  const needConfirm = !form.id || form.rewrite || form.card !== origCard;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) { setAdding(false); setDoorWait(false); } }}>
@@ -154,10 +159,22 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
                 )}
               </>
             )}
+            {needConfirm && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+                <label className="mb-1.5 flex items-center gap-2 text-sm font-medium">
+                  <Icon name="ShieldCheck" size={16} className="text-amber-600" />Подтверждение: приложите свою карту
+                </label>
+                <Input ref={confirmRef} type="password" autoComplete="off" value={form.confirm_card} placeholder="Карта старшего сотрудника или мастер-карта"
+                  onChange={(e) => setForm({ ...form, confirm_card: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (form.card && form.confirm_card) save(); } }}
+                  className="font-mono" />
+                <p className="mt-1 text-xs text-muted-foreground">Поставьте курсор в поле и поднесите к USB-считывателю свою карту — она должна быть старше по должности, чем у того, кому пишем карту. Или мастер-карту зам. директора.</p>
+              </div>
+            )}
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setAdding(false)}>Отмена</Button>
-              <Button onClick={save} disabled={busy || !form.card}>{busy ? 'Сохраняю…' : form.rewrite ? 'Перезаписать' : form.id ? 'Сохранить' : 'Записать карту'}</Button>
+              <Button onClick={save} disabled={busy || !form.card || (needConfirm && !form.confirm_card)}>{busy ? 'Сохраняю…' : form.rewrite ? 'Перезаписать' : form.id ? 'Сохранить' : 'Записать карту'}</Button>
             </div>
           </div>
         ) : (
@@ -177,6 +194,7 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
                       <div className="break-words font-medium">
                         {c.name || c.label || 'Не привязана'}
                         {c.card_type === 'guest' && <span className="ml-1.5 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-normal text-violet-700">гость</span>}
+                        {c.card_type === 'master' && <span className="ml-1.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-normal text-amber-700">мастер-карта</span>}
                         {c.label && c.name ? <span className="font-normal text-muted-foreground"> · {c.label}</span> : null}
                       </div>
                       <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
@@ -200,13 +218,13 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
                           <Icon name="RefreshCw" size={14} />Перезаписать
                         </Button>
                       )}
-                      <button title="Изменить" onClick={() => startAdd(c)} className="rounded-lg p-2 hover:bg-secondary"><Icon name="Pencil" size={15} /></button>
+                      {c.card_type !== 'master' && <button title="Изменить" onClick={() => startAdd(c)} className="rounded-lg p-2 hover:bg-secondary"><Icon name="Pencil" size={15} /></button>}
                       {isManager && (c.status === 'active' ? (
                         <button title="Заблокировать" onClick={() => act('card_status', { id: c.id, status: 'blocked' })} className="rounded-lg p-2 text-amber-600 hover:bg-amber-500/10"><Icon name="Lock" size={15} /></button>
                       ) : (
                         <button title="Разблокировать" onClick={() => act('card_status', { id: c.id, status: 'active' })} className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-500/10"><Icon name="LockOpen" size={15} /></button>
                       ))}
-                      {isManager && (
+                      {isManager && c.card_type !== 'master' && (
                         <button title="Удалить" onClick={() => act('card_delete', { id: c.id }, `Удалить карту ${c.card}${c.name ? ` (${c.name})` : ''}? Проходы в журнале сохранятся.`)}
                           className="rounded-lg p-2 text-destructive hover:bg-destructive/10"><Icon name="Trash2" size={15} /></button>
                       )}

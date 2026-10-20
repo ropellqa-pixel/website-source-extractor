@@ -20,7 +20,7 @@ CORS = {
 }
 MANAGER_ROLES = {'director', 'deputy_director'}
 CARD_ROLES = {'director', 'deputy_director', 'senior_employee'}
-CARD_ACTIONS = {'overview', 'cards', 'card_save', 'card_rewrite', 'card_check', 'enroll_start', 'enroll_poll', 'events', 'visits'}
+CARD_ACTIONS = {'master_get', 'master_save', 'master_delete', 'overview', 'cards', 'card_save', 'card_rewrite', 'card_check', 'enroll_start', 'enroll_poll', 'events', 'visits'}
 OUTPUTS_DEFAULT = [{'addr': 1, 'name': 'Реле 2'}, {'addr': 2, 'name': 'Выход SW2'}, {'addr': 3, 'name': 'Выход SW3'},
                    {'addr': 4, 'name': 'Выход SW0'}, {'addr': 5, 'name': 'Выход SW1'}]
 KINDS = {
@@ -30,6 +30,42 @@ KINDS = {
     'power': 'Питание / перезапуск', 'other': 'Событие контроллера',
 }
 CARD_STATUSES = {'active', 'blocked'}
+ROLE_RANK = {'employee': 1, 'senior_employee': 2, 'deputy_director': 3, 'director': 4}
+MASTER_ROLES = {'director', 'deputy_director'}
+
+
+def _expires(ctype: str, role: Optional[str]) -> bool:
+    """Ежемесячно продлевать нужно только карты простых сотрудников (и карты без владельца)."""
+    return ctype == 'employee' and ROLE_RANK.get(role or 'employee', 1) <= 1
+
+
+def _check_confirm(cur, user: Dict[str, Any], confirm: str, new_card: str, target_profile: Optional[str]) -> Optional[str]:
+    """Каждую запись карты подтверждают своей картой старшего уровня или мастер-картой."""
+    c = norm_card(confirm or '')
+    if not re.fullmatch(r'\d{3},\d{5}', c):
+        return 'Приложите свою карту для подтверждения записи'
+    if c == new_card:
+        return 'Нельзя подтвердить записью той же карты — приложите свою карту'
+    cur.execute(f'SELECT c.card_type, c.status, c.profile_id, p.role, c.written_at FROM {SCHEMA}.skud_cards c '
+                f'LEFT JOIN {SCHEMA}.profiles p ON p.id = c.profile_id WHERE c.card_number = %s', (c,))
+    r = cur.fetchone()
+    if not r or r[1] != 'active':
+        return 'Карта подтверждения не найдена в СКУД или заблокирована'
+    if r[0] == 'master':
+        return None
+    if r[0] != 'employee' or not r[2] or r[2] != user.get('profile_id'):
+        return 'Подтвердить можно только своей картой или мастер-картой'
+    if _expires(r[0], r[3]) and datetime.now(timezone.utc) >= alerts.card_dates(r[4])['expires']:
+        return 'Срок вашей карты истёк — подтвердите мастер-картой'
+    rank = ROLE_RANK.get(r[3] or 'employee', 1)
+    trole = None
+    if target_profile:
+        cur.execute(f'SELECT role FROM {SCHEMA}.profiles WHERE id = %s', (target_profile,))
+        t = cur.fetchone()
+        trole = t[0] if t else None
+    if rank < 2 or rank <= ROLE_RANK.get(trole or 'employee', 1):
+        return 'Нужна карта сотрудника старше по должности или мастер-карта зам. директора'
+    return None
 
 
 def _resp(status: int, payload: Any) -> Dict[str, Any]:
@@ -72,7 +108,8 @@ def _site_user(cur, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 f'ORDER BY (user_id = %s) DESC LIMIT 1', (row[0], row[1] or '', row[0]))
     prof = cur.fetchone()
     role = 'director' if row[2] else (prof[1] if prof else 'employee')
-    return {'id': row[0], 'role': role, 'name': prof[2] if prof else (row[1] or ''), 'profile_id': prof[0] if prof else None}
+    return {'id': row[0], 'role': role, 'name': prof[2] if prof else (row[1] or ''), 'profile_id': prof[0] if prof else None,
+            'email': row[1] or ''}
 
 
 def _controller_by_key(cur, event: Dict[str, Any], body: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -149,13 +186,14 @@ def _schedules(cur) -> List[Dict[str, Any]]:
 
 def _cards_for_controller(cur) -> List[Dict[str, Any]]:
     zone = {s['id']: s['zone'] for s in _schedules(cur)}
-    cur.execute(f'SELECT card_number, pin_code, schedule_id, card_type, written_at FROM {SCHEMA}.skud_cards WHERE status = %s '
-                f'AND (valid_from IS NULL OR valid_from <= current_date) AND (valid_to IS NULL OR valid_to >= current_date) '
-                f'ORDER BY card_number', ('active',))
+    cur.execute(f'SELECT c.card_number, c.pin_code, c.schedule_id, c.card_type, c.written_at, p.role FROM {SCHEMA}.skud_cards c '
+                f'LEFT JOIN {SCHEMA}.profiles p ON p.id = c.profile_id WHERE c.status = %s '
+                f'AND (c.valid_from IS NULL OR c.valid_from <= current_date) AND (c.valid_to IS NULL OR c.valid_to >= current_date) '
+                f'ORDER BY c.card_number', ('active',))
     now = datetime.now(timezone.utc)
     out = []
-    for num, pin, sch, ctype, written in cur.fetchall():
-        if ctype == 'employee' and now >= alerts.card_dates(written)['removed']:
+    for num, pin, sch, ctype, written, role in cur.fetchall():
+        if _expires(ctype, role) and now >= alerts.card_dates(written)['removed']:
             continue
         out.append({'card': num, 'pin': pin or '', 'mask': (1 << zone[sch]) if sch in zone else 0x80, 'guest': ctype == 'guest'})
     return out
@@ -315,7 +353,7 @@ def _visits(cur, body: Dict[str, Any]) -> Dict[str, Any]:
 def _cards(cur) -> List[Dict[str, Any]]:
     cur.execute(f'SELECT c.id, c.card_number, c.profile_id, p.full_name, c.label, c.status, c.valid_from, c.valid_to, '
                 f'c.synced, c.created_at, (SELECT max(event_time) FROM {SCHEMA}.skud_events e WHERE e.card_number = c.card_number), '
-                f'c.card_type, (c.pin_code IS NOT NULL), c.schedule_id, c.written_at, c.written_by '
+                f'c.card_type, (c.pin_code IS NOT NULL), c.schedule_id, c.written_at, c.written_by, p.role '
                 f'FROM {SCHEMA}.skud_cards c LEFT JOIN {SCHEMA}.profiles p ON p.id = c.profile_id '
                 f'ORDER BY c.status, p.full_name NULLS LAST')
     now = datetime.now(timezone.utc)
@@ -324,7 +362,7 @@ def _cards(cur) -> List[Dict[str, Any]]:
         x = {'id': r[0], 'card': r[1], 'profile_id': r[2], 'name': r[3], 'label': r[4], 'status': r[5],
              'valid_from': r[6], 'valid_to': r[7], 'synced': r[8], 'created_at': r[9], 'last_used': r[10],
              'card_type': r[11], 'has_pin': r[12], 'schedule_id': r[13], 'written_at': r[14], 'written_by': r[15]}
-        if r[11] == 'employee':
+        if _expires(r[11], r[16]):
             d = alerts.card_dates(r[14])
             x.update({'expires_at': d['expires'], 'removed_at': d['removed'],
                       'expiry_state': 'grace' if now >= d['expires'] else 'warn' if now >= d['warn_from'] else 'ok'})
@@ -376,6 +414,17 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
             p = cur.fetchone()
             return _resp(400, {'error': f'Эта карта уже записана{" на " + p[0] if p else ""}'})
         ctype = 'guest' if body.get('card_type') == 'guest' else 'employee'
+        old_num = None
+        if body.get('id'):
+            cur.execute(f'SELECT card_number, card_type FROM {SCHEMA}.skud_cards WHERE id=%s', (body['id'],))
+            o = cur.fetchone()
+            if o and o[1] == 'master':
+                return _resp(400, {'error': 'Мастер-карту меняют только в профиле зам. директора'})
+            old_num = o[0] if o else None
+        if not body.get('id') or body.get('rewrite') or old_num != card:
+            err = _check_confirm(cur, user, str(body.get('confirm_card') or ''), card, body.get('profile_id') or None)
+            if err:
+                return _resp(400, {'error': err, 'need_confirm': True})
         if ctype == 'guest' and not body.get('valid_to'):
             return _resp(400, {'error': 'Для гостевой карты укажите, до какого числа она действует'})
         pin = str(body.get('pin') or '').strip()
@@ -413,6 +462,11 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         cur.execute(f'UPDATE {SCHEMA}.skud_enroll SET until_at = NULL, card_number = NULL WHERE id = 1')
         return _resp(200, {'ok': True, 'card': card, 'cards': _cards(cur)})
     if action == 'card_rewrite':
+        cur.execute(f'SELECT card_number, profile_id FROM {SCHEMA}.skud_cards WHERE id=%s', (body.get('id'),))
+        t = cur.fetchone()
+        err = _check_confirm(cur, user, str(body.get('confirm_card') or ''), t[0] if t else '', t[1] if t else None)
+        if err:
+            return _resp(400, {'error': err, 'need_confirm': True})
         cur.execute(f"UPDATE {SCHEMA}.skud_cards SET written_at = now(), written_by = %s, synced = false, updated_at = now() "
                     f"WHERE id = %s AND card_type = 'employee'", (user['name'], body.get('id')))
         return _resp(200, {'ok': True, 'cards': _cards(cur)})
@@ -426,6 +480,36 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         cur.execute(f'DELETE FROM {SCHEMA}.skud_cards WHERE id=%s', (body.get('id'),))
         cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
         return _resp(200, {'ok': True, 'cards': _cards(cur)})
+    if action == 'master_get':
+        cur.execute(f"SELECT id, card_number, written_at FROM {SCHEMA}.skud_cards WHERE card_type = 'master' AND profile_id = %s",
+                    (user.get('profile_id'),))
+        r = cur.fetchone()
+        return _resp(200, {'master': {'id': r[0], 'card': r[1], 'written_at': r[2]} if r else None})
+    if action in ('master_save', 'master_delete'):
+        if user['role'] not in MASTER_ROLES or not user.get('profile_id'):
+            return _resp(403, {'error': 'Мастер-карту может добавить только зам. директора'})
+        pin = str(body.get('pin') or '').strip()
+        cur.execute(f'SELECT 1 FROM {SCHEMA}.pin_codes WHERE lower(email) = lower(%s) AND pin = %s', (user['email'], pin))
+        if not pin or not cur.fetchone():
+            return _resp(400, {'error': 'Неверный ПИН-код'})
+        if action == 'master_delete':
+            cur.execute(f"DELETE FROM {SCHEMA}.skud_cards WHERE card_type = 'master' AND profile_id = %s", (user['profile_id'],))
+            cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
+            return _resp(200, {'ok': True, 'master': None})
+        card = norm_card(str(body.get('card') or ''))
+        if not re.fullmatch(r'\d{3},\d{5}', card):
+            return _resp(400, {'error': 'Не похоже на номер карты Em-Marin. Поднесите карту к считывателю ещё раз'})
+        cur.execute(f"SELECT id, card_type, profile_id FROM {SCHEMA}.skud_cards WHERE card_number = %s", (card,))
+        ex = cur.fetchone()
+        if ex and not (ex[1] == 'master' and ex[2] == user['profile_id']):
+            return _resp(400, {'error': 'Эта карта уже записана в СКУД на другого человека'})
+        cur.execute(f"DELETE FROM {SCHEMA}.skud_cards WHERE card_type = 'master' AND profile_id = %s", (user['profile_id'],))
+        cur.execute(f"INSERT INTO {SCHEMA}.skud_cards (card_number, profile_id, label, card_type, created_by, written_by) "
+                    f"VALUES (%s, %s, 'Мастер-карта', 'master', %s, %s) RETURNING id, written_at",
+                    (card, user['profile_id'], user['name'], user['name']))
+        r = cur.fetchone()
+        return _resp(200, {'ok': True, 'master': {'id': r[0], 'card': card, 'written_at': r[1]}})
+
     if action == 'card_check':
         card = norm_card(str(body.get('card') or ''))
         owner = _card_owner(cur, card)

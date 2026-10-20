@@ -19,16 +19,40 @@ const HEVC_OK = !PREFER_WASM && typeof window !== 'undefined' && (
   !!document.createElement('video').canPlayType('application/vnd.apple.mpegurl')
 );
 
+const LS_LIST = 'abiz_cams_list';
+const LS_LIVE = 'abiz_cams_live';
+const LIVE_TTL = 40 * 60 * 1000;
+function lsGet<T>(k: string): T | null { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } }
+function lsSet(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* */ } }
+function loadLive(): Record<string, string> {
+  const all = lsGet<Record<string, { url: string; at: number }>>(LS_LIVE) || {};
+  const out: Record<string, string> = {};
+  Object.entries(all).forEach(([id, v]) => { if (v?.url && Date.now() - v.at < LIVE_TTL) out[id] = v.url; });
+  return out;
+}
+function saveLive(id: string, url: string | null) {
+  const all = lsGet<Record<string, { url: string; at: number }>>(LS_LIVE) || {};
+  if (url) all[id] = { url, at: Date.now() }; else delete all[id];
+  lsSet(LS_LIVE, all);
+}
+const cachedList = lsGet<{ cameras: Camera[]; can_manage: boolean }>(LS_LIST);
+
 type Mode = { kind: 'live' } | { kind: 'archive'; day: string; sec: number };
 
 export default function Cameras() {
   // Переход из СКУД: ?cam=<id>&day=YYYY-MM-DD&sec=<секунды от начала дня> — сразу открываем архив на это время.
   const [params] = useSearchParams();
+  const jumpCam = params.get('cam');
   const [jump] = useState(() => ({ cam: params.get('cam'), day: params.get('day'), sec: Number(params.get('sec')) }));
-  const [cameras, setCameras] = useState<Camera[]>([]);
-  const [canManage, setCanManage] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [index, setIndex] = useState(0);
+  const [cameras, setCameras] = useState<Camera[]>(() => cachedList?.cameras || []);
+  const [canManage, setCanManage] = useState(!!cachedList?.can_manage);
+  const [loading, setLoading] = useState(!cachedList?.cameras?.length);
+  const [index, setIndex] = useState(() => {
+    const l = cachedList?.cameras || [];
+    const w = l.findIndex((c) => c.id === jumpCam);
+    const d = l.findIndex((c) => c.is_default);
+    return w >= 0 ? w : d >= 0 ? d : 0;
+  });
   const [src, setSrc] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,18 +66,22 @@ export default function Cameras() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const reqId = useRef(0);
   const freshNext = useRef(false);
-  const liveCache = useRef<Record<string, string>>({});
+  const liveCache = useRef<Record<string, string>>(loadLive());
 
   const cam = cameras[index];
 
   useEffect(() => {
     camerasCall<{ cameras?: Camera[]; can_manage?: boolean }>({ action: 'list' }).then((r) => {
       const list = r.cameras || [];
-      setCameras(list);
+      if (r.error && !list.length && cachedList?.cameras?.length) { setLoading(false); return; }
+      lsSet(LS_LIST, { cameras: list, can_manage: !!r.can_manage });
+      if (JSON.stringify(list) !== JSON.stringify(cachedList?.cameras || [])) setCameras(list);
       setCanManage(!!r.can_manage);
       const def = list.findIndex((c) => c.is_default);
       const wanted = list.findIndex((c) => c.id === jump.cam);
-      setIndex(wanted >= 0 ? wanted : def >= 0 ? def : 0);
+      const cur = cachedList?.cameras?.[0] ? list.findIndex((c) => c.id === (cachedList.cameras.find((x) => x.id === jump.cam) || cachedList.cameras.find((x) => x.is_default) || cachedList.cameras[0]).id) : -1;
+      const next = wanted >= 0 ? wanted : def >= 0 ? def : 0;
+      if (!(cur >= 0 && cur === next)) setIndex(next);
       if (wanted >= 0 && jump.day && Number.isFinite(jump.sec)) {
         setMode({ kind: 'archive', day: jump.day, sec: jump.sec });
         setShowArchive(true);
@@ -62,7 +90,7 @@ export default function Cameras() {
       setLoading(false);
     });
     camerasCall<{ streams?: Record<string, { url?: string }> }>({ action: 'live_all' }).then((r) => {
-      Object.entries(r.streams || {}).forEach(([id, v]) => { if (v.url) liveCache.current[id] = v.url; });
+      Object.entries(r.streams || {}).forEach(([id, v]) => { if (v.url && !liveCache.current[id]) { liveCache.current[id] = v.url; saveLive(id, v.url); } });
     });
   }, [jump]);
 
@@ -76,7 +104,7 @@ export default function Cameras() {
       const fresh = freshNext.current;
       freshNext.current = false;
       r = cached ? { url: cached } : await camerasCall({ action: 'live', id: cam.id, quality: hd ? 'hd' : 'sd', fresh });
-      if (!hd && r.url) liveCache.current[cam.id] = r.url;
+      if (!hd && r.url && !cached) { liveCache.current[cam.id] = r.url; saveLive(cam.id, r.url); }
     } else {
       const start = `${mode.day} ${fmtSec(mode.sec)}`;
       const end = `${mode.day} ${fmtSec(Math.min(mode.sec + 3600, 86399))}`;
@@ -119,7 +147,7 @@ export default function Cameras() {
   };
 
   const onFatal = useCallback(() => {
-    if (cam) delete liveCache.current[cam.id];
+    if (cam) { delete liveCache.current[cam.id]; saveLive(cam.id, null); }
     freshNext.current = true;
     if (mode.kind === 'live') setTimeout(() => connect(), 1000);
     else setError('Запись прервалась. Выберите другое время.');

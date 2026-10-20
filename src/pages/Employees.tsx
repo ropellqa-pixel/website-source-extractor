@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../lib/auth';
 import { db, auth } from '@/lib/sdk';
-import { createVkBindCode, getVkStatus, unbindVk } from '../lib/vkBinding';
+import { createVkBindCode, getVkStatus, getAllVkStatuses, unbindVk } from '../lib/vkBinding';
 import { PIN_ADPODS } from '../lib/pinAdpods';
 import { listDevices, linkDevice, revokeDevice, setEmployeePassword, type Device } from '../lib/devices';
 import {
@@ -154,21 +154,10 @@ export default function Employees() {
       if (pc) setPins(pc as PinCode[]);
 
       // Статусы привязки VK хранятся на сервере (подтверждает бот), запрашиваем по каждому сотруднику
-      const statuses = await Promise.all(profileList.map(p => getVkStatus(p.id)));
-      const bindings: VkBinding[] = [];
-      profileList.forEach((p, i) => {
-        const s = statuses[i];
-        if (s?.binding) {
-          bindings.push({
-            id: p.id,
-            profile_id: p.id,
-            vk_user_id: s.binding.vk_user_id,
-            vk_link: s.binding.vk_link,
-            status: s.binding.status,
-            message: s.binding.message,
-          });
-        }
-      });
+      const ids = new Set(profileList.map(p => p.id));
+      const bindings: VkBinding[] = (await getAllVkStatuses())
+        .filter(b => ids.has(b.profile_id))
+        .map(b => ({ id: b.profile_id, profile_id: b.profile_id, vk_user_id: b.vk_user_id, vk_link: b.vk_link, status: b.status, message: b.message }));
       setVkBindings(bindings);
     } catch (err) {
       console.error('Load error:', err);

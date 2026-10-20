@@ -30,7 +30,7 @@ export interface SkudCard {
   valid_to: string | null;
   synced: boolean;
   last_used: string | null;
-  card_type: 'employee' | 'guest';
+  card_type: 'employee' | 'guest' | 'master';
   has_pin: boolean;
   schedule_id: number | null;
   written_at: string;
