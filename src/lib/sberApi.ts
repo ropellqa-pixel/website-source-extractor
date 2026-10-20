@@ -1,6 +1,6 @@
-import func2url from '../../backend/func2url.json';
+import { apiUrl } from '@/lib/apiUrls';
 
-const URL = (func2url as Record<string, string>)['sber-api'];
+const URL = apiUrl('sber-api');
 
 export interface SberCp {
   id: number; name: string; kind: string; inn: string; kpp: string; account: string; bic: string; bank_name: string; corr_account: string;

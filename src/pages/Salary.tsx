@@ -7,11 +7,11 @@ import {
   ArrowLeft, Banknote,
   Save, Lock, Send, Settings2, Unlock, UserCheck, Loader2, CheckCircle, CalendarDays
 } from 'lucide-react';
-import func2url from '../../backend/func2url.json';
+import { apiUrl } from '@/lib/apiUrls';
 import { evalFormula, useAccess, type FieldDef } from '@/lib/access';
 import SalaryGrid, { cellValue, type GridRow } from '@/components/salary/SalaryGrid';
 
-const VK_API_URL = func2url['vk-api'];
+const VK_API_URL = apiUrl('vk-api');
 
 interface Profile {
   id: string;

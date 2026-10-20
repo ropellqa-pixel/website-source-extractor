@@ -1,6 +1,6 @@
-import func2url from '../../backend/func2url.json';
+import { apiUrl } from '@/lib/apiUrls';
 
-const URL = (func2url as Record<string, string>)['accounting-api'];
+const URL = apiUrl('accounting-api');
 
 export type Kind = 'income' | 'expense';
 export type PayType = 'salary' | 'percent' | 'hourly' | 'tabel';

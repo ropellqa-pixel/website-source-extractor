@@ -7,9 +7,9 @@ import { getAllVkBindings } from '../lib/vkBinding';
 import { LogOut, ArrowLeft, Save, Send, Lock, Unlock, RefreshCw, Pencil, Trash2, Printer, Loader2, CheckCircle, X, Eye, EyeOff } from 'lucide-react';
 import AnodBizLogo from '../components/AnodBizLogo';
 import EmployeeSettingsModal from '../components/EmployeeSettingsModal';
-import func2url from '../../backend/func2url.json';
+import { apiUrl } from '@/lib/apiUrls';
 
-const VK_API_URL = func2url['vk-api'];
+const VK_API_URL = apiUrl('vk-api');
 
 const RUSSIAN_MONTHS = [
   'Январь','Февраль','Март','Апрель','Май','Июнь',

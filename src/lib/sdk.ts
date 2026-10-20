@@ -5,11 +5,11 @@
  * к серверным backend-функциям (data-api / auth-api / file-upload), а данные хранятся
  * в PostgreSQL — не в браузере. Компания видит и хранит все свои данные в реальной БД.
  */
-import func2url from '../../backend/func2url.json';
+import { apiUrl } from '@/lib/apiUrls';
 
-const DATA_API_URL = func2url['data-api'];
-const AUTH_API_URL = func2url['auth-api'];
-const FILE_UPLOAD_URL = func2url['file-upload'];
+const DATA_API_URL = apiUrl('data-api');
+const AUTH_API_URL = apiUrl('auth-api');
+const FILE_UPLOAD_URL = apiUrl('file-upload');
 
 const TOKEN_KEY = 'anod_session_token';
 

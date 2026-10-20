@@ -16,7 +16,7 @@ CORS_HEADERS = {
     'Access-Control-Max-Age': '86400',
 }
 
-BUCKET = 'files'
+BUCKET = os.environ.get('S3_BUCKET', 'files')
 
 
 def _resp(status: int, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -97,13 +97,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         s3 = boto3.client(
             's3',
-            endpoint_url='https://bucket.poehali.dev',
-            aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
-            aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+            endpoint_url=os.environ.get('S3_ENDPOINT', 'https://bucket.poehali.dev'), region_name=os.environ.get('S3_REGION') or None,
+            aws_access_key_id=os.environ.get('S3_ACCESS_KEY') or os.environ['AWS_ACCESS_KEY_ID'],
+            aws_secret_access_key=os.environ.get('S3_SECRET_KEY') or os.environ['AWS_SECRET_ACCESS_KEY'],
         )
         s3.put_object(Bucket=BUCKET, Key=key, Body=file_bytes, ContentType=content_type)
 
-        cdn_url = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{key}"
+        cdn_url = (os.environ.get('S3_PUBLIC_URL') or f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket") + '/' + key
         return _resp(200, {'url': cdn_url})
     except Exception as e:
         return _resp(500, {'error': str(e)})

@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import func2url from '../../backend/func2url.json';
+import { apiUrl } from '@/lib/apiUrls';
 import { auth } from '@/lib/sdk';
 
-const AUTH_API_URL = func2url['auth-api'];
-const CONTROL_API_URL = (func2url as Record<string, string>)['device-control'];
+const AUTH_API_URL = apiUrl('auth-api');
+const CONTROL_API_URL = apiUrl('device-control');
 const TOKEN_KEY = 'anod_session_token';
 
 function getToken(): string | null {

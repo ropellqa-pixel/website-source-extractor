@@ -18,13 +18,13 @@ PART_BYTES = 1024 * 1024
 
 
 def _s3():
-    return boto3.client('s3', endpoint_url='https://bucket.poehali.dev',
-                        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
-                        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'])
+    return boto3.client('s3', endpoint_url=os.environ.get('S3_ENDPOINT', 'https://bucket.poehali.dev'), region_name=os.environ.get('S3_REGION') or None,
+                        aws_access_key_id=os.environ.get('S3_ACCESS_KEY') or os.environ['AWS_ACCESS_KEY_ID'],
+                        aws_secret_access_key=os.environ.get('S3_SECRET_KEY') or os.environ['AWS_SECRET_ACCESS_KEY'])
 
 
 def cdn(key: str) -> str:
-    return f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{key}"
+    return (os.environ.get('S3_PUBLIC_URL') or f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket") + '/' + key
 
 
 def device_by_api_token(cur, schema: str, token: str):
@@ -127,7 +127,7 @@ def site_cleanup(cur, schema: str) -> None:
         if url and url.startswith(prefix):
             s3 = s3 or _s3()
             try:
-                s3.delete_object(Bucket='files', Key=url[len(prefix):])
+                s3.delete_object(Bucket=os.environ.get('S3_BUCKET', 'files'), Key=url[len(prefix):])
             except Exception as ex:
                 print('site_cleanup delete error', url, repr(ex))
         cur.execute(f"UPDATE {schema}.skud_clips SET status = 'deleted', url = NULL, "
@@ -143,16 +143,16 @@ def upload_part(body: Dict[str, Any]) -> Dict[str, Any]:
         return {'error': 'bad key'}
     s3 = _s3()
     part_key = f"{key}.part{int(body.get('part') or 0):04d}"
-    s3.put_object(Bucket='files', Key=part_key, Body=base64.b64decode(body.get('data') or ''))
+    s3.put_object(Bucket=os.environ.get('S3_BUCKET', 'files'), Key=part_key, Body=base64.b64decode(body.get('data') or ''))
     return {'ok': True}
 
 
 def finish_parts(key: str, parts: int) -> int:
     s3 = _s3()
-    data = b''.join(s3.get_object(Bucket='files', Key=f'{key}.part{i:04d}')['Body'].read() for i in range(parts))
-    s3.put_object(Bucket='files', Key=key, Body=data, ContentType='video/mp4')
+    data = b''.join(s3.get_object(Bucket=os.environ.get('S3_BUCKET', 'files'), Key=f'{key}.part{i:04d}')['Body'].read() for i in range(parts))
+    s3.put_object(Bucket=os.environ.get('S3_BUCKET', 'files'), Key=key, Body=data, ContentType='video/mp4')
     for i in range(parts):
-        s3.delete_object(Bucket='files', Key=f'{key}.part{i:04d}')
+        s3.delete_object(Bucket=os.environ.get('S3_BUCKET', 'files'), Key=f'{key}.part{i:04d}')
     return len(data)
 
 
@@ -172,7 +172,7 @@ def done(cur, schema: str, body: Dict[str, Any]) -> Dict[str, Any]:
         return {'error': 'bad key'}
     try:
         size = finish_parts(key, int(body.get('parts') or 0)) if body.get('parts') else \
-            _s3().head_object(Bucket='files', Key=key)['ContentLength']
+            _s3().head_object(Bucket=os.environ.get('S3_BUCKET', 'files'), Key=key)['ContentLength']
     except Exception as ex:
         print('rec_done error', key, repr(ex))
         cur.execute(f"UPDATE {schema}.skud_clips SET status = 'pending', error = %s WHERE id = %s",

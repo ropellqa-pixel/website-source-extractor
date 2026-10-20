@@ -1,6 +1,6 @@
-import func2url from '../../backend/func2url.json';
+import { apiUrl } from '@/lib/apiUrls';
 
-const URL = (func2url as Record<string, string>)['cameras-api'];
+const URL = apiUrl('cameras-api');
 
 export interface Camera {
   id: string;

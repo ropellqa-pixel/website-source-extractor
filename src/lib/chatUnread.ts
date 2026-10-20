@@ -1,3 +1,4 @@
+import { apiUrl } from '@/lib/apiUrls';
 /**
  * Лёгкое хранилище счётчика непрочитанных сообщений общего чата.
  * Работает без стейт-менеджера: держит значение в localStorage (переживает перезагрузку)
@@ -51,8 +52,7 @@ export function isChatActive(): boolean { return chatActive; }
 /** Отметить общий чат прочитанным на сервере — чтобы программа АБИЗ перестала напоминать. */
 export async function markChatReadOnServer(): Promise<void> {
   try {
-    const { default: func2url } = await import('../../backend/func2url.json');
-    const url = (func2url as Record<string, string>)['device-control'];
+    const url = apiUrl('device-control');
     const token = localStorage.getItem('anod_session_token') || '';
     if (!url || !token) return;
     await fetch(url, {

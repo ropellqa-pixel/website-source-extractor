@@ -1,7 +1,7 @@
 import { db } from '@/lib/sdk';
-import func2url from '../../backend/func2url.json';
+import { apiUrl } from '@/lib/apiUrls';
 
-const VK_API_URL = func2url['vk-api'];
+const VK_API_URL = apiUrl('vk-api');
 
 interface VkStatusResponse {
   code: string | null;

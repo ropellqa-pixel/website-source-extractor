@@ -95,9 +95,9 @@ def _log(cur, device_code: str, kind: str, message: str, actor: str = None):
 
 def _s3():
     return boto3.client(
-        's3', endpoint_url='https://bucket.poehali.dev',
-        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
-        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
+        's3', endpoint_url=os.environ.get('S3_ENDPOINT', 'https://bucket.poehali.dev'), region_name=os.environ.get('S3_REGION') or None,
+        aws_access_key_id=os.environ.get('S3_ACCESS_KEY') or os.environ['AWS_ACCESS_KEY_ID'],
+        aws_secret_access_key=os.environ.get('S3_SECRET_KEY') or os.environ['AWS_SECRET_ACCESS_KEY'],
     )
 
 
@@ -110,8 +110,8 @@ def _upload_screenshot(device_code: str, b64: str) -> Optional[str]:
         return None
     s3 = _s3()
     key = f'screenshots/{device_code}/{uuidlib.uuid4().hex}.jpg'
-    s3.put_object(Bucket='files', Key=key, Body=raw, ContentType='image/jpeg')
-    return f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{key}"
+    s3.put_object(Bucket=os.environ.get('S3_BUCKET', 'files'), Key=key, Body=raw, ContentType='image/jpeg')
+    return (os.environ.get('S3_PUBLIC_URL') or f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket") + '/' + key
 
 
 def _presence_row(d) -> Dict[str, Any]:
@@ -357,7 +357,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             raw = base64.b64decode(body.get('data') or '')
             if part < 1 or not raw:
                 return _resp(400, {'error': 'Пустая часть файла'})
-            _s3().put_object(Bucket='files', Key=f'{folder}/part{part:03d}.bin', Body=raw,
+            _s3().put_object(Bucket=os.environ.get('S3_BUCKET', 'files'), Key=f'{folder}/part{part:03d}.bin', Body=raw,
                              ContentType='application/octet-stream')
             return _resp(200, {'folder': folder, 'part': part})
 
@@ -371,7 +371,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             sha = (body.get('sha256') or '').lower()
             if not version or not folder.startswith(f'releases/{edition}/') or parts < 1 or len(sha) != 64:
                 return _resp(400, {'error': 'Выпуск загружен не полностью'})
-            base = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{folder}"
+            base = (os.environ.get('S3_PUBLIC_URL') or f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket") + '/' + folder
             url = f'{base}/part{{n:03d}}.bin|{parts}'
             cur.execute(f'UPDATE {SCHEMA}.app_releases SET is_active = false WHERE edition = %s', (edition,))
             rid = str(uuidlib.uuid4())

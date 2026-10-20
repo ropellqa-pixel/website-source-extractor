@@ -1,8 +1,8 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
-import func2url from '../../backend/func2url.json';
+import { apiUrl } from '@/lib/apiUrls';
 import { useAuth } from './auth';
 
-const URL = (func2url as Record<string, string>)['admin-api'];
+const URL = apiUrl('admin-api');
 
 export interface FieldDef {
   key: string;
