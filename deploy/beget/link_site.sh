@@ -14,15 +14,18 @@ rm -f "$SITE_DIR/passenger_wsgi.py" "$SITE_DIR/.htaccess"
 
 mkdir -p "$PUB/api"
 cp "$SRC/api_proxy.php" "$PUB/api/index.php"
-printf 'Options -Indexes\nDirectoryIndex index.php\n<IfModule mod_rewrite.c>\nRewriteEngine On\nRewriteRule ^ index.php [L]\n</IfModule>\n' > "$PUB/api/.htaccess"
+chmod 644 "$PUB/api/index.php"
+chmod 755 "$PUB/api"
+rm -f "$PUB/api/.htaccess"
 
 cat > "$PUB/.htaccess" <<'EOF'
 Options -Indexes
-DirectoryIndex index.html
+DirectoryIndex index.html index.php
 <IfModule mod_rewrite.c>
 RewriteEngine On
 RewriteCond %{HTTPS} off
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+RewriteRule ^api/index\.php$ - [L]
 RewriteRule ^api(/.*)?$ api/index.php [L]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
@@ -37,5 +40,5 @@ EOF
 
 sleep 2
 echo "Проверка:"
-curl -s https://bizwor.ru/api/health | head -c 300 || true
+curl -s -w "  [код %{http_code}]" https://bizwor.ru/api/health | head -c 400 || true
 echo
