@@ -1,5 +1,10 @@
 #!/bin/bash
 set -e
+if ! "$HOME/api.bizwor.ru/venv/bin/python" -c "import encodings" >/dev/null 2>&1; then
+  echo "Сначала войдите в окружение сервера командой:  ssh localhost -p222"
+  echo "(в начале строки должно появиться (docker)), затем снова: bash ~/upd/install.sh"
+  exit 1
+fi
 U="$(cd "$(dirname "$0")" && pwd)"
 SITE="$HOME/bizwor.ru/public_html"
 API="$HOME/api.bizwor.ru"

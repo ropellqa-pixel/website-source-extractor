@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Icon from '@/components/ui/icon';
 import {
-  listReleases, publishRelease, activateRelease, deleteRelease, updateAllDevices, type AppRelease,
+  listReleases, publishRelease, activateRelease, deleteRelease, downloadRelease, updateAllDevices, type AppRelease,
 } from '@/lib/devices';
 
 const EDITIONS: Record<'abiz' | 'admin', string> = { abiz: 'АБИЗ (киоск)', admin: 'АБИЗ-Админ' };
@@ -16,6 +16,19 @@ export default function ReleasePanel({ notify }: { notify: (t: string) => void }
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const [dl, setDl] = useState<{ id: string; pct: number } | null>(null);
+
+  const download = async (r: AppRelease) => {
+    setDl({ id: r.id, pct: 0 });
+    try {
+      await downloadRelease(r, (pct) => setDl({ id: r.id, pct }));
+      notify(`Архив АБИЗ ${r.version} скачан`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Не удалось скачать');
+    } finally {
+      setDl(null);
+    }
+  };
 
   const load = () => listReleases().then(setReleases);
   useEffect(() => { load(); }, []);
@@ -80,6 +93,10 @@ export default function ReleasePanel({ notify }: { notify: (t: string) => void }
                 {r.is_active && <span className="ml-2 rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-700">текущая</span>}
               </span>
               <span className="flex gap-1">
+                <button disabled={dl !== null} onClick={() => download(r)}
+                  className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-link hover:underline disabled:opacity-50">
+                  <Icon name="Download" size={13} />{dl?.id === r.id ? `${dl.pct}%` : 'Скачать'}
+                </button>
                 {!r.is_active && (
                   <button onClick={async () => { await activateRelease(r.id); load(); notify(`Вернули версию ${r.version}`); }}
                     className="rounded px-2 py-0.5 text-xs text-link hover:underline">Сделать текущей</button>

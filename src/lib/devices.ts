@@ -95,6 +95,8 @@ export interface AppRelease {
   notes: string;
   is_active: boolean;
   created_at: string;
+  url?: string;
+  sha256?: string;
 }
 
 export async function listReleases(): Promise<AppRelease[]> {
@@ -155,6 +157,38 @@ export async function activateRelease(id: string): Promise<void> {
 
 export async function deleteDevice(deviceCode: string): Promise<void> {
   await callControlApi({ action: 'device_delete', device_code: deviceCode });
+}
+
+export async function downloadRelease(r: AppRelease, onProgress?: (pct: number) => void): Promise<void> {
+  if (!r.url) throw new Error('У выпуска нет файла');
+  const [tpl, cnt] = r.url.split('|');
+  const total = Math.max(1, Number(cnt) || 1);
+  const urls = cnt ? Array.from({ length: total }, (_, i) => tpl.replace('{n:03d}', String(i + 1).padStart(3, '0'))) : [tpl];
+  const chunks: ArrayBuffer[] = [];
+  for (let i = 0; i < urls.length; i++) {
+    let buf: ArrayBuffer | null = null;
+    for (let attempt = 0; attempt < 3 && !buf; attempt++) {
+      try {
+        const res = await fetch(urls[i], { cache: 'no-store' });
+        if (res.ok) buf = await res.arrayBuffer();
+      } catch { /* повтор */ }
+    }
+    if (!buf) throw new Error(`Не удалось скачать часть ${i + 1} из ${urls.length}`);
+    chunks.push(buf);
+    onProgress?.(Math.round(((i + 1) / urls.length) * 100));
+  }
+  const blob = new Blob(chunks, { type: 'application/zip' });
+  if (r.sha256 && crypto?.subtle) {
+    const hex = await sha256Hex(await blob.arrayBuffer());
+    if (hex !== r.sha256.toLowerCase()) throw new Error('Файл скачался с ошибкой — попробуйте ещё раз');
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${r.edition === 'admin' ? 'ABIZ-Admin' : 'ABIZ'}-${r.version}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
 }
 
 export async function deleteRelease(id: string): Promise<void> {

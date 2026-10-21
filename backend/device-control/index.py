@@ -338,10 +338,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # ----- Выпуск обновлений программы (загрузка ZIP частями, затем «Выпустить») -----
         if action == 'release_list':
             cur.execute(
-                f'SELECT id, edition, version, url, size_bytes, notes, is_active, created_at FROM {SCHEMA}.app_releases '
+                f'SELECT id, edition, version, url, size_bytes, notes, is_active, created_at, sha256 FROM {SCHEMA}.app_releases '
                 f'ORDER BY created_at DESC LIMIT 30')
             items = [{'id': r[0], 'edition': r[1], 'version': r[2], 'url': r[3], 'size': r[4], 'notes': r[5],
-                      'is_active': r[6], 'created_at': r[7]} for r in cur.fetchall()]
+                      'is_active': r[6], 'created_at': r[7], 'sha256': r[8]} for r in cur.fetchall()]
             return _resp(200, {'releases': items})
 
         if action == 'release_upload_part':
