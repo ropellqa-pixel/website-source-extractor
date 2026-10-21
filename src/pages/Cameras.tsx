@@ -5,19 +5,13 @@ import HlsPlayer from '@/components/cameras/HlsPlayer';
 import ArchiveBar from '@/components/cameras/ArchiveBar';
 import CameraManager from '@/components/cameras/CameraManager';
 import WasmHevcPlayer from '@/components/cameras/WasmHevcPlayer';
+import SnapshotView from '@/components/cameras/SnapshotView';
 import { camerasCall, fmtSec, type Camera } from '@/lib/camerasApi';
+import { detectEngine, downgradeEngine, type CamEngine } from '@/lib/hevc/engine';
+import { useCamSnapshot } from '@/lib/camStream';
 
-// Камеры снимают в H.265. Если браузер умеет его сам (Яндекс Браузер, Edge с кодеком, Safari) —
-// играем родным видеоплеером. Иначе (встроенный браузер АБИЗ, Chrome без кодека) — свой декодер
-// в WebAssembly: видео показывается везде, без расширений и платных кодеков.
-// Встроенный браузер программы АБИЗ (WebView2): всегда свой декодер — он проверен и не зависит от Windows.
 const IN_ABIZ = typeof navigator !== 'undefined' && /AbizShell|AbizAdmin|\bABIZ\//.test(navigator.userAgent);
 const PREFER_WASM = IN_ABIZ || (typeof location !== 'undefined' && new URLSearchParams(location.search).has('wasm'));
-const HEVC_OK = !PREFER_WASM && typeof window !== 'undefined' && (
-  (window.MediaSource?.isTypeSupported?.('video/mp4; codecs="hvc1.1.6.L93.B0"') ?? false) ||
-  (window.MediaSource?.isTypeSupported?.('video/mp4; codecs="hev1.1.6.L93.B0"') ?? false) ||
-  !!document.createElement('video').canPlayType('application/vnd.apple.mpegurl')
-);
 
 const LS_LIST = 'abiz_cams_list';
 const LS_LIVE = 'abiz_cams_live';
@@ -54,6 +48,8 @@ export default function Cameras() {
     return w >= 0 ? w : d >= 0 ? d : 0;
   });
   const [src, setSrc] = useState<string | null>(null);
+  const [epoch, setEpoch] = useState(0);
+  const [engine, setEngine] = useState<CamEngine>(() => detectEngine(PREFER_WASM));
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: 'live' });
@@ -69,6 +65,9 @@ export default function Cameras() {
   const liveCache = useRef<Record<string, string>>(loadLive());
 
   const cam = cameras[index];
+  const camId = cam?.id;
+  const modeKey = mode.kind === 'live' ? 'live' : `${mode.day}|${mode.sec}`;
+  const poster = useCamSnapshot(camId, mode.kind === 'live');
 
   useEffect(() => {
     camerasCall<{ cameras?: Camera[]; can_manage?: boolean }>({ action: 'list' }).then((r) => {
@@ -94,34 +93,42 @@ export default function Cameras() {
     });
   }, [jump]);
 
-  const connect = useCallback(async () => {
-    if (!cam) return;
+  const connect = useCallback(async (reconnect = false) => {
+    if (!camId) return;
     const id = ++reqId.current;
-    setSrc(null); setError(null); setConnecting(true); setPlayPos(null);
+    if (!reconnect) setSrc(null);
+    setError(null); setConnecting(true); setPlayPos(null);
     let r: { url?: string; error?: string };
     if (mode.kind === 'live') {
-      const cached = !hd ? liveCache.current[cam.id] : undefined;
+      const cached = !hd ? liveCache.current[camId] : undefined;
       const fresh = freshNext.current;
       freshNext.current = false;
-      r = cached ? { url: cached } : await camerasCall({ action: 'live', id: cam.id, quality: hd ? 'hd' : 'sd', fresh });
-      if (!hd && r.url && !cached) { liveCache.current[cam.id] = r.url; saveLive(cam.id, r.url); }
+      r = cached ? { url: cached } : await camerasCall({ action: 'live', id: camId, quality: hd ? 'hd' : 'sd', fresh });
+      if (!hd && r.url && !cached) { liveCache.current[camId] = r.url; saveLive(camId, r.url); }
     } else {
       const start = `${mode.day} ${fmtSec(mode.sec)}`;
       const end = `${mode.day} ${fmtSec(Math.min(mode.sec + 3600, 86399))}`;
-      r = await camerasCall({ action: 'playback', id: cam.id, start, end });
+      r = await camerasCall({ action: 'playback', id: camId, start, end });
     }
     if (id !== reqId.current) return;
     setConnecting(false);
-    if (r.error || !r.url) setError(r.error || 'Не удалось получить видео');
-    else setSrc(r.url);
-  }, [cam, mode, hd]);
+    if (r.error || !r.url) {
+      setError(r.error || 'Не удалось получить видео');
+      if (mode.kind === 'live') setTimeout(() => { if (id === reqId.current) { freshNext.current = true; connect(true); } }, 4000);
+    } else { setSrc(r.url); setEpoch((e) => e + 1); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camId, modeKey, hd]);
 
   useEffect(() => { connect(); }, [connect]);
+
+  const onUnsupported = useCallback(() => {
+    setEngine((e) => (e === 'snapshot' ? e : downgradeEngine(e)));
+  }, []);
 
   const go = useCallback((dir: number) => {
     if (cameras.length < 2) return;
     setIndex((i) => (i + dir + cameras.length) % cameras.length);
-    setMode({ kind: 'live' });
+    setMode((m) => (m.kind === 'live' ? m : { kind: 'live' }));
   }, [cameras.length]);
 
   useEffect(() => {
@@ -136,22 +143,36 @@ export default function Cameras() {
   }, [go, manage]);
 
   useEffect(() => {
-    const h = () => setIsFull(!!document.fullscreenElement);
+    const d = document as Document & { webkitFullscreenElement?: Element };
+    const h = () => setIsFull(!!(d.fullscreenElement || d.webkitFullscreenElement));
     document.addEventListener('fullscreenchange', h);
-    return () => document.removeEventListener('fullscreenchange', h);
+    document.addEventListener('webkitfullscreenchange', h);
+    return () => { document.removeEventListener('fullscreenchange', h); document.removeEventListener('webkitfullscreenchange', h); };
   }, []);
 
   const toggleFull = () => {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else wrapRef.current?.requestFullscreen?.();
+    const d = document as Document & { webkitFullscreenElement?: Element; webkitExitFullscreen?: () => void };
+    const el = wrapRef.current as (HTMLDivElement & { webkitRequestFullscreen?: () => void }) | null;
+    if (d.fullscreenElement || d.webkitFullscreenElement) {
+      if (d.exitFullscreen) d.exitFullscreen().catch(() => { /* */ });
+      else d.webkitExitFullscreen?.();
+      return;
+    }
+    if (el?.requestFullscreen) el.requestFullscreen().catch(() => { /* */ });
+    else if (el?.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    else {
+      const v = el?.querySelector('video') as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
+      v?.webkitEnterFullscreen?.();
+    }
   };
 
   const onFatal = useCallback(() => {
-    if (cam) { delete liveCache.current[cam.id]; saveLive(cam.id, null); }
+    if (camId) { delete liveCache.current[camId]; saveLive(camId, null); }
     freshNext.current = true;
-    if (mode.kind === 'live') setTimeout(() => connect(), 1000);
+    if (mode.kind === 'live') setTimeout(() => connect(true), 500);
     else setError('Запись прервалась. Выберите другое время.');
-  }, [mode, connect, cam]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeKey, connect, camId]);
 
   const onTime = useCallback((t: number) => {
     if (mode.kind === 'archive') setPlayPos(Math.min(mode.sec + Math.floor(t), 86399));
@@ -198,14 +219,18 @@ export default function Cameras() {
   return (
     <div ref={wrapRef} className="relative flex h-full flex-col bg-black text-white">
       <div className="relative min-h-0 flex-1">
-        {HEVC_OK ? <HlsPlayer
-          key={`${cam.id}-${mode.kind}-${mode.kind === 'archive' ? mode.day + mode.sec : ''}-${hd}`}
-          src={src} loading={connecting} error={error} muted={muted} onFatal={onFatal} onTime={onTime}
-        /> : <WasmHevcPlayer
-          key={`${cam.id}-${mode.kind}-${mode.kind === 'archive' ? mode.day + mode.sec : ''}-${hd}`}
-          src={src} loading={connecting} error={error} onFatal={onFatal}
-          live={mode.kind === 'live'} onTime={onTime}
-        />}
+        {engine === 'native' ? <HlsPlayer
+          key={`${engine}-${cam.id}-${modeKey}-${hd}`}
+          src={src} epoch={epoch} loading={connecting} error={error} poster={poster} muted={muted}
+          live={mode.kind === 'live'} onFatal={onFatal} onUnsupported={onUnsupported} onTime={onTime}
+        /> : engine === 'wasm' ? <WasmHevcPlayer
+          key={`${engine}-${cam.id}-${modeKey}-${hd}`}
+          src={src} epoch={epoch} loading={connecting} error={error} poster={poster} onFatal={onFatal}
+          onUnsupported={onUnsupported} live={mode.kind === 'live'} onTime={onTime}
+        /> : mode.kind === 'live' ? <SnapshotView key={`snap-${cam.id}`} cameraId={cam.id} poster={poster} />
+          : <div className="flex h-full w-full items-center justify-center p-6 text-center text-sm text-white/80">
+            Этот браузер не умеет показывать запись архива. Откройте страницу в Chrome, Edge, Safari или Яндекс Браузере.
+          </div>}
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 bg-gradient-to-b from-black/70 to-transparent p-3 sm:p-4">
           <div className="pointer-events-auto flex items-center gap-2">
@@ -262,7 +287,7 @@ export default function Cameras() {
               playingFrom={mode.kind === 'archive' ? mode.sec : null}
               position={playPos}
               onSeek={(day, sec) => setMode({ kind: 'archive', day, sec: Math.max(0, sec) })}
-              onLive={() => setMode({ kind: 'live' })}
+              onLive={() => setMode((m) => (m.kind === 'live' ? m : { kind: 'live' }))}
               initialDay={mode.kind === 'archive' ? mode.day : undefined}
             />
           </div>
@@ -273,7 +298,7 @@ export default function Cameras() {
         {cameras.map((c, i) => (
           <button
             key={c.id}
-            onClick={() => { setIndex(i); setMode({ kind: 'live' }); }}
+            onClick={() => { setIndex(i); setMode((m) => (m.kind === 'live' ? m : { kind: 'live' })); }}
             className={`flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm transition ${
               i === index ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'
             }`}

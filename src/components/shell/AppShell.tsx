@@ -14,10 +14,7 @@ interface Notice {
 
 export default function AppShell({ children, notice }: { children: ReactNode; notice?: Notice }) {
   const [open, setOpen] = useState(false);
-  const n: Notice = notice || {
-    text: 'Зарплата за сентябрь рассчитана по табелю.',
-    link: { label: 'Проверить ›', to: '/salary' },
-  };
+  const n: Notice = notice || { text: '' };
 
   useChatNotifications();
 

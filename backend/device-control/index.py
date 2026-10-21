@@ -390,6 +390,15 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             cur.execute(f'UPDATE {SCHEMA}.app_releases SET is_active = (id = %s) WHERE edition = %s', (body['id'], r[0]))
             return _resp(200, {'ok': True})
 
+        if action == 'device_delete':
+            code = (body.get('device_code') or '').strip()
+            if not code:
+                return _resp(400, {'error': 'Не указан ПК'})
+            cur.execute(f'DELETE FROM {SCHEMA}.device_commands WHERE device_code = %s', (code,))
+            cur.execute(f'DELETE FROM {SCHEMA}.device_logs WHERE device_code = %s', (code,))
+            cur.execute(f'DELETE FROM {SCHEMA}.devices WHERE device_code = %s', (code,))
+            return _resp(200, {'ok': True, 'deleted': cur.rowcount})
+
         if action == 'release_delete':
             cur.execute(f'DELETE FROM {SCHEMA}.app_releases WHERE id = %s', (body.get('id') or '',))
             return _resp(200, {'ok': True})

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Icon from '@/components/ui/icon';
 import ReleasePanel from '@/components/devices/ReleasePanel';
 import {
-  getDevicesStatus, sendDeviceCommand, getDeviceLogs,
+  getDevicesStatus, sendDeviceCommand, getDeviceLogs, deleteDevice,
   type DeviceStatus, type DeviceLogEntry, type RemoteCommand,
 } from '@/lib/devices';
 
@@ -46,6 +46,20 @@ export default function Devices() {
   }, [load]);
 
   const notify = (text: string) => { setToast(text); setTimeout(() => setToast(''), 3000); };
+
+  const removeDevice = async (device: DeviceStatus) => {
+    if (!confirm(`Удалить ПК «${device.hostname || device.device_code}» из списка? Чтобы вернуть его, программу АБИЗ на этом ПК нужно будет привязать заново.`)) return;
+    setBusy(device.device_code + 'delete');
+    try {
+      await deleteDevice(device.device_code);
+      setDevices((list) => list.filter((x) => x.device_code !== device.device_code));
+      notify('ПК удалён');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Не удалось удалить ПК');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const run = async (device: DeviceStatus, command: RemoteCommand, payload?: Record<string, unknown>) => {
     setBusy(device.device_code + command);
@@ -199,6 +213,10 @@ export default function Devices() {
                   <button onClick={() => openLogs(d)}
                     className="flex items-center gap-1 rounded-lg bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/70">
                     <Icon name="ScrollText" size={13} /> Журнал
+                  </button>
+                  <button disabled={busy === d.device_code + 'delete'} onClick={() => removeDevice(d)}
+                    className="flex items-center gap-1 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 disabled:opacity-40">
+                    <Icon name="Trash2" size={13} /> Удалить ПК
                   </button>
                 </div>
               </div>

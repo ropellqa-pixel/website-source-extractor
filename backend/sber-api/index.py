@@ -990,6 +990,19 @@ def _action(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dic
                          user['name'], user['id'], cat, period, 'sent' if direct else 'draft', direct))
         return _resp(200, {'ok': True})
 
+    if action == 'request_remove':
+        if not (deputy or user.get('role') == 'senior_employee'):
+            return _err('Удалять платёжки может старший сотрудник или зам. директора', 403)
+        ids = [int(x) for x in (body.get('ids') or [body.get('id')]) if str(x or '').isdigit()][:200]
+        if not ids:
+            return _err('Выберите платёжки')
+        cur.execute(f"DELETE FROM {SCHEMA}.sber_requests WHERE id = ANY(%s) AND status NOT IN ('paying', 'signing') RETURNING id", (ids,))
+        removed = len(cur.fetchall())
+        if not removed:
+            return _err('Эти платёжки сейчас в банке на подписи — сначала дождитесь ответа банка')
+        _log(cur, user, 'Платёжки удалены', f'{removed} шт.: ' + ', '.join(f'#{i}' for i in ids))
+        return _resp(200, {'ok': True, 'removed': removed})
+
     if action in ('request_delete', 'send_week'):
         if 'sber.request' not in can:
             return _err('Нет права', 403)

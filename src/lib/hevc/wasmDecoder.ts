@@ -90,6 +90,12 @@ export class WasmHevcDecoder {
     return out;
   }
 
+  reset() {
+    try { this.api.destroy(this.dec); } catch { /* */ }
+    this.dec = this.api.create();
+    if (!this.dec) throw new Error('Не удалось создать декодер');
+  }
+
   destroy() {
     try { this.api.destroy(this.dec); } catch { /* */ }
   }

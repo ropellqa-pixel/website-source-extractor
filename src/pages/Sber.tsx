@@ -55,6 +55,7 @@ export default function Sber() {
 
   const currentWeek = (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toLocaleDateString('sv-SE'); })();
   const can = (a: string) => !!data && data.can.includes(a);
+  const canRemove = !!data && (data.is_deputy || user?.role === 'senior_employee');
   const ready = useMemo(() => (data?.counterparties || []).filter((c) => c.ready && !c.archived), [data]);
 
   if (error) return <div className="p-6 text-sm text-red-600">{error}</div>;
@@ -225,6 +226,9 @@ export default function Sber() {
                       {can('sber.request') && ['draft', 'rejected', 'sent'].includes(r.status) && (r.created_by_user === user?.id || data.is_deputy) && (
                         <Button size="sm" variant="outline" className="h-9 text-red-600" onClick={() => act('request_delete', { id: r.id }, 'Отменить заявку?')}><Icon name="Trash2" size={15} /></Button>
                       )}
+                      {canRemove && !['paying', 'signing'].includes(r.status) && (
+                        <Button size="sm" variant="outline" className="h-9 text-red-600" onClick={() => act('request_remove', { id: r.id }, 'Удалить платёжку насовсем? Её нельзя будет восстановить.')}><Icon name="X" size={15} />Удалить</Button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -292,6 +296,10 @@ export default function Sber() {
                           {can('sber.request') && ['draft', 'rejected', 'sent'].includes(r.status) && (r.created_by_user === user?.id || data.is_deputy) && (
                             <button title="Отменить" onClick={() => act('request_delete', { id: r.id }, 'Отменить заявку?')}
                               className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-red-600"><Icon name="Trash2" size={15} /></button>
+                          )}
+                          {canRemove && !['paying', 'signing'].includes(r.status) && (
+                            <button title="Удалить насовсем" onClick={() => act('request_remove', { id: r.id }, 'Удалить платёжку насовсем? Её нельзя будет восстановить.')}
+                              className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-red-600"><Icon name="X" size={15} /></button>
                           )}
                         </div>
                       </td>

@@ -153,6 +153,10 @@ export async function activateRelease(id: string): Promise<void> {
   await callControlApi({ action: 'release_activate', id });
 }
 
+export async function deleteDevice(deviceCode: string): Promise<void> {
+  await callControlApi({ action: 'device_delete', device_code: deviceCode });
+}
+
 export async function deleteRelease(id: string): Promise<void> {
   await callControlApi({ action: 'release_delete', id });
 }

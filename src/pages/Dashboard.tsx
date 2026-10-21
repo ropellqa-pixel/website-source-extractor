@@ -3,49 +3,21 @@ import Icon from '@/components/ui/icon';
 import { useAuth } from '@/lib/auth';
 import { useAccess } from '@/lib/access';
 import { ROLE_LABELS, visibleNav } from '@/lib/navigation';
-import MonthSlab, { monthInfo } from '@/components/dashboard/MonthSlab';
 import StatsRow from '@/components/dashboard/StatsRow';
-
-const MONTHS_NOM = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+import PlanCalendar from '@/components/dashboard/PlanCalendar';
 
 export default function Dashboard() {
   const { user, company } = useAuth();
   const { access } = useAccess();
-  const today = new Date();
-  const { workdays, m } = monthInfo(today);
   const isDirectorOrDeputy = user?.role === 'director' || user?.role === 'deputy_director';
   const sections = visibleNav(user?.role, access?.sections).filter(i => i.path !== '/dashboard');
   const firstName = (user?.fullName || '').split(' ')[1] || user?.fullName?.split(' ')[0] || '';
 
   return (
     <div className="flex flex-col items-center px-5 pb-20 text-center">
-      <section className="flex w-full flex-col items-center pt-14">
-        <p className="reveal-up text-[26px] font-medium leading-[1.1] tracking-[-0.02em]" style={{ animationDelay: '.05s' }}>
-          Табель
-        </p>
-        <h1
-          className="reveal-up mt-1 font-head text-[40px] font-extrabold leading-[1.08] tracking-[-0.045em] sm:text-[52px] lg:text-[64px]"
-          style={{ animationDelay: '.15s' }}
-        >
-          {MONTHS_NOM[m]} закрыт.
-        </h1>
-        <Link
-          to="/schedule"
-          className="reveal-up mt-6 inline-flex h-11 items-center rounded-full bg-primary px-[22px] text-[17px] text-primary-foreground transition-opacity hover:opacity-85"
-          style={{ animationDelay: '.3s' }}
-        >
-          Открыть табель
-        </Link>
-        <p className="reveal-up mt-4 text-[17px] font-semibold tracking-[-0.01em]" style={{ animationDelay: '.38s' }}>
-          {workdays} смен из {workdays}
-        </p>
+      <PlanCalendar />
 
-        <div className="reveal-rise mt-[90px] flex w-full justify-center" style={{ animationDelay: '.45s' }}>
-          <MonthSlab date={today} />
-        </div>
-      </section>
-
-      <section className="mt-24 w-full max-w-[980px] text-left">
+      <section className="mt-16 w-full max-w-[980px] text-left">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-2">
           <div>
             <p className="text-[13px] text-muted-foreground">

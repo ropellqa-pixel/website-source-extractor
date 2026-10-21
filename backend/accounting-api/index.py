@@ -193,20 +193,8 @@ def sync_period(cur, period: str, cfg=None, params=None, force: bool = False) ->
                      'Из раздела «Зарплата»' + (' (руководитель)' if p['kind'] == 'mgr' else ''), key, details))
     cur.execute(f'UPDATE {SCHEMA}.acc_accruals SET void = true WHERE period = %s AND source_key LIKE %s AND NOT (source_key = ANY(%s))',
                 (period, f'sheet:{period}:%', keep_acc or ['']))
-    for kind, cat_name, label in (('emp', CAT_EMP, 'сотрудников'), ('mgr', CAT_MGR, 'руководителей')):
-        key = f'{period}:{kind}'
-        cat = _cat_id(cur, 'expense', cat_name)
-        cur.execute(f"SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_entries WHERE kind = 'expense' AND category_id = %s "
-                    f"AND period = %s AND NOT void AND COALESCE(source, '') <> 'salary'", (cat, period))
-        paid = _num(cur.fetchone()[0])
-        if paid > 0:
-            cur.execute(f"UPDATE {SCHEMA}.acc_entries SET void = true WHERE source = 'salary' AND source_key = %s", (key,))
-            continue
-        if round(totals[kind], 2) > 0:
-            _upsert_entry(cur, 'salary', key, 'expense', last, totals[kind], _cat_id(cur, 'expense', cat_name),
-                          f'ИТОГО к выдаче из «Зарплаты», {label}: {counts[kind]}', period)
-        else:
-            cur.execute(f"UPDATE {SCHEMA}.acc_entries SET void = true WHERE source = 'salary' AND source_key = %s", (key,))
+    cur.execute(f"UPDATE {SCHEMA}.acc_entries SET void = true WHERE source = 'salary' AND source_key = ANY(%s)",
+                ([f'{period}:emp', f'{period}:mgr'],))
     cur.execute(f"SELECT shift_date, SUM(COALESCE(fact_value, 0)), COUNT(*) FROM {SCHEMA}.collection_data "
                 f"WHERE month_year = %s AND shift_date ~ '^\\d{{2}}\\.\\d{{2}}\\.\\d{{4}}$' GROUP BY 1", (_my(period),))
     keep_col: List[str] = []
@@ -235,16 +223,61 @@ def sync_period(cur, period: str, cfg=None, params=None, force: bool = False) ->
     return {'period': period, **snap}
 
 
+WEEK_DAYS = (5, 12, 19, 26)
+MONTHS_GEN = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
+
+
+def _next_period(period: str) -> str:
+    y, m = int(period[:4]), int(period[5:7])
+    return f'{y + (m == 12)}-{m % 12 + 1:02d}'
+
+
+def post_weekly_salary(cur, today: Optional[date] = None) -> int:
+    """Зарплата прошлого месяца (сотрудники + руководители) делится на 4 и сама ставится в расход
+    5, 12, 19 и 26 числа следующего месяца. За месяц сумма четырёх расходов = общему итогу."""
+    today = today or date.today()
+    cur_month = today.strftime('%Y-%m')
+    first = today.replace(day=1)
+    prev = date.fromordinal(first.toordinal() - 1).strftime('%Y-%m')
+    sync_period(cur, prev)
+    start = _start(cur)
+    closed = _closed(cur)
+    cur.execute(f"SELECT period, snapshot FROM {SCHEMA}.acc_periods WHERE period >= %s ORDER BY period DESC LIMIT 4",
+                ((date(today.year - 1, today.month, 1)).strftime('%Y-%m'),))
+    posted = 0
+    for period, snap in cur.fetchall():
+        snap = snap or {}
+        target = _next_period(period)
+        if target > cur_month or target < start or closed.get(target, {}).get('closed'):
+            continue
+        name = MONTHS_GEN[int(period[5:7]) - 1]
+        for kind, cat_name, label in (('emp', CAT_EMP, 'сотрудники'), ('mgr', CAT_MGR, 'заведующий')):
+            total = round(_num(snap.get('salary_' + kind)), 2)
+            week = round(total / 4, 2)
+            cat = _cat_id(cur, 'expense', cat_name)
+            for i, day in enumerate(WEEK_DAYS, 1):
+                key = f'{period}:{kind}:w{i}'
+                d = date(int(target[:4]), int(target[5:7]), day)
+                amount = round(total - week * 3, 2) if i == 4 else week
+                if d > today or amount <= 0:
+                    cur.execute(f"UPDATE {SCHEMA}.acc_entries SET void = true WHERE source = 'salary_week' AND source_key = %s AND NOT void", (key,))
+                    continue
+                _upsert_entry(cur, 'salary_week', key, 'expense', d.isoformat(), amount, cat,
+                              f'Зарплата за {name}, неделя {i} из 4 ({label}): общий итог {total:.2f} / 4', target)
+                posted += 1
+    return posted
+
+
 def sync_range(cur, d_from: str, d_to: str) -> None:
     cur_month = date.today().strftime('%Y-%m')
     closed = _closed(cur)
     todo = [p for p in _data_periods(cur)
             if d_from[:7] <= p <= d_to[:7] and p <= cur_month and not closed.get(p, {}).get('closed')]
-    if not todo:
-        return
-    cfg, params = load_config(cur, SCHEMA), global_params(cur, SCHEMA)
-    for p in todo[-12:]:
-        sync_period(cur, p, cfg, params)
+    if todo:
+        cfg, params = load_config(cur, SCHEMA), global_params(cur, SCHEMA)
+        for p in todo[-12:]:
+            sync_period(cur, p, cfg, params)
+    post_weekly_salary(cur)
 
 
 # ---------------------------------------------------------------- чтение
@@ -832,6 +865,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                         (json.dumps({'start_period': sp}), user['name']))
             cur.execute(f'UPDATE {SCHEMA}.acc_accruals SET void = (period < %s) WHERE source_key IS NOT NULL', (sp,))
             cur.execute(f'UPDATE {SCHEMA}.acc_entries SET void = (period < %s) WHERE source IN (%s, %s)', (sp, 'salary', 'collection'))
+            cur.execute(f"UPDATE {SCHEMA}.acc_entries SET void = true WHERE source = 'salary_week' AND period < %s", (sp,))
             cur.execute(f'UPDATE {SCHEMA}.acc_periods SET fingerprint = NULL')
             _log(cur, user, 'Начало учёта', sp)
             return _resp(200, {'ok': True})
@@ -871,7 +905,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 total = round(sum(p['raw'] for p in calc['people'] if p['kind'] == kind), 2)
                 cid = _cat_id(cur, 'expense', cat_name)
                 cur.execute(f"SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.acc_entries WHERE kind = 'expense' AND category_id = %s "
-                            f"AND period = %s AND NOT void AND COALESCE(source, '') <> 'salary' AND id <> %s",
+                            f"AND period = %s AND NOT void AND COALESCE(source, '') NOT IN ('salary', 'salary_week') AND id <> %s",
                             (cid, period, int(body.get('exclude_id') or 0)))
                 paid = _num(cur.fetchone()[0])
                 out[str(cid)] = {'total': total, 'paid': round(paid, 2), 'left': round(max(total - paid, 0), 2)}

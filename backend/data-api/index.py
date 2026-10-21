@@ -17,7 +17,7 @@ ALLOWED_TABLES = {
     'schedule_data', 'schedule_settings', 'salary_data', 'salary_settings', 'manager_data',
     'manager_settings', 'employee_rotation', 'collection_data', 'documents', 'folders',
     'base_files', 'dto_categories', 'dto_templates', 'chat_rooms', 'chat_messages', 'devices',
-    'kiosk_buttons',
+    'kiosk_buttons', 'plan_events',
 }
 
 CORS_HEADERS = {

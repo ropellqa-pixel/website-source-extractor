@@ -24,6 +24,17 @@ async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
   finally { clearTimeout(t); }
 }
 
+async function fetchSeg(url: string): Promise<Uint8Array | null> {
+  for (let a = 0; a < 3; a++) {
+    try {
+      const r = await fetchWithTimeout(url, 4000);
+      if (!r.ok) return null;
+      return new Uint8Array(await r.arrayBuffer());
+    } catch { /* повтор */ }
+  }
+  return null;
+}
+
 async function loop(url: string, gen: number, live: boolean) {
   const seen = new Set<string>();
   let errors = 0;
@@ -52,17 +63,18 @@ async function loop(url: string, gen: number, live: boolean) {
       const todo = first && live ? segs.slice(-3) : segs.filter(s => !seen.has(s.url));
       if (first && live) segs.forEach(s => seen.add(s.url));
       const ended = !live && text.includes('#EXT-X-ENDLIST');
-      for (const s of todo) {
+      const loads: Promise<Uint8Array | null>[] = [];
+      const ahead = (upto: number) => {
+        while (loads.length < Math.min(todo.length, upto)) { const s = todo[loads.length]; seen.add(s.url); loads.push(fetchSeg(s.url)); }
+      };
+      for (let i = 0; i < todo.length; i++) {
+        const s = todo[i];
         if (!running || gen !== generation) return;
-        seen.add(s.url);
+        ahead(i + 3);
         lastNew = Date.now();
-        let sr: Response | null = null;
-        for (let a = 0; a < 3 && !sr; a++) {
-          try { sr = await fetchWithTimeout(s.url, 4000); } catch { /* повтор */ }
-        }
-        if (!sr) continue;
-        if (!sr.ok || !decoder) continue;
-        const es = extractHevcFromTs(new Uint8Array(await sr.arrayBuffer()));
+        const buf = await loads[i];
+        if (!buf || !decoder) continue;
+        const es = extractHevcFromTs(buf);
         if (!es.length) continue;
         decoder.feed(es);
         const frames = decoder.drain();
@@ -102,9 +114,18 @@ self.onmessage = async (e: MessageEvent) => {
   if (m.type === 'start') {
     try {
       if (!decoder) {
-        importScripts(m.glueUrl);
-        const factory = self.HEVCDecoderModule as Parameters<typeof WasmHevcDecoder.create>[0];
-        decoder = await WasmHevcDecoder.create(factory, m.wasmUrl);
+        if (typeof WebAssembly !== 'object' || typeof importScripts !== 'function') {
+          post({ type: 'unsupported', message: 'WebAssembly недоступен' });
+          return;
+        }
+        try {
+          importScripts(m.glueUrl);
+          const factory = self.HEVCDecoderModule as Parameters<typeof WasmHevcDecoder.create>[0];
+          decoder = await WasmHevcDecoder.create(factory, m.wasmUrl);
+        } catch (err) {
+          post({ type: 'unsupported', message: String(err) });
+          return;
+        }
       }
       generation++;
       running = true;
