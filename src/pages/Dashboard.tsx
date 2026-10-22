@@ -23,26 +23,26 @@ export default function Dashboard() {
             <p className="text-[13px] text-muted-foreground">
               {company?.name || user?.companyName || 'АнодБИЗ'} · {ROLE_LABELS[user?.role || 'employee']}
             </p>
-            <h2 className="font-head text-[26px] font-medium tracking-[-0.03em]">
+            <h2 className="page-title text-[24px] sm:text-[26px]">
               {firstName ? `Здравствуйте, ${firstName}` : 'Сводка'}
             </h2>
           </div>
         </div>
         <StatsRow canSeeEmployees={isDirectorOrDeputy} />
 
-        <h3 className="mb-4 mt-14 text-[13px] uppercase tracking-[0.08em] text-muted-foreground">Разделы</h3>
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[22px] border border-border bg-border sm:grid-cols-3 lg:grid-cols-4">
+        <h3 className="mb-4 mt-14 text-[12px] font-semibold uppercase tracking-[0.09em] text-muted-foreground">Разделы</h3>
+        <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
           {sections.map(s => (
             <Link
               key={s.path}
               to={s.path}
-              className="group flex items-center justify-between gap-3 bg-card px-5 py-5 text-[15px] transition-colors hover:bg-nav"
+              className="surface surface-hover group flex items-center justify-between gap-3 px-4 py-4 text-[15px] font-medium active:scale-[0.98]"
             >
-              <span className="flex items-center gap-3">
-                <Icon name={s.icon} size={18} strokeWidth={1.5} className="text-muted-foreground" />
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="icon-tile h-10 w-10 shrink-0"><Icon name={s.icon} size={18} strokeWidth={1.7} /></span>
                 {s.label}
               </span>
-              <Icon name="ChevronRight" size={16} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+              <Icon name="ChevronRight" size={16} className="shrink-0 text-muted-foreground/70 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
             </Link>
           ))}
         </div>

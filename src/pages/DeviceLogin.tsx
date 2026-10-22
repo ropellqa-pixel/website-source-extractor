@@ -32,25 +32,25 @@ export default function DeviceLogin() {
   }, [searchParams, signInWithLoginCode, navigate]);
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-md text-center">
-        <AnodBizLogo size="lg" />
+    <div className="auth-bg flex min-h-[100dvh] items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-3xl border border-white/70 bg-card/90 p-8 text-center shadow-pop backdrop-blur-xl reveal-up">
+        <AnodBizLogo size="lg" className="drop-shadow-[0_18px_30px_hsl(222_47%_11%/0.3)]" />
         <h1 className="font-head text-2xl font-extrabold tracking-[-0.04em] text-foreground mb-2 mt-4">АнодБИЗ</h1>
 
         {error ? (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mt-6 text-left">
+          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-left">
             <div className="flex items-center gap-2 mb-1">
               <AlertTriangle className="w-5 h-5 text-red-600" />
               <p className="text-red-600 font-medium">Не удалось войти</p>
             </div>
-            <p className="text-red-600/90 text-sm">{error}</p>
-            <a href="/login" className="inline-block mt-3 text-blue-600 hover:text-blue-700 font-medium text-sm">
+            <p className="text-sm text-red-700">{error}</p>
+            <a href="/login" className="mt-3 inline-flex h-9 items-center rounded-lg bg-card px-3 text-sm font-medium text-link shadow-soft hover:underline">
               Войти вручную
             </a>
           </div>
         ) : (
           <div className="flex items-center justify-center gap-2 mt-6 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin" />
+            <Loader2 className="h-5 w-5 animate-spin text-[hsl(var(--day))]" />
             Выполняется вход...
           </div>
         )}

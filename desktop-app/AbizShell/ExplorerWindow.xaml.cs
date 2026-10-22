@@ -67,7 +67,7 @@ namespace AbizShell
             AddPlace("\U0001F5A5", "Рабочий стол", Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
             AddPlace("\U0001F5BC", "Изображения", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
 
-            PlacesPanel.Children.Add(new TextBlock { Text = "Диски", Foreground = new SolidColorBrush(Color.FromArgb(0x77, 255, 255, 255)), FontSize = 11, Margin = new Thickness(8, 12, 0, 4) });
+            PlacesPanel.Children.Add(new TextBlock { Text = "ДИСКИ", Foreground = new SolidColorBrush(Color.FromRgb(0x9A, 0x9A, 0xA2)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(12, 14, 0, 6) });
             foreach (var d in DriveInfo.GetDrives())
             {
                 try
@@ -86,9 +86,9 @@ namespace AbizShell
             if (!Directory.Exists(path)) return;
             var btn = new Button
             {
-                Style = (Style)FindResource("ExBtn"),
+                Style = (Style)FindResource("PlaceBtn"),
                 HorizontalContentAlignment = HorizontalAlignment.Left,
-                Margin = new Thickness(0, 0, 0, 4),
+                Margin = new Thickness(0, 0, 0, 2),
                 Content = new StackPanel
                 {
                     Orientation = Orientation.Horizontal,

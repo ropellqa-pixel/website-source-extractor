@@ -23,7 +23,7 @@ namespace AbizShell
         public void ShowMessage(string text)
         {
             _isLock = false;
-            IconLabel.Text = "\U0001F4AC";
+            IconLabel.Text = "\uE8BD";
             TitleLabel.Text = "Сообщение от руководства";
             MessageLabel.Text = text;
             CloseButton.Visibility = Visibility.Visible;
@@ -34,7 +34,7 @@ namespace AbizShell
         public void ShowLock(string? text)
         {
             _isLock = true;
-            IconLabel.Text = "\U0001F512";
+            IconLabel.Text = "\uE72E";
             TitleLabel.Text = "Доступ временно заблокирован";
             MessageLabel.Text = string.IsNullOrWhiteSpace(text)
                 ? "Компьютер заблокирован заместителем директора."

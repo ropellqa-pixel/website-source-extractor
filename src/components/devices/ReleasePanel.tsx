@@ -73,7 +73,12 @@ export default function ReleasePanel({ notify }: { notify: (t: string) => void }
             ))}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <a href="/downloads/ABIZ-source.zip" download="ABIZ-source.zip"
+            title="Код программы АБИЗ для сборки в Visual Studio"
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm hover:bg-secondary">
+            <Icon name="Download" size={15} /> Скачать архив ПО АБИЗ
+          </a>
           <button onClick={pushAll} className="flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-2 text-sm text-foreground hover:bg-secondary/70">
             <Icon name="RefreshCcw" size={15} /> Обновить все ПК сейчас
           </button>

@@ -23,24 +23,27 @@ export default function BottomNav({ onMore }: { onMore: () => void }) {
     return subscribeUnread(setUnread);
   }, []);
 
-  const cell = 'relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] leading-none transition-colors';
+  const cell = 'relative flex flex-1 flex-col items-center justify-center gap-1 text-[10.5px] leading-none transition-colors active:scale-95';
+  const pill = (on: boolean) => cn('grid h-7 w-12 place-items-center rounded-full transition-all duration-200', on ? 'bg-[hsl(var(--slab))] text-[hsl(var(--day))]' : '');
 
   return (
-    <nav className="app-tabs flex border-t border-border bg-card/95 backdrop-blur lg:hidden" aria-label="Быстрые разделы">
+    <nav className="frost app-tabs flex border-t border-border/70 lg:hidden" aria-label="Быстрые разделы">
       {main.map((i) => (
         <NavLink key={i.path} to={i.path}
-          className={({ isActive }) => cn(cell, isActive ? 'font-semibold text-primary' : 'text-muted-foreground')}>
-          <Icon name={i.icon} size={22} strokeWidth={1.7} />
+          className={({ isActive }) => cn(cell, isActive ? 'font-semibold text-foreground' : 'text-muted-foreground')}>
+          {({ isActive }) => (<>
+          <span className={pill(isActive)}><Icon name={i.icon} size={20} strokeWidth={isActive ? 2 : 1.7} /></span>
           <span className="max-w-full truncate px-1">{i.label}</span>
           {i.path === '/chat' && unread > 0 && (
-            <span className="absolute left-1/2 top-1.5 ml-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
+            <span className="absolute left-1/2 top-1 ml-2.5 flex ring-2 ring-white h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
               {unread > 99 ? '99+' : unread}
             </span>
           )}
+          </>)}
         </NavLink>
       ))}
-      <button onClick={onMore} className={cn(cell, moreActive ? 'font-semibold text-primary' : 'text-muted-foreground')}>
-        <Icon name="LayoutGrid" size={22} strokeWidth={1.7} />
+      <button onClick={onMore} className={cn(cell, moreActive ? 'font-semibold text-foreground' : 'text-muted-foreground')}>
+        <span className={pill(moreActive)}><Icon name="LayoutGrid" size={20} strokeWidth={moreActive ? 2 : 1.7} /></span>
         <span>Ещё</span>
       </button>
     </nav>

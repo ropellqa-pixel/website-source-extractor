@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '@/lib/sdk';
-import { ArrowLeft, Zap, Loader2 } from 'lucide-react';
+import { ArrowLeft, Zap, Loader2, AlertCircle } from 'lucide-react';
 
 export default function PinLogin() {
   const [pin, setPin] = useState('');
@@ -51,23 +51,23 @@ export default function PinLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="auth-bg flex min-h-[100dvh] items-center justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
+      <div className="w-full max-w-[420px] reveal-up">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-violet-500 to-purple-600 rounded-2xl shadow-lg mb-4">
-            <Zap className="w-10 h-10 text-foreground" />
+          <div className="inline-flex items-center justify-center w-20 h-20 mb-5 rounded-[22px] bg-gradient-to-br from-[hsl(var(--logo-1))] to-[hsl(var(--logo-2))] shadow-[0_18px_30px_-8px_hsl(222_47%_11%/0.45)]">
+            <Zap className="h-9 w-9 text-[hsl(var(--logo-bar))]" />
           </div>
-          <h1 className="text-3xl font-bold text-foreground mb-2">Быстрый вход</h1>
+          <h1 className="mb-1.5 font-head text-[28px] font-bold tracking-[-0.04em] text-foreground">Быстрый вход</h1>
           <p className="text-muted-foreground">Введите пин-код для входа в АнодБИЗ</p>
         </div>
 
-        <div className="bg-card backdrop-blur-sm rounded-[22px] shadow-[0_30px_60px_-30px_hsl(var(--logo-2)/0.25)] p-8 border border-border">
+        <div className="rounded-3xl border border-white/70 bg-card/90 p-6 shadow-pop backdrop-blur-xl sm:p-8">
           <form onSubmit={handlePinSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-foreground/80 mb-3">
+              <label className="mb-4 block text-center text-[13px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                 Пин-код
               </label>
-              <div className="flex gap-3 justify-center">
+              <div className="flex justify-center gap-2.5 sm:gap-3">
                 {[0, 1, 2, 3].map((i) => (
                   <input
                     key={i}
@@ -94,7 +94,7 @@ export default function PinLogin() {
                         inputs?.[i - 1]?.focus();
                       }
                     }}
-                    className="w-16 h-20 bg-secondary border-2 border-border rounded-xl text-center text-3xl text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring transition-all"
+                    className={`h-[72px] w-[60px] rounded-2xl border-2 text-center font-mono text-3xl text-foreground shadow-[inset_0_1px_2px_hsl(240_10%_20%/0.05)] transition-all duration-150 focus:-translate-y-0.5 focus:border-ring focus:bg-card focus:outline-none focus:ring-4 focus:ring-ring/15 sm:h-20 sm:w-16 ${error ? 'border-red-300 bg-red-50/60' : pin[i] ? 'border-[hsl(var(--slab-edge))] bg-[hsl(var(--cell))]' : 'border-border bg-secondary/60'}`}
                     autoFocus={i === 0}
                   />
                 ))}
@@ -102,14 +102,15 @@ export default function PinLogin() {
             </div>
 
             {error && (
-              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-                <p className="text-red-600 text-sm text-center">{error}</p>
+              <div className="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 animate-fade-in" role="alert">
+                <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+                <p className="text-sm text-red-700">{error}</p>
               </div>
             )}
 
             {success && (
-              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
-                <p className="text-emerald-600 text-sm text-center flex items-center justify-center gap-2">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 animate-fade-in">
+                <p className="text-emerald-700 text-sm text-center flex items-center justify-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />
                   {success}
                 </p>
@@ -119,7 +120,7 @@ export default function PinLogin() {
             <button
               type="submit"
               disabled={loading || pin.length !== 4}
-              className="w-full bg-secondary text-foreground border border-border font-medium py-3.5 px-4 rounded-xl hover:bg-border focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-card transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-lg"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-[15px] font-medium text-primary-foreground shadow-[0_1px_2px_hsl(240_10%_10%/0.2),0_8px_20px_-8px_hsl(240_10%_10%/0.45)] transition-all duration-150 hover:bg-primary/90 focus:outline-none focus-visible:ring-4 focus-visible:ring-ring/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
@@ -134,7 +135,7 @@ export default function PinLogin() {
         <div className="mt-6 text-center">
           <button
             onClick={() => navigate('/login')}
-            className="text-muted-foreground hover:text-foreground transition-colors text-sm flex items-center gap-2 mx-auto"
+            className="mx-auto flex h-10 items-center gap-2 rounded-xl px-4 text-sm text-muted-foreground transition-colors hover:bg-card/70 hover:text-foreground"
           >
             <ArrowLeft className="w-4 h-4" />
             Обычный вход (email + пароль)

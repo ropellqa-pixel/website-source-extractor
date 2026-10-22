@@ -4,246 +4,237 @@
         Title="АБИЗ"
         WindowStyle="None" Topmost="False"
         ShowInTaskbar="False"
-        WindowStartupLocation="CenterScreen" Background="#0D0D14">
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource BgBrush}"
+        FontFamily="{DynamicResource UiFont}"
+        Foreground="{DynamicResource TextBrush}"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
 
-    <Grid>
-        <Rectangle>
-            <Rectangle.Fill>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#0D0D14" Offset="0"/>
-                    <GradientStop Color="#1A1A2E" Offset="0.5"/>
-                    <GradientStop Color="#16213E" Offset="1"/>
-                </LinearGradientBrush>
-            </Rectangle.Fill>
-        </Rectangle>
+    <Grid Background="{DynamicResource LoginBgBrush}">
+        <Ellipse Width="520" Height="520" Margin="-180,-200,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False">
+            <Ellipse.Fill>
+                <RadialGradientBrush>
+                    <GradientStop Color="#330891B2" Offset="0"/>
+                    <GradientStop Color="#000891B2" Offset="1"/>
+                </RadialGradientBrush>
+            </Ellipse.Fill>
+        </Ellipse>
+        <Ellipse Width="460" Height="460" Margin="0,0,-160,-180" HorizontalAlignment="Right" VerticalAlignment="Bottom" IsHitTestVisible="False">
+            <Ellipse.Fill>
+                <RadialGradientBrush>
+                    <GradientStop Color="#2A0E7490" Offset="0"/>
+                    <GradientStop Color="#000E7490" Offset="1"/>
+                </RadialGradientBrush>
+            </Ellipse.Fill>
+        </Ellipse>
 
-        <Ellipse Width="400" Height="400" Fill="#11FFFFFF" Margin="-100,-100,0,0"
-                 HorizontalAlignment="Left" VerticalAlignment="Top"/>
-        <Ellipse Width="300" Height="300" Fill="#11FFFFFF" Margin="0,0,-80,-80"
-                 HorizontalAlignment="Right" VerticalAlignment="Bottom"/>
+        <Border Style="{DynamicResource CardBorder}" Padding="0" CornerRadius="22"
+                HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,24,24,70">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="360"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="380"/>
+                </Grid.ColumnDefinitions>
 
-        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="400">
-            <TextBlock x:Name="AppTitleLabel" Text="АБИЗ" FontSize="56" FontWeight="Black" Foreground="#FFFFFF"
-                       HorizontalAlignment="Center" Margin="0,0,0,4"/>
-            <TextBlock Text="Автономный БИЗнес" FontSize="16" Foreground="#66FFFFFF"
-                       HorizontalAlignment="Center" Margin="0,0,0,8"/>
-            <TextBlock Text="ООО «Рассвет»" FontSize="14" Foreground="#44FFFFFF"
-                       HorizontalAlignment="Center" Margin="0,0,0,40"/>
+                <Grid Grid.Column="0" Margin="36,34,32,30">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
 
-            <PasswordBox x:Name="PasswordBox" FontSize="20" Padding="14"
-                         BorderBrush="#33FFFFFF" BorderThickness="1"
-                         Background="#1A1A2E" Foreground="White"
-                         MinHeight="56" Margin="0,0,0,12"
-                         HorizontalContentAlignment="Center"
-                         KeyDown="PasswordBox_KeyDown">
-                <PasswordBox.Resources>
-                    <Style TargetType="PasswordBox">
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="PasswordBox">
-                                    <Border Background="{TemplateBinding Background}"
-                                            BorderBrush="{TemplateBinding BorderBrush}"
-                                            BorderThickness="{TemplateBinding BorderThickness}"
-                                            CornerRadius="14">
-                                        <ScrollViewer x:Name="PART_ContentHost"
-                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                    </Style>
-                </PasswordBox.Resources>
-            </PasswordBox>
-
-            <TextBlock x:Name="StatusLabel" Foreground="#4A90D9" FontSize="14"
-                       HorizontalAlignment="Center" Margin="0,8,0,0" Height="20"
-                       Text="Ожидание ввода..."/>
-
-            <!-- Прямая трансляция камеры «Зал-Касса» без входа в систему -->
-            <Button Margin="0,22,0,0" Height="54" Cursor="Hand" Click="CameraHall_Click"
-                    Foreground="White" FontSize="17" FontWeight="SemiBold"
-                    ToolTip="Прямая трансляция камеры зала">
-                <Button.Template>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="b" Background="#26FFFFFF" CornerRadius="14" BorderBrush="#33FFFFFF" BorderThickness="1">
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <TextBlock Text="&#x1F4F9;" FontSize="20" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                                <TextBlock Text="Камера Зал" VerticalAlignment="Center" Foreground="{TemplateBinding Foreground}"/>
-                            </StackPanel>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal">
+                        <Border Width="44" Height="44" CornerRadius="12" Background="{DynamicResource PrimaryBrush}" VerticalAlignment="Center">
+                            <Grid>
+                                <TextBlock Text="А" FontSize="24" FontWeight="Bold" Foreground="White"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,2"/>
+                                <Border Height="4" Width="22" CornerRadius="2" Background="{DynamicResource Accent2Brush}"
+                                        VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+                            </Grid>
                         </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="b" Property="Background" Value="#40FFFFFF"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="b" Property="Background" Value="#55FFFFFF"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Button.Template>
-            </Button>
+                        <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="AppTitleLabel" Text="АБИЗ" FontSize="26" FontWeight="Bold"
+                                       FontFamily="{DynamicResource DisplayFont}" Foreground="{DynamicResource TextBrush}"/>
+                            <TextBlock Text="Автономный БИЗнес · ООО «Рассвет»" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+                        </StackPanel>
+                    </StackPanel>
 
-            <TextBlock x:Name="DeviceCodeLabel" Foreground="#33FFFFFF" FontSize="12"
-                       HorizontalAlignment="Center" Margin="0,24,0,0"
-                       Text="Код устройства: ---"
-                       MouseLeftButtonDown="DeviceCode_MouseLeftButtonDown"
-                       Cursor="Hand"
-                       ToolTip="Три быстрых клика — получить новый код устройства"/>
-        </StackPanel>
+                    <StackPanel Grid.Row="1" VerticalAlignment="Center" Margin="0,30,0,26">
+                        <TextBlock x:Name="GreetingLabel" Text="Добрый день" FontSize="18" Foreground="{DynamicResource MutedBrush}"/>
+                        <TextBlock x:Name="ClockText" Text="00:00" FontSize="72" FontWeight="SemiBold"
+                                   FontFamily="{DynamicResource DisplayFont}" Foreground="{DynamicResource TextBrush}"
+                                   Margin="-3,-4,0,-6"/>
+                        <TextBlock x:Name="DateText" Text="" FontSize="16" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold"/>
+                    </StackPanel>
 
-        <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,20,16">
-            <TextBlock x:Name="EmployeeInfoLabel" Foreground="#33FFFFFF" FontSize="11"
+                    <StackPanel Grid.Row="2">
+                        <Button Style="{DynamicResource SecondaryButton}" Height="50" Click="CameraHall_Click"
+                                HorizontalAlignment="Stretch" ToolTip="Прямая трансляция камеры зала">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE714;" Style="{DynamicResource IconText}" FontSize="18"
+                                           Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0"/>
+                                <TextBlock Text="Камера Зал" FontSize="15" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                        <Border Style="{DynamicResource ChipBorder}" HorizontalAlignment="Left" Margin="0,14,0,0">
+                            <TextBlock x:Name="DeviceCodeLabel" Foreground="{DynamicResource MutedBrush}" FontSize="12"
+                                       Text="Код устройства: ---"
+                                       MouseLeftButtonDown="DeviceCode_MouseLeftButtonDown"
+                                       Cursor="Hand"
+                                       ToolTip="Три быстрых клика — получить новый код устройства"/>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <Border Grid.Column="1" Width="1" Background="{DynamicResource LineBrush}" Margin="0,28"/>
+
+                <StackPanel Grid.Column="2" Margin="34,34,36,30" VerticalAlignment="Center">
+                    <TextBlock Text="Вход в систему" FontSize="22" FontWeight="SemiBold" FontFamily="{DynamicResource DisplayFont}"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="Введите пароль и нажмите Enter" FontSize="13" Foreground="{DynamicResource MutedBrush}"
+                               HorizontalAlignment="Center" Margin="0,4,0,18"/>
+
+                    <PasswordBox x:Name="PasswordBox" Style="{DynamicResource CenteredPasswordBox}"
+                                 FontSize="26" MinHeight="58" Margin="0,0,0,10"
+                                 HorizontalContentAlignment="Center"
+                                 KeyDown="PasswordBox_KeyDown"/>
+
+                    <TextBlock x:Name="StatusLabel" Foreground="{DynamicResource AccentBrush}" FontSize="13" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" MinHeight="20"
+                               Text="Ожидание ввода..." Margin="0,0,0,10"/>
+
+                    <UniformGrid Columns="3" HorizontalAlignment="Center">
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Content="1" Tag="1" Click="Keypad_Click" Focusable="False"/>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Content="2" Tag="2" Click="Keypad_Click" Focusable="False"/>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Content="3" Tag="3" Click="Keypad_Click" Focusable="False"/>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Content="4" Tag="4" Click="Keypad_Click" Focusable="False"/>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Content="5" Tag="5" Click="Keypad_Click" Focusable="False"/>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Content="6" Tag="6" Click="Keypad_Click" Focusable="False"/>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Content="7" Tag="7" Click="Keypad_Click" Focusable="False"/>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Content="8" Tag="8" Click="Keypad_Click" Focusable="False"/>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Content="9" Tag="9" Click="Keypad_Click" Focusable="False"/>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Tag="back" Click="Keypad_Click" Focusable="False"
+                                ToolTip="Стереть" Background="{DynamicResource SubtleBrush}">
+                            <TextBlock Text="&#xE750;" Style="{DynamicResource IconText}" FontSize="20"/>
+                        </Button>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Content="0" Tag="0" Click="Keypad_Click" Focusable="False"/>
+                        <Button Style="{DynamicResource PinKeyButton}" Width="64" Height="64" Margin="7" Tag="ok" Click="Keypad_Click" Focusable="False"
+                                ToolTip="Войти" Background="{DynamicResource PrimaryBrush}" Foreground="White" BorderBrush="{DynamicResource PrimaryBrush}">
+                            <TextBlock Text="&#xE72A;" Style="{DynamicResource IconText}" FontSize="20"/>
+                        </Button>
+                    </UniformGrid>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,24,20" Orientation="Horizontal">
+            <Ellipse Width="8" Height="8" Fill="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBlock x:Name="EmployeeInfoLabel" Foreground="{DynamicResource MutedBrush}" FontSize="12"
                        Text="Ожидание привязки устройства..."/>
         </StackPanel>
 
-        <TextBlock VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="20,0,0,16"
-                   Foreground="#22FFFFFF" FontSize="11"
+        <TextBlock VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="24,0,0,20"
+                   Foreground="{DynamicResource FaintBrush}" FontSize="12"
                    x:Name="VersionLabel" Text="АБИЗ Shell v3.6"/>
 
         <!-- Кнопка выхода в Windows: спрашивает пароль администратора. Нужна, чтобы из
              программы всегда был выход, даже если рабочий стол АБИЗ не открывается. -->
         <Button VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14"
-                Content="Выйти в Windows" FontSize="12" Foreground="#55FFFFFF" Cursor="Hand"
-                Padding="14,7" Click="ExitToWindows_Click" ToolTip="Требуется пароль администратора">
-            <Button.Template>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="b" Background="#14FFFFFF" CornerRadius="10" Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="#33FFFFFF"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Button.Template>
+                Style="{DynamicResource GhostButton}" FontSize="12"
+                Click="ExitToWindows_Click" ToolTip="Требуется пароль администратора">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="&#xE7E8;" Style="{DynamicResource IconText}" FontSize="12" Margin="0,0,8,0"/>
+                <TextBlock Text="Выйти в Windows" VerticalAlignment="Center"/>
+            </StackPanel>
         </Button>
 
         <!-- Экран привязки устройства: показывает 9-значный код, который директор вводит
              на сайте в Сотрудники → Устройства → Привязать. Пока не привязано — опрос раз в 5с. -->
         <Grid x:Name="BindingOverlay" Visibility="Collapsed">
-            <Rectangle Fill="#F20D0D14"/>
-            <Border HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Width="540" Background="#1A1A2E" CornerRadius="24">
-                <Border.Effect>
-                    <DropShadowEffect BlurRadius="30" ShadowDepth="0" Opacity="0.6" Color="Black"/>
-                </Border.Effect>
-                <StackPanel HorizontalAlignment="Center" Margin="40">
-                    <TextBlock Text="&#x1F511;" FontSize="56" HorizontalAlignment="Center" Margin="0,0,0,20"/>
-                    <TextBlock Text="Первый запуск — привязка устройства" FontSize="24" FontWeight="Bold"
-                               Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,12"
+            <Rectangle Fill="{DynamicResource LoginBgBrush}"/>
+            <Rectangle Fill="{DynamicResource ScrimBrush}"/>
+            <Border Style="{DynamicResource CardBorder}" CornerRadius="22" Padding="40,34"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" Width="560">
+                <StackPanel HorizontalAlignment="Stretch">
+                    <Border Width="64" Height="64" CornerRadius="32" Background="{DynamicResource AccentLightBrush}"
+                            HorizontalAlignment="Center" Margin="0,0,0,18">
+                        <TextBlock Text="&#xE8D7;" Style="{DynamicResource IconText}" FontSize="28" Foreground="{DynamicResource AccentBrush}"/>
+                    </Border>
+                    <TextBlock Text="Первый запуск — привязка устройства" FontSize="23" FontWeight="SemiBold"
+                               FontFamily="{DynamicResource DisplayFont}"
+                               HorizontalAlignment="Center" Margin="0,0,0,8"
                                TextWrapping="Wrap" TextAlignment="Center"/>
                     <TextBlock Text="Этот компьютер ещё не привязан к сотруднику. Передайте код ниже директору."
-                               FontSize="14" Foreground="#88FFFFFF" HorizontalAlignment="Center"
+                               FontSize="14" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center"
                                Margin="0,0,0,16" TextWrapping="Wrap" TextAlignment="Center"/>
-                    <Border Background="#0D0D14" CornerRadius="16" Padding="24,16" Margin="0,8,0,16">
+                    <Border Background="{DynamicResource AccentSoftBrush}" BorderBrush="{DynamicResource AccentLightBrush}" BorderThickness="1"
+                            CornerRadius="16" Padding="24,14" Margin="0,4,0,16">
                         <TextBlock x:Name="BindingCodeLabel" Text="---"
-                                   FontSize="42" FontWeight="Black" Foreground="#4A90D9"
-                                   HorizontalAlignment="Center" FontFamily="Consolas"
+                                   FontSize="42" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}"
+                                   HorizontalAlignment="Center" FontFamily="{DynamicResource MonoFont}"
                                    MouseLeftButtonDown="DeviceCode_MouseLeftButtonDown"
                                    Cursor="Hand"/>
                     </Border>
                     <TextBlock Text="Директор вводит этот код на сайте anod.saou.ru: Сотрудники → Устройства → Привязать"
-                               FontSize="14" Foreground="#66FFFFFF" TextWrapping="Wrap"
-                               TextAlignment="Center" Margin="0,0,0,16"/>
-                    <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Margin="0,0,0,8">
-                        <Ellipse Width="10" Height="10" Fill="#4A90D9" Margin="0,0,8,0">
+                               FontSize="13" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"
+                               TextAlignment="Center" Margin="0,0,0,14"/>
+                    <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Margin="0,0,0,4">
+                        <Ellipse Width="16" Height="16" Stroke="{DynamicResource Accent2Brush}" StrokeThickness="2.5"
+                                 StrokeDashArray="3 2" Margin="0,0,10,0" VerticalAlignment="Center">
                             <Ellipse.RenderTransform>
-                                <RotateTransform x:Name="SpinnerRot" CenterX="5" CenterY="5"/>
+                                <RotateTransform x:Name="SpinnerRot" CenterX="8" CenterY="8"/>
                             </Ellipse.RenderTransform>
                         </Ellipse>
                         <TextBlock x:Name="BindingStatusLabel" Text="Ожидание привязки..."
-                                   FontSize="14" Foreground="#4A90D9" FontWeight="Medium"/>
+                                   FontSize="14" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBlock x:Name="BindingPcName" Text="" FontSize="12" Foreground="#44FFFFFF"
-                               HorizontalAlignment="Center" Margin="0,12,0,0"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,0">
-                        <Button Content="Проверить привязку" FontSize="15" FontWeight="Bold" Foreground="White"
-                                Padding="22,12" Margin="0,0,10,0" Cursor="Hand" Click="CheckBindingNow_Click">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border x:Name="b" Background="#4A90D9" CornerRadius="12" Padding="{TemplateBinding Padding}">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                    <ControlTemplate.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="b" Property="Background" Value="#5AA0E9"/>
-                                        </Trigger>
-                                    </ControlTemplate.Triggers>
-                                </ControlTemplate>
-                            </Button.Template>
+                    <TextBlock x:Name="BindingPcName" Text="" FontSize="12" Foreground="{DynamicResource FaintBrush}"
+                               HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,18,0,0">
+                        <Button Style="{DynamicResource PrimaryButton}" Margin="0,0,10,0" Padding="22,12" Click="CheckBindingNow_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE72C;" Style="{DynamicResource IconText}" FontSize="14" Margin="0,0,8,0"/>
+                                <TextBlock Text="Проверить привязку" VerticalAlignment="Center"/>
+                            </StackPanel>
                         </Button>
-                        <Button Content="Новый код" FontSize="15" Foreground="White"
-                                Padding="22,12" Cursor="Hand" Click="NewCode_Click">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border x:Name="b" Background="#333344" CornerRadius="12" Padding="{TemplateBinding Padding}">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                    <ControlTemplate.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="b" Property="Background" Value="#444458"/>
-                                        </Trigger>
-                                    </ControlTemplate.Triggers>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
+                        <Button Style="{DynamicResource SecondaryButton}" Padding="22,12" Content="Новый код" Click="NewCode_Click"/>
                     </StackPanel>
+                    <Border Height="1" Background="{DynamicResource LineBrush}" Margin="0,22,0,14"/>
                     <TextBlock Text="Пароль администратора открывает программу и без привязки"
-                               FontSize="12" Foreground="#44FFFFFF" HorizontalAlignment="Center" Margin="0,14,0,0"/>
-                    <PasswordBox x:Name="BindingAdminPassword" Width="260" FontSize="16" Padding="8" Margin="0,6,0,0"
-                                 Background="#0D0D14" Foreground="White" BorderBrush="#33FFFFFF"
+                               FontSize="12" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center"/>
+                    <PasswordBox x:Name="BindingAdminPassword" Width="280" FontSize="16" Margin="0,8,0,0"
                                  HorizontalContentAlignment="Center" KeyDown="BindingAdminPassword_KeyDown"/>
                 </StackPanel>
             </Border>
         </Grid>
 
         <Grid x:Name="NetworkOverlay" Visibility="Collapsed">
-            <Rectangle Fill="#EE0A0A14"/>
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="480">
-                <TextBlock Text="&#x26A0;" FontSize="48" Foreground="#FF6B6B"
-                           HorizontalAlignment="Center" Margin="0,0,0,16"/>
-                <TextBlock Text="Сеть недоступна!" FontSize="28" FontWeight="Bold" Foreground="#FF6B6B"
-                           HorizontalAlignment="Center" Margin="0,0,0,12"/>
-                <TextBlock Text="Интернет-соединение пропало. Ожидаем восстановление сети."
-                           FontSize="15" Foreground="#88FFFFFF" TextWrapping="Wrap"
-                           TextAlignment="Center" Margin="0,0,0,8"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                    <Button Content="Обновить" FontSize="16" FontWeight="Bold" Foreground="White"
-                            Background="#4A6FA5" BorderThickness="0" Padding="24,12"
-                            Margin="0,0,12,0" Cursor="Hand" Click="RetryNetwork_Click">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="b" Background="#4A6FA5" CornerRadius="14">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="b" Property="Background" Value="#5A7FB5"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
-                    <Button Content="Ввести пароль администратора" FontSize="14" FontWeight="Bold" Foreground="White"
-                            Background="#D32F2F" BorderThickness="0" Padding="20,12"
-                            Cursor="Hand" Click="CallAdmin_Click">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="b" Background="#D32F2F" CornerRadius="14">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="b" Property="Background" Value="#E53F3F"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
+            <Rectangle Fill="{DynamicResource ScrimBrush}"/>
+            <Border Style="{DynamicResource CardBorder}" CornerRadius="22" Padding="40,34"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" Width="520">
+                <StackPanel>
+                    <Border Width="64" Height="64" CornerRadius="32" Background="{DynamicResource DangerLightBrush}"
+                            HorizontalAlignment="Center" Margin="0,0,0,16">
+                        <TextBlock Text="&#xEB55;" Style="{DynamicResource IconText}" FontSize="28" Foreground="{DynamicResource DangerBrush}"/>
+                    </Border>
+                    <TextBlock Text="Сеть недоступна!" FontSize="26" FontWeight="SemiBold" FontFamily="{DynamicResource DisplayFont}"
+                               Foreground="{DynamicResource TextBrush}" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                    <TextBlock Text="Интернет-соединение пропало. Ожидаем восстановление сети."
+                               FontSize="14" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"
+                               TextAlignment="Center" Margin="0,0,0,22"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Button Style="{DynamicResource PrimaryButton}" Padding="24,12" Margin="0,0,10,0" Click="RetryNetwork_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE72C;" Style="{DynamicResource IconText}" FontSize="14" Margin="0,0,8,0"/>
+                                <TextBlock Text="Обновить" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Style="{DynamicResource DangerSoftButton}" Padding="20,12"
+                                Content="Ввести пароль администратора" Click="CallAdmin_Click"/>
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
+            </Border>
         </Grid>
     </Grid>
 </Window>

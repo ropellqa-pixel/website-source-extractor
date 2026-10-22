@@ -27,16 +27,16 @@ export default function StatsRow({ canSeeEmployees }: { canSeeEmployees: boolean
         const disabled = s.table === 'profiles' && !canSeeEmployees;
         const body = (
           <>
-            <Icon name={s.icon} size={18} strokeWidth={1.5} className="text-muted-foreground" />
-            <p className="mt-6 font-head text-[26px] font-medium tracking-[-0.03em]">{counts[s.table] ?? '—'}</p>
+            <span className="icon-tile h-10 w-10"><Icon name={s.icon} size={18} strokeWidth={1.7} /></span>
+            <p className="mt-5 font-head text-[26px] font-medium tabular-nums tracking-[-0.03em]">{counts[s.table] ?? '—'}</p>
             <p className="text-[13px] text-muted-foreground">{s.label}</p>
           </>
         );
-        const cls = 'reveal-up block rounded-[22px] border border-border bg-card p-5 text-left transition-shadow';
+        const cls = 'reveal-up surface block p-5 text-left';
         return disabled ? (
           <div key={s.table} className={cls} style={{ animationDelay: `${0.5 + i * 0.07}s` }}>{body}</div>
         ) : (
-          <Link key={s.table} to={s.to} className={`${cls} hover:shadow-[0_12px_30px_-18px_hsl(var(--logo-2)/0.35)]`} style={{ animationDelay: `${0.5 + i * 0.07}s` }}>
+          <Link key={s.table} to={s.to} className={`${cls} surface-hover`} style={{ animationDelay: `${0.5 + i * 0.07}s` }}>
             {body}
           </Link>
         );

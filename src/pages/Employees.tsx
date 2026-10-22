@@ -496,7 +496,7 @@ export default function Employees() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </a>
-              <h1 className="text-xl font-bold text-foreground">Сотрудники</h1>
+              <h1 className="page-title text-xl text-foreground">Сотрудники</h1>
             </div>
             <div className="flex items-center gap-2">
               <button

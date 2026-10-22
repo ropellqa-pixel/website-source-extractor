@@ -111,7 +111,7 @@ export default function Skud() {
     <div className="flex h-full flex-col gap-4 p-4 md:p-6">
       <div className="flex flex-wrap items-center gap-3">
         <div className="mr-auto">
-          <h1 className="text-2xl font-semibold tracking-tight">СКУД</h1>
+          <h1 className="page-title text-[22px] text-foreground sm:text-2xl">СКУД</h1>
           <p className="text-sm text-muted-foreground">Контроль доступа на склад</p>
         </div>
         <button onClick={() => isManager && setCtrlOpen(true)}

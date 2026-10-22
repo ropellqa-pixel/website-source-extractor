@@ -536,7 +536,7 @@ export default function Collection() {
               </button>
               <div className="flex items-center gap-2">
                 <Coins className="w-6 h-6 text-amber-600" />
-                <h1 className="text-lg font-bold text-foreground">ИНКАССАЦИЯ</h1>
+                <h1 className="page-title text-lg text-foreground">ИНКАССАЦИЯ</h1>
               </div>
               {monthLocked && (
                 <span className="flex items-center gap-1 px-2 py-0.5 bg-red-500/10 border border-red-500/30 rounded-md text-red-600 text-xs font-medium">

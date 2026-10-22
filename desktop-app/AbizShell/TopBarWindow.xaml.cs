@@ -34,6 +34,9 @@ namespace AbizShell
             _shell = shell;
             _isAdmin = isAdmin;
             AdminBtn.Visibility = isAdmin ? Visibility.Visible : Visibility.Collapsed;
+            string userName = !string.IsNullOrWhiteSpace(shell.EmployeeName) ? shell.EmployeeName : isAdmin ? "Администратор" : "";
+            UserChipText.Text = userName;
+            UserChip.Visibility = string.IsNullOrEmpty(userName) ? Visibility.Collapsed : Visibility.Visible;
 
             Width = SystemParameters.PrimaryScreenWidth;
             if (!Edition.Kiosk)
@@ -137,7 +140,8 @@ namespace AbizShell
 
         public void SetOnline(bool online)
         {
-            StatusDot.Fill = new SolidColorBrush(online ? Color.FromRgb(0x28, 0xC8, 0x40) : Color.FromRgb(0xFF, 0x6B, 0x6B));
+            StatusDot.Fill = new SolidColorBrush(online ? Color.FromRgb(0x16, 0xA3, 0x4A) : Color.FromRgb(0xDC, 0x26, 0x26));
+            NetworkBtnIcon.Text = online ? "\uE701" : "\uEB55";
             StatusDot.ToolTip = online ? "Сеть: подключено" : "Сеть: нет соединения";
         }
 
@@ -162,13 +166,13 @@ namespace AbizShell
         private bool _volumeUpdating;
 
         private static string VolumeIcon(int v, bool muted) =>
-            muted || v == 0 ? "\U0001F507" : v < 34 ? "\U0001F508" : v < 67 ? "\U0001F509" : "\U0001F50A";
+            muted || v == 0 ? "\uE74F" : v < 34 ? "\uE993" : v < 67 ? "\uE994" : "\uE995";
 
         private void RefreshVolumeIcon()
         {
             int v = AudioManager.GetVolume();
             bool muted = AudioManager.GetMute();
-            VolumeBtnIcon.Text = v < 0 ? "\U0001F507" : VolumeIcon(v, muted);
+            VolumeBtnIcon.Text = v < 0 ? "\uE74F" : VolumeIcon(v, muted);
             VolumeBtn.ToolTip = v < 0 ? "Звуковое устройство не найдено" : muted ? "Звук выключен" : $"Громкость: {v}%";
         }
 
@@ -242,7 +246,7 @@ namespace AbizShell
         private void FillNetworkInfo()
         {
             NetAdaptersList.Children.Clear();
-            var gray = new SolidColorBrush(Color.FromArgb(0xAA, 255, 255, 255));
+            var gray = new SolidColorBrush(Color.FromRgb(0x6E, 0x6E, 0x73));
             try
             {
                 var adapters = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
@@ -277,10 +281,10 @@ namespace AbizShell
         private async System.Threading.Tasks.Task CheckInternetAsync()
         {
             NetStateLabel.Text = "Проверяю связь с сервером...";
-            NetStateDot.Fill = new SolidColorBrush(Color.FromRgb(0xFF, 0xC1, 0x07));
+            NetStateDot.Fill = new SolidColorBrush(Color.FromRgb(0xF5, 0x9E, 0x0B));
             bool online = await AnodBizClient.CheckNetworkAsync();
             NetStateLabel.Text = online ? "Интернет есть, сервер АБИЗ доступен" : "Нет связи с сервером АБИЗ";
-            NetStateDot.Fill = new SolidColorBrush(online ? Color.FromRgb(0x28, 0xC8, 0x40) : Color.FromRgb(0xFF, 0x6B, 0x6B));
+            NetStateDot.Fill = new SolidColorBrush(online ? Color.FromRgb(0x16, 0xA3, 0x4A) : Color.FromRgb(0xDC, 0x26, 0x26));
             SetOnline(online);
         }
 
@@ -359,7 +363,7 @@ namespace AbizShell
                 WindowsList.Children.Add(new TextBlock
                 {
                     Text = "Других открытых программ нет. Откройте их через «Меню».",
-                    Foreground = new SolidColorBrush(Color.FromArgb(0x88, 255, 255, 255)), FontSize = 12,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x6E, 0x6E, 0x73)), FontSize = 12,
                     TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 8, 4, 0),
                 });
 
@@ -374,9 +378,9 @@ namespace AbizShell
 
             var open = new Button
             {
-                Style = (Style)FindResource("LabeledBtn"),
+                Style = (Style)FindResource("WindowRowBtn"),
                 HorizontalContentAlignment = HorizontalAlignment.Left,
-                Height = 40,
+                Height = 44,
                 Margin = new Thickness(0),
                 Content = new StackPanel
                 {
@@ -393,7 +397,7 @@ namespace AbizShell
 
             if (close != null)
             {
-                var x = new Button { Style = (Style)FindResource("BarBtn"), Content = "✕", FontSize = 13, Height = 40, Margin = new Thickness(4, 0, 0, 0), ToolTip = "Закрыть программу" };
+                var x = new Button { Style = (Style)FindResource("IconBarBtn"), Content = "\uE711", FontSize = 11, Height = 40, Margin = new Thickness(4, 0, 0, 0), ToolTip = "Закрыть программу", Foreground = new SolidColorBrush(Color.FromRgb(0xDC, 0x26, 0x26)) };
                 x.Click += (s, e) => close();
                 Grid.SetColumn(x, 1);
                 grid.Children.Add(x);
@@ -420,11 +424,11 @@ namespace AbizShell
                     LayoutTransform = new ScaleTransform(1.3, 1.3),
                 };
                 var text = new StackPanel();
-                text.Children.Add(new TextBlock { Text = item.Title, Foreground = Brushes.White, FontSize = 13, FontWeight = FontWeights.SemiBold });
+                text.Children.Add(new TextBlock { Text = item.Title, Foreground = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x20)), FontSize = 13, FontWeight = FontWeights.SemiBold });
                 string sub = !item.Installed
                     ? "Не удалось подключить: " + (string.IsNullOrEmpty(item.Error) ? "браузер ещё загружается" : item.Error)
                     : item.Hint;
-                text.Children.Add(new TextBlock { Text = sub, Foreground = new SolidColorBrush(Color.FromArgb(0x88, 255, 255, 255)), FontSize = 11, TextWrapping = TextWrapping.Wrap, MaxWidth = 340 });
+                text.Children.Add(new TextBlock { Text = sub, Foreground = new SolidColorBrush(Color.FromRgb(0x6E, 0x6E, 0x73)), FontSize = 11, TextWrapping = TextWrapping.Wrap, MaxWidth = 340 });
 
                 box.Click += async (s, a) =>
                 {
@@ -437,10 +441,19 @@ namespace AbizShell
                     if (ok) _shell.ReloadPage();
                 };
 
-                var row = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
+                var row = new DockPanel();
                 row.Children.Add(box);
                 row.Children.Add(text);
-                ExtensionsList.Children.Add(row);
+                ExtensionsList.Children.Add(new Border
+                {
+                    Child = row,
+                    Background = new SolidColorBrush(Color.FromRgb(0xF7, 0xF7, 0xFA)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(0xE4, 0xE4, 0xEA)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(12, 10, 12, 10),
+                    Margin = new Thickness(0, 0, 0, 8),
+                });
             }
             ExtensionsPopup.IsOpen = true;
         }

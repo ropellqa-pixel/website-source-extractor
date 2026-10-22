@@ -32,6 +32,12 @@ namespace AbizShell
             InitializeComponent();
             Loaded += MainWindow_Loaded;
 
+            UpdateClockUi();
+            _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _clockTimer.Tick += (s, e) => UpdateClockUi();
+            _clockTimer.Start();
+            Closed += (s, e) => _clockTimer.Stop();
+
             if (Edition.Kiosk)
             {
                 // Экран входа — точно на весь монитор; заодно сбрасываем область экрана
@@ -54,7 +60,7 @@ namespace AbizShell
                 Height = 720;
                 Title = Edition.Name;
                 AppTitleLabel.Text = Edition.Name;
-                AppTitleLabel.FontSize = 46;
+                AppTitleLabel.FontSize = 26;
                 VersionLabel.Text = Edition.Name + " v3.2";
                 Closing += (s, e) =>
                 {
@@ -68,6 +74,36 @@ namespace AbizShell
         }
 
         private bool _openingNext;
+        private readonly DispatcherTimer _clockTimer;
+
+        private void UpdateClockUi()
+        {
+            var now = DateTime.Now;
+            ClockText.Text = now.ToString("HH:mm");
+            DateText.Text = now.ToString("dddd, d MMMM", new System.Globalization.CultureInfo("ru-RU"));
+            GreetingLabel.Text = now.Hour < 5 ? "Доброй ночи" : now.Hour < 12 ? "Доброе утро" : now.Hour < 18 ? "Добрый день" : "Добрый вечер";
+        }
+
+        private void Keypad_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not System.Windows.Controls.Button b || b.Tag is not string key) return;
+            if (key == "back")
+            {
+                string p = PasswordBox.Password;
+                if (p.Length > 0) PasswordBox.Password = p.Substring(0, p.Length - 1);
+            }
+            else if (key == "ok")
+            {
+                var source = PresentationSource.FromVisual(PasswordBox);
+                if (source == null) return;
+                PasswordBox.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, Key.Enter) { RoutedEvent = Keyboard.KeyDownEvent });
+            }
+            else
+            {
+                PasswordBox.Password += key;
+            }
+            PasswordBox.Focus();
+        }
 
         private void CameraHall_Click(object sender, RoutedEventArgs e)
         {
@@ -93,7 +129,7 @@ namespace AbizShell
                 _networkTimer?.Start();
                 _spinnerTimer?.Start();
                 if (!_isLinked) _devicePollTimer?.Start();
-                SetStatus("Не удалось открыть камеру", Color.FromRgb(0xFF, 0x6B, 0x6B));
+                SetStatus("Не удалось открыть камеру", Color.FromRgb(0xDC, 0x26, 0x26));
                 MessageBox.Show(this, "Не удалось открыть окно камеры:\n" + ex.Message, Edition.Name,
                     MessageBoxButton.OK, MessageBoxImage.Warning);
             }
@@ -174,7 +210,7 @@ namespace AbizShell
         private void ApplyUpdateNow()
         {
             if (!Updater.ApplyAndRestart()) return;
-            SetStatus("Устанавливается обновление " + Updater.StagedVersion + "...", Colors.White);
+            SetStatus("Устанавливается обновление " + Updater.StagedVersion + "...", Color.FromRgb(0x1E, 0x1E, 0x20));
             ExitToWindows();
         }
 
@@ -200,7 +236,7 @@ namespace AbizShell
             {
                 BindingOverlay.Visibility = Visibility.Collapsed;
                 EmployeeInfoLabel.Text = "Устройство привязано";
-                SetStatus("Введите пароль для входа", Color.FromRgb(0x4A, 0x90, 0xD9));
+                SetStatus("Введите пароль для входа", Color.FromRgb(0x0E, 0x74, 0x90));
                 PasswordBox.Focus();
             }
             else
@@ -243,7 +279,7 @@ namespace AbizShell
                         RecorderService.Start(_apiToken);
                         _devicePollTimer?.Stop();
                         UpdateLinkUi();
-                        SetStatus("Устройство привязано. Введите пароль", Colors.LightGreen);
+                        SetStatus("Устройство привязано. Введите пароль", Color.FromRgb(0x16, 0xA3, 0x4A));
                         break;
                     case "reset":
                         // Сервер не знает этот код (например, его выдумала старая версия
@@ -327,7 +363,7 @@ namespace AbizShell
             NetworkOverlay.Visibility = Visibility.Collapsed;
             BindingOverlay.Visibility = Visibility.Collapsed;
             PasswordBox.Focus();
-            SetStatus("Введите пароль администратора", Colors.White);
+            SetStatus("Введите пароль администратора", Color.FromRgb(0x1E, 0x1E, 0x20));
         }
 
         // --- Вход ---
@@ -353,14 +389,14 @@ namespace AbizShell
 
             if (!_isLinked || string.IsNullOrEmpty(_apiToken))
             {
-                SetStatus("Устройство не привязано — обратитесь к директору", Color.FromRgb(0xFF, 0x6B, 0x6B));
+                SetStatus("Устройство не привязано — обратитесь к директору", Color.FromRgb(0xDC, 0x26, 0x26));
                 PasswordBox.Clear();
                 UpdateLinkUi();
                 return;
             }
 
             _busy = true;
-            SetStatus("Проверка пароля...", Colors.White);
+            SetStatus("Проверка пароля...", Color.FromRgb(0x1E, 0x1E, 0x20));
             var (result, fullName) = await AnodBizClient.DeviceSignInAsync(_apiToken, pwd);
             _busy = false;
 
@@ -380,10 +416,10 @@ namespace AbizShell
                     BindingStatusLabel.Text = "Устройство отвязано в личном кабинете. Выдан новый код.";
                     break;
                 case AnodBizClient.SignInResult.NoNetwork:
-                    SetStatus("Нет связи с сервером — попробуйте ещё раз", Color.FromRgb(0xFF, 0x6B, 0x6B));
+                    SetStatus("Нет связи с сервером — попробуйте ещё раз", Color.FromRgb(0xDC, 0x26, 0x26));
                     break;
                 default:
-                    SetStatus("Неверный пароль", Color.FromRgb(0xFF, 0x6B, 0x6B));
+                    SetStatus("Неверный пароль", Color.FromRgb(0xDC, 0x26, 0x26));
                     break;
             }
             PasswordBox.Clear();
@@ -417,7 +453,7 @@ namespace AbizShell
                 // Рабочий стол не открылся — остаёмся на экране входа, а не в пустом окне.
                 TaskbarManager.Restore();
                 _networkTimer?.Start();
-                SetStatus("Ошибка запуска рабочего стола", Color.FromRgb(0xFF, 0x6B, 0x6B));
+                SetStatus("Ошибка запуска рабочего стола", Color.FromRgb(0xDC, 0x26, 0x26));
                 MessageBox.Show(this,
                     "Не удалось открыть рабочий стол АБИЗ:\n" + ex.Message +
                     "\n\nЧтобы выйти в Windows, введите exit: и пароль администратора без пробела.",
@@ -433,7 +469,7 @@ namespace AbizShell
             if (string.IsNullOrEmpty(pwd)) return;
             if (pwd != AdminPassword)
             {
-                SetStatus("Неверный пароль администратора", Color.FromRgb(0xFF, 0x6B, 0x6B));
+                SetStatus("Неверный пароль администратора", Color.FromRgb(0xDC, 0x26, 0x26));
                 return;
             }
             ExitToWindows();

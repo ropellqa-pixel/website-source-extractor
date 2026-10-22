@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="АБИЗ" WindowStyle="None" ResizeMode="NoResize"
-        Topmost="False" Background="#1E1E2E" ShowInTaskbar="False">
+        Topmost="False" Background="{DynamicResource BgBrush}" ShowInTaskbar="False"
+        FontFamily="{DynamicResource UiFont}" Foreground="{DynamicResource TextBrush}" UseLayoutRounding="True">
 
     <!--
       Главное окно оболочки. ВАЖНО:
@@ -17,17 +18,24 @@
         <Style x:Key="QA" TargetType="Button">
             <Setter Property="Margin" Value="3"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="b" Background="#22FFFFFF" CornerRadius="8">
-                            <TextBlock Text="{TemplateBinding Content}" FontSize="12"
-                                       Foreground="#CCFFFFFF" Padding="8,5"
+                        <Border x:Name="b" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource LineBrush}"
+                                BorderThickness="1" CornerRadius="999">
+                            <TextBlock x:Name="t" Text="{TemplateBinding Content}" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextBrush}" Padding="12,6"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="b" Property="Background" Value="#44FFFFFF"/>
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource AccentLightBrush}"/>
+                                <Setter TargetName="t" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentLightBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -36,20 +44,26 @@
         </Style>
 
         <Style x:Key="OvlBtn" TargetType="Button">
-            <Setter Property="FontSize" Value="16"/>
-            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="{DynamicResource PrimaryBrush}"/>
             <Setter Property="Padding" Value="24,12"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="14" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border x:Name="b" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="12" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="b" Property="Opacity" Value="0.85"/>
+                                <Setter TargetName="b" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="b" Property="Opacity" Value="0.75"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -58,34 +72,46 @@
         </Style>
 
         <Style x:Key="AppTile" TargetType="Button">
-            <Setter Property="Width" Value="140"/>
-            <Setter Property="Height" Value="140"/>
+            <Setter Property="Width" Value="148"/>
+            <Setter Property="Height" Value="148"/>
             <Setter Property="Margin" Value="10"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}"/>
             <Setter Property="ToolTipService.InitialShowDelay" Value="300"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="28"
-                                RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform>
+                        <Grid RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform>
                                 <ScaleTransform x:Name="scale" ScaleX="1" ScaleY="1"/>
-                            </Border.RenderTransform>
-                            <Border.Effect>
-                                <DropShadowEffect BlurRadius="16" ShadowDepth="4" Opacity="0.35" Color="Black"/>
-                            </Border.Effect>
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
+                            </Grid.RenderTransform>
+                            <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="24">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="20" ShadowDepth="3" Direction="270" Opacity="0.14" Color="#000000"/>
+                                </Border.Effect>
+                            </Border>
+                            <Border CornerRadius="24" BorderThickness="1" BorderBrush="#33FFFFFF">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#26FFFFFF" Offset="0"/>
+                                        <GradientStop Color="#00FFFFFF" Offset="0.55"/>
+                                        <GradientStop Color="#14000000" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Trigger.EnterActions>
                                     <BeginStoryboard>
                                         <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="scale" Storyboard.TargetProperty="ScaleX" To="1.08" Duration="0:0:0.12"/>
-                                            <DoubleAnimation Storyboard.TargetName="scale" Storyboard.TargetProperty="ScaleY" To="1.08" Duration="0:0:0.12"/>
+                                            <DoubleAnimation Storyboard.TargetName="scale" Storyboard.TargetProperty="ScaleX" To="1.05" Duration="0:0:0.12"/>
+                                            <DoubleAnimation Storyboard.TargetName="scale" Storyboard.TargetProperty="ScaleY" To="1.05" Duration="0:0:0.12"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </Trigger.EnterActions>
@@ -98,6 +124,9 @@
                                     </BeginStoryboard>
                                 </Trigger.ExitActions>
                             </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="b" Property="Opacity" Value="0.85"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -109,12 +138,9 @@
         <wv2:WebView2CompositionControl x:Name="MainBrowser"/>
 
         <!-- Календарь и заметки -->
-        <Border x:Name="SidePanel" Width="290" HorizontalAlignment="Right" VerticalAlignment="Stretch"
-                Margin="0,8,8,8" Background="#F21A1A2E" CornerRadius="16" Visibility="Collapsed">
-            <Border.Effect>
-                <DropShadowEffect BlurRadius="14" ShadowDepth="0" Opacity="0.4" Color="Black"/>
-            </Border.Effect>
-            <Grid Margin="14">
+        <Border x:Name="SidePanel" Width="312" HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                Margin="0,10,12,12" Style="{DynamicResource CardBorder}" Padding="0" Visibility="Collapsed">
+            <Grid Margin="16">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
@@ -122,21 +148,29 @@
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                <DockPanel Grid.Row="0" Margin="0,0,0,10">
-                    <Button DockPanel.Dock="Right" Content="&#x2715;" Width="26" Height="26" Background="Transparent"
-                            Foreground="#AAFFFFFF" BorderThickness="0" Cursor="Hand" Click="CloseSidePanel_Click"/>
-                    <TextBlock Text="Календарь и заметки" FontSize="15" FontWeight="Bold" Foreground="White"/>
+                <DockPanel Grid.Row="0" Margin="0,0,0,12">
+                    <Button DockPanel.Dock="Right" Style="{DynamicResource IconButton}" Content="&#xE711;" Width="30" Height="30" FontSize="11"
+                            Click="CloseSidePanel_Click" ToolTip="Закрыть"/>
+                    <Border Width="30" Height="30" CornerRadius="9" Background="{DynamicResource AccentLightBrush}" Margin="0,0,10,0">
+                        <TextBlock Text="&#xE787;" Style="{DynamicResource IconText}" FontSize="14" Foreground="{DynamicResource AccentBrush}"/>
+                    </Border>
+                    <TextBlock Text="Календарь и заметки" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </DockPanel>
-                <Calendar Grid.Row="1" x:Name="SideCalendar" FirstDayOfWeek="Monday" SelectionMode="SingleDate"
-                          SelectedDatesChanged="Calendar_SelectedDatesChanged" Margin="0,0,0,6"/>
-                <TextBlock Grid.Row="2" x:Name="SelectedDateLabel" Text="Сегодня" FontSize="12" Foreground="#88FFFFFF" Margin="0,0,0,6"/>
-                <Border Grid.Row="3" Background="#0D0D14" CornerRadius="8" BorderBrush="#33FFFFFF" BorderThickness="1">
-                    <TextBox x:Name="NotesBox" AcceptsReturn="True" TextWrapping="Wrap"
-                             Background="Transparent" Foreground="White" CaretBrush="White" BorderThickness="0" Padding="8"
-                             FontSize="13" MinHeight="60" TextChanged="NotesBox_TextChanged"
-                             VerticalScrollBarVisibility="Auto" ToolTip="Заметки сохраняются автоматически"/>
+                <Border Grid.Row="1" Background="{DynamicResource SubtleBrush}" CornerRadius="12" Padding="4" Margin="0,0,0,8"
+                        BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
+                    <Viewbox Stretch="Uniform" StretchDirection="Both">
+                        <Calendar x:Name="SideCalendar" FirstDayOfWeek="Monday" SelectionMode="SingleDate"
+                                  BorderThickness="0" Background="Transparent"
+                                  SelectedDatesChanged="Calendar_SelectedDatesChanged"/>
+                    </Viewbox>
                 </Border>
-                <WrapPanel Grid.Row="4" HorizontalAlignment="Center" Margin="0,10,0,0">
+                <TextBlock Grid.Row="2" x:Name="SelectedDateLabel" Text="Сегодня" FontSize="12" FontWeight="SemiBold"
+                           Foreground="{DynamicResource AccentBrush}" Margin="2,0,0,6"/>
+                <TextBox Grid.Row="3" x:Name="NotesBox" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalContentAlignment="Top" Padding="10,8"
+                         FontSize="13" MinHeight="60" TextChanged="NotesBox_TextChanged"
+                         VerticalScrollBarVisibility="Auto" ToolTip="Заметки сохраняются автоматически"/>
+                <WrapPanel Grid.Row="4" HorizontalAlignment="Center" Margin="0,12,0,0">
                     <Button Style="{StaticResource QA}" Content="Табель" Click="QuickAction_Click" Tag="schedule"/>
                     <Button Style="{StaticResource QA}" Content="Зарплата" Click="QuickAction_Click" Tag="salary"/>
                     <Button Style="{StaticResource QA}" Content="Касса" Click="QuickAction_Click" Tag="collection"/>
@@ -148,20 +182,22 @@
 
         <!-- Меню кнопок (Launchpad). Открывается кнопкой «Меню», Tab или 2× Пробел. -->
         <Grid x:Name="OverlayGrid" Visibility="Collapsed">
-            <Rectangle Fill="#E60A0A14" MouseLeftButtonDown="OverlayBackground_MouseDown"/>
+            <Rectangle Fill="#F0F3F3F6" MouseLeftButtonDown="OverlayBackground_MouseDown"/>
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalAlignment="Center" VerticalAlignment="Center"
                           Margin="40,40,40,70">
                 <WrapPanel x:Name="TilesPanel" HorizontalAlignment="Center" MaxWidth="1100"/>
             </ScrollViewer>
-            <TextBlock Text="Esc или клик по пустому месту — закрыть" Foreground="#77FFFFFF"
-                       FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,30"/>
+            <Border Style="{DynamicResource ChipBorder}" Background="{DynamicResource CardBrush}"
+                    HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,26" Padding="14,6" IsHitTestVisible="False">
+                <TextBlock Text="Esc или клик по пустому месту — закрыть" Foreground="{DynamicResource MutedBrush}" FontSize="12"/>
+            </Border>
         </Grid>
 
         <!-- Редактор кнопок (только админ) -->
         <Grid x:Name="EditorOverlay" Visibility="Collapsed">
-            <Rectangle Fill="#F00A0A14"/>
-            <Border Width="900" MaxHeight="680" HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Background="#1A1A2E" CornerRadius="20" Padding="24">
+            <Rectangle Fill="{DynamicResource ScrimBrush}"/>
+            <Border Width="980" MaxHeight="700" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Style="{DynamicResource CardBorder}" CornerRadius="20" Padding="26">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -170,63 +206,73 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <DockPanel Grid.Row="0" Margin="0,0,0,6">
-                        <Button DockPanel.Dock="Right" Content="&#x2715;" Width="28" Height="28" Background="Transparent"
-                                Foreground="#AAFFFFFF" BorderThickness="0" Click="CloseEditor_Click" ToolTip="Закрыть"/>
-                        <TextBlock Text="Кнопки меню" FontSize="18" FontWeight="Bold" Foreground="White"/>
+                        <Button DockPanel.Dock="Right" Style="{DynamicResource IconButton}" Content="&#xE711;" FontSize="12"
+                                Click="CloseEditor_Click" ToolTip="Закрыть"/>
+                        <TextBlock Text="Кнопки меню" FontSize="20" FontWeight="SemiBold" FontFamily="{DynamicResource DisplayFont}"
+                                   VerticalAlignment="Center"/>
                     </DockPanel>
-                    <TextBlock Grid.Row="1" Foreground="#88FFFFFF" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,12"
+                    <TextBlock Grid.Row="1" Foreground="{DynamicResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,14"
                                Text="Название · Сайт или программа · Цвет · Тип (Сайт / Программа). Для программы нажмите «Обзор» и выберите .exe-файл. Изменения сохраняются для всех компьютеров."/>
                     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="EditorRowsPanel"/>
                     </ScrollViewer>
                     <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-                        <Button Content="+ Добавить кнопку" FontSize="13" Padding="14,8" Margin="0,0,8,0"
-                                Background="#333344" Foreground="White" BorderThickness="0" Cursor="Hand" Click="AddButton_Click"/>
-                        <Button Content="Сохранить" FontSize="13" Padding="14,8"
-                                Background="#4A90D9" Foreground="White" BorderThickness="0" Cursor="Hand" Click="SaveButtons_Click"/>
+                        <Button Style="{DynamicResource SecondaryButton}" Content="+ Добавить кнопку" Margin="0,0,8,0" Click="AddButton_Click"/>
+                        <Button Style="{DynamicResource PrimaryButton}" Content="Сохранить" Click="SaveButtons_Click"/>
                     </StackPanel>
                 </Grid>
             </Border>
         </Grid>
 
         <!-- Уведомление -->
-        <Border x:Name="NotificationPanel" Width="300" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                Margin="0,0,16,16" Background="#EE1A1A2E" CornerRadius="10" Visibility="Collapsed" Padding="12">
-            <Border.Effect>
-                <DropShadowEffect BlurRadius="12" ShadowDepth="0" Opacity="0.4" Color="Black"/>
-            </Border.Effect>
-            <StackPanel>
-                <DockPanel Margin="0,0,0,6">
-                    <Button DockPanel.Dock="Right" Content="&#x2715;" FontSize="11" Foreground="#88FFFFFF"
-                            Background="Transparent" BorderThickness="0" Cursor="Hand"
-                            Click="CloseNotification_Click" Width="22" Height="22"/>
-                    <TextBlock x:Name="NotificationIcon" Text="&#x1F4AC;" FontSize="18" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBlock x:Name="NotificationTitle" Text="Уведомление" FontSize="13" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
-                </DockPanel>
-                <TextBlock x:Name="NotificationMessage" Text="" FontSize="12" Foreground="#BBFFFFFF" TextWrapping="Wrap"/>
-            </StackPanel>
+        <Border x:Name="NotificationPanel" Width="340" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Margin="0,0,18,18" Style="{DynamicResource CardBorder}" CornerRadius="14" Padding="14" Visibility="Collapsed">
+            <DockPanel>
+                <Border DockPanel.Dock="Left" Width="4" CornerRadius="2" Background="{DynamicResource Accent2Brush}" Margin="0,0,12,0"/>
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,4">
+                        <Button DockPanel.Dock="Right" Style="{DynamicResource IconButton}" Content="&#xE711;" FontSize="10"
+                                Click="CloseNotification_Click" Width="24" Height="24"/>
+                        <TextBlock x:Name="NotificationIcon" Text="&#x1F4AC;" FontSize="16" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="NotificationTitle" Text="Уведомление" FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    </DockPanel>
+                    <TextBlock x:Name="NotificationMessage" Text="" FontSize="12" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+                </StackPanel>
+            </DockPanel>
         </Border>
 
-        <TextBlock x:Name="DeviceCodeDisplay" Foreground="#44FFFFFF" FontSize="11" Background="#661A1A2E" Padding="6,2"
-                   Text="Код ПК: ---" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="8,0,0,6"
-                   MouseLeftButtonDown="DeviceCode_MouseLeftButtonDown"
-                   Cursor="Hand" ToolTip="Три быстрых клика — получить новый код"/>
+        <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="10,0,0,8" CornerRadius="999"
+                Background="#E6FFFFFF" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" Padding="10,3">
+            <TextBlock x:Name="DeviceCodeDisplay" Foreground="{DynamicResource MutedBrush}" FontSize="11"
+                       Text="Код ПК: ---"
+                       MouseLeftButtonDown="DeviceCode_MouseLeftButtonDown"
+                       Cursor="Hand" ToolTip="Три быстрых клика — получить новый код"/>
+        </Border>
 
         <!-- Нет сети -->
         <Grid x:Name="ShellNetworkOverlay" Visibility="Collapsed">
-            <Rectangle Fill="#EE0A0A14"/>
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="480">
-                <TextBlock Text="&#x26A0;" FontSize="48" Foreground="#FF6B6B" HorizontalAlignment="Center" Margin="0,0,0,16"/>
-                <TextBlock Text="Сеть недоступна" FontSize="28" FontWeight="Bold" Foreground="#FF6B6B" HorizontalAlignment="Center" Margin="0,0,0,12"/>
-                <TextBlock Text="Нет связи с сервером. Программы на компьютере (Word, Excel, проводник) работают — откройте их через «Меню» или «Окна»."
-                           FontSize="15" Foreground="#AAFFFFFF" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,16"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                    <Button Content="Проверить снова" Background="#4A6FA5" Margin="0,0,12,0"
-                            Click="ShellRetryNetwork_Click" Style="{StaticResource OvlBtn}"/>
-                    <Button Content="Скрыть" Background="#444458"
-                            Click="HideNetworkOverlay_Click" Style="{StaticResource OvlBtn}"/>
+            <Rectangle Fill="{DynamicResource ScrimBrush}"/>
+            <Border Style="{DynamicResource CardBorder}" CornerRadius="22" Padding="40,34"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" Width="540">
+                <StackPanel>
+                    <Border Width="64" Height="64" CornerRadius="32" Background="{DynamicResource DangerLightBrush}"
+                            HorizontalAlignment="Center" Margin="0,0,0,16">
+                        <TextBlock Text="&#xEB55;" Style="{DynamicResource IconText}" FontSize="28" Foreground="{DynamicResource DangerBrush}"/>
+                    </Border>
+                    <TextBlock Text="Сеть недоступна" FontSize="26" FontWeight="SemiBold" FontFamily="{DynamicResource DisplayFont}"
+                               HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                    <TextBlock Text="Нет связи с сервером. Программы на компьютере (Word, Excel, проводник) работают — откройте их через «Меню» или «Окна»."
+                               FontSize="14" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,22"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Button Content="Проверить снова" Margin="0,0,10,0"
+                                Click="ShellRetryNetwork_Click" Style="{StaticResource OvlBtn}"/>
+                        <Button Content="Скрыть" Background="{DynamicResource CardBrush}" Foreground="{DynamicResource TextBrush}"
+                                BorderBrush="{DynamicResource LineBrush}" BorderThickness="1"
+                                Click="HideNetworkOverlay_Click" Style="{StaticResource OvlBtn}"/>
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
+            </Border>
         </Grid>
     </Grid>
 </Window>

@@ -101,7 +101,7 @@ export default function Sber() {
     <div className="flex flex-col gap-4 p-3 sm:p-4 md:p-6">
       <div className="flex flex-wrap items-center gap-3">
         <div className="mr-auto">
-          <h1 className="text-2xl font-semibold tracking-tight">СБЕР</h1>
+          <h1 className="page-title text-[22px] text-foreground sm:text-2xl">СБЕР</h1>
           <p className="text-sm text-muted-foreground">Оплата контрагентам через СберБизнес и автозагрузка выписки</p>
         </div>
         {can('sber.pay') && tab === 'requests' && (

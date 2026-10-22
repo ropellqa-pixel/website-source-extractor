@@ -1,2 +1,3 @@
-ABIZ project version 21 (program 3.9)
+ABIZ project version 22 (program 3.9, build 1.6.0)
 New: works with own server bizwor.ru (site and API at https://bizwor.ru/api).
+New: light redesign of the program (login, lock screen, top panel, explorer, camera), new icon and installer artwork.

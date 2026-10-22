@@ -389,8 +389,9 @@ namespace AbizShell
                 var content = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
                 content.Children.Add(new TextBlock
                 {
-                    Text = btn.Action == "app" ? "\U0001F5A5" : "\U0001F310",
-                    FontSize = 30, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 8),
+                    Text = btn.Action == "app" ? "\uE7F4" : "\uE774",
+                    FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+                    FontSize = 30, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 12),
                 });
                 content.Children.Add(new TextBlock
                 {
@@ -843,9 +844,8 @@ namespace AbizShell
 
         private TextBox EditorBox(string text, double width, string tip) => new()
         {
-            Text = text, Width = width, Margin = new Thickness(0, 0, 8, 0), FontSize = 13, Padding = new Thickness(6, 4, 6, 4),
-            Background = new SolidColorBrush(Color.FromRgb(0x0D, 0x0D, 0x14)), Foreground = Brushes.White, CaretBrush = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x44, 255, 255, 255)), ToolTip = tip, VerticalContentAlignment = VerticalAlignment.Center,
+            Text = text, Width = width, Margin = new Thickness(0, 0, 8, 0), FontSize = 13, Padding = new Thickness(8, 5, 8, 5),
+            ToolTip = tip, VerticalContentAlignment = VerticalAlignment.Center, Height = 34,
         };
 
         private Button EditorButton(string text, string tip, Action onClick, Brush? fg = null)
@@ -853,9 +853,14 @@ namespace AbizShell
             var b = new Button
             {
                 Content = text, MinWidth = 30, Height = 30, Margin = new Thickness(0, 0, 4, 0), Padding = new Thickness(8, 0, 8, 0),
-                ToolTip = tip, Cursor = Cursors.Hand, Foreground = fg ?? Brushes.White,
-                Background = new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x44)), BorderThickness = new Thickness(0),
+                ToolTip = tip, Cursor = Cursors.Hand,
             };
+            b.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryButton");
+            b.MinHeight = 0;
+            b.Height = 34;
+            b.FontSize = 13;
+            b.Padding = new Thickness(10, 0, 10, 0);
+            if (fg != null) b.Foreground = fg;
             b.Click += (s, e) => onClick();
             return b;
         }
@@ -868,7 +873,7 @@ namespace AbizShell
                 var row = _editorRows[i];
                 var line = new StackPanel { Orientation = Orientation.Horizontal };
 
-                var swatch = new Border { Width = 14, Height = 30, CornerRadius = new CornerRadius(4), Background = SafeBrush(row.Color), Margin = new Thickness(0, 0, 8, 0) };
+                var swatch = new Border { Width = 14, Height = 34, CornerRadius = new CornerRadius(5), Background = SafeBrush(row.Color), Margin = new Thickness(0, 0, 8, 0) };
                 var name = EditorBox(row.Text, 150, "Название кнопки");
                 name.TextChanged += (s, e) => row.Text = name.Text;
                 var target = EditorBox(row.Target, 300, "Сайт (https://...) или путь к программе (.exe)");
@@ -876,7 +881,7 @@ namespace AbizShell
                 var color = EditorBox(row.Color, 84, "Цвет, например #125499");
                 color.TextChanged += (s, e) => { row.Color = color.Text; swatch.Background = SafeBrush(color.Text); };
 
-                var type = new ComboBox { Width = 110, Margin = new Thickness(0, 0, 8, 0), Height = 30 };
+                var type = new ComboBox { Width = 120, Margin = new Thickness(0, 0, 8, 0), Height = 34 };
                 type.Items.Add("Сайт");
                 type.Items.Add("Программа");
                 type.SelectedIndex = row.Action == "app" ? 1 : 0;
@@ -901,12 +906,13 @@ namespace AbizShell
                 int index = i;
                 line.Children.Add(EditorButton("↑", "Выше", () => MoveRow(index, -1)));
                 line.Children.Add(EditorButton("↓", "Ниже", () => MoveRow(index, 1)));
-                line.Children.Add(EditorButton("✕", "Удалить", () => { _editorRows.RemoveAt(index); RenderEditor(); }, Brushes.OrangeRed));
+                line.Children.Add(EditorButton("✕", "Удалить", () => { _editorRows.RemoveAt(index); RenderEditor(); }, new SolidColorBrush(Color.FromRgb(0xDC, 0x26, 0x26))));
 
                 EditorRowsPanel.Children.Add(new Border
                 {
-                    Background = new SolidColorBrush(Color.FromArgb(0x22, 255, 255, 255)),
-                    CornerRadius = new CornerRadius(10), Margin = new Thickness(0, 0, 0, 8), Padding = new Thickness(10),
+                    Background = new SolidColorBrush(Color.FromRgb(0xF7, 0xF7, 0xFA)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(0xE4, 0xE4, 0xEA)), BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(12), Margin = new Thickness(0, 0, 0, 8), Padding = new Thickness(10),
                     Child = line,
                 });
             }
@@ -926,7 +932,7 @@ namespace AbizShell
             {
                 Id = Guid.NewGuid().ToString(),
                 Text = "Новая кнопка",
-                Color = "#4A90D9",
+                Color = "#0E7490",
                 Action = "web",
                 Target = "https://",
             }));

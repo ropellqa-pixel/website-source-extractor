@@ -65,22 +65,23 @@ namespace AbizShell
             {
                 Title = "Печать", Width = 440, SizeToContent = SizeToContent.Height, Owner = owner,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize,
-                ShowInTaskbar = false, Background = new SolidColorBrush(Color.FromRgb(30, 30, 46)),
+                ShowInTaskbar = false, Background = new SolidColorBrush(Color.FromRgb(0xF3, 0xF3, 0xF6)),
+                FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI"), UseLayoutRounding = true,
             };
-            var panel = new StackPanel { Margin = new Thickness(20) };
-            panel.Children.Add(new TextBlock { Text = $"Файлов к печати: {fileCount}", Foreground = Brushes.White, FontSize = 15, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 12) });
-            panel.Children.Add(new TextBlock { Text = "Принтер:", Foreground = Brushes.White, FontSize = 13, Margin = new Thickness(0, 0, 0, 6) });
-            var combo = new ComboBox { FontSize = 14, Height = 32, ItemsSource = printers };
+            var panel = new StackPanel { Margin = new Thickness(24, 20, 24, 20) };
+            panel.Children.Add(new TextBlock { Text = $"Файлов к печати: {fileCount}", Foreground = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x20)), FontSize = 17, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 12) });
+            panel.Children.Add(new TextBlock { Text = "Принтер:", Foreground = new SolidColorBrush(Color.FromRgb(0x6E, 0x6E, 0x73)), FontSize = 13, Margin = new Thickness(0, 0, 0, 6) });
+            var combo = new ComboBox { FontSize = 14, Height = 38, ItemsSource = printers };
             string? def = GetDefaultPrinter();
             combo.SelectedItem = def != null && printers.Contains(def) ? def : printers[0];
             panel.Children.Add(combo);
 
             string? result = null;
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0) };
-            var ok = new Button { Content = "Печать", Width = 100, Height = 34, Margin = new Thickness(0, 0, 8, 0), IsDefault = true,
-                                  Background = new SolidColorBrush(Color.FromRgb(74, 144, 217)), Foreground = Brushes.White, BorderThickness = new Thickness(0) };
-            var cancel = new Button { Content = "Отмена", Width = 90, Height = 34, IsCancel = true,
-                                      Background = new SolidColorBrush(Color.FromRgb(51, 51, 68)), Foreground = Brushes.White, BorderThickness = new Thickness(0) };
+            var ok = new Button { Content = "Печать", MinWidth = 110, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
+            ok.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
+            var cancel = new Button { Content = "Отмена", MinWidth = 96, IsCancel = true };
+            cancel.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryButton");
             ok.Click += (s, e) => { result = combo.SelectedItem as string; win.Close(); };
             buttons.Children.Add(ok);
             buttons.Children.Add(cancel);

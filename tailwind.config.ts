@@ -75,6 +75,12 @@ export default {
 					ring: 'hsl(var(--sidebar-ring))'
 				}
 			},
+			boxShadow: {
+				soft: 'var(--shadow-soft)',
+				card: 'var(--shadow-card)',
+				lift: 'var(--shadow-lift)',
+				pop: 'var(--shadow-pop)'
+			},
 			borderRadius: {
 				slab: '22px',
 				xl: '12px',

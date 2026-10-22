@@ -21,7 +21,24 @@ namespace AbizShell
             if (!isNew) return;
 
             var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            app.LoadTheme();
             app.Run();
+        }
+
+        private void LoadTheme()
+        {
+            try
+            {
+                Resources.MergedDictionaries.Add(new ResourceDictionary
+                {
+                    Source = new Uri("pack://application:,,,/" + typeof(App).Assembly.GetName().Name + ";component/Theme.xaml", UriKind.Absolute)
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Не удалось загрузить оформление:\n" + ex.Message, Edition.Name,
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         protected override void OnStartup(StartupEventArgs e)

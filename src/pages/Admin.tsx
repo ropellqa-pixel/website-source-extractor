@@ -37,7 +37,7 @@ export default function Admin() {
   return (
     <div className="flex h-full flex-col gap-4 overflow-auto p-4 md:p-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Админ-панель</h1>
+        <h1 className="page-title text-[22px] text-foreground sm:text-2xl">Админ-панель</h1>
         <p className="text-sm text-muted-foreground">Должности, доступ к разделам и кнопкам, формулы, колонки таблиц и справочники</p>
       </div>
       <div className="flex flex-wrap gap-1 rounded-lg bg-secondary p-0.5 w-fit">

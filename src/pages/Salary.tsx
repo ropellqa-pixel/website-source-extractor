@@ -623,7 +623,7 @@ export default function Salary() {
               </button>
               <div className="flex items-center gap-2">
                 <Banknote className="w-6 h-6 text-emerald-600" />
-                <h1 className="text-lg font-bold text-foreground">ЗАРПЛАТА</h1>
+                <h1 className="page-title text-lg text-foreground">ЗАРПЛАТА</h1>
               </div>
             </div>
             <div className="flex items-center gap-4">

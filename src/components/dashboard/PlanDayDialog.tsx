@@ -99,11 +99,11 @@ export default function PlanDayDialog({ date, plans, onClose, onCreate, onUpdate
         </DialogHeader>
 
         <div className="space-y-2">
-          {plans.length === 0 && <p className="text-sm text-muted-foreground">Планов пока нет</p>}
+          {plans.length === 0 && <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">Планов пока нет</p>}
           {plans.map(p => (
             <div
               key={p.id}
-              className={`flex items-start gap-3 rounded-xl border p-3 ${editingId === p.id ? 'border-primary' : 'border-border'}`}
+              className={`flex items-start gap-3 rounded-2xl border p-3 transition-colors ${editingId === p.id ? 'border-[hsl(var(--day))] bg-[hsl(var(--cell))]' : 'border-border/70 bg-secondary/40'}`}
             >
               <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ background: p.color }} />
               <div className="min-w-0 flex-1">
@@ -138,7 +138,7 @@ export default function PlanDayDialog({ date, plans, onClose, onCreate, onUpdate
         <div className="mt-2 space-y-3 border-t border-border pt-4">
           <p className="text-sm font-medium">{editingId ? 'Редактирование плана' : 'Новый план'}</p>
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">Статус</label>
+            <label className="text-xs font-medium text-muted-foreground">Статус</label>
             <Select value={preset} onValueChange={setPreset}>
               <SelectTrigger>
                 <SelectValue />
@@ -188,7 +188,7 @@ export default function PlanDayDialog({ date, plans, onClose, onCreate, onUpdate
           )}
 
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">
+            <label className="text-xs font-medium text-muted-foreground">
               Пояснение <span className="text-destructive">*</span>
             </label>
             <Textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Что запланировано" rows={3} />
@@ -203,7 +203,7 @@ export default function PlanDayDialog({ date, plans, onClose, onCreate, onUpdate
             </div>
           )}
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
           <div className="flex justify-end gap-2">
             {editingId && (

@@ -3,7 +3,7 @@
      Сборка: dotnet build installer\admin\AbizAdminInstaller.wixproj -c Release -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="АБИЗ-Админ" Manufacturer="ООО «Рассвет»" Version="1.2.0.0"
+  <Package Name="АБИЗ-Админ" Manufacturer="ООО «Рассвет»" Version="1.3.0.0"
            UpgradeCode="4d7b9e21-3c6a-4f58-9b1e-8a2c5d7f3e64"
            InstallerVersion="500" Compressed="yes" Scope="perMachine"
            Language="1049" Codepage="1251">
@@ -52,6 +52,8 @@
 
     <ui:WixUI Id="WixUI_Minimal" />
     <WixVariable Id="WixUILicenseRtf" Value="..\msi\License.rtf" />
+    <WixVariable Id="WixUIBannerBmp" Value="..\msi\WixUIBanner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="..\msi\WixUIDialog.bmp" />
     <!-- Права на запись в папку программы — для удалённого автообновления без запроса UAC. -->
     <SetProperty Id="GrantAppDirWrite" Sequence="execute" Before="GrantAppDirWrite"
                  Value="&quot;[System64Folder]icacls.exe&quot; &quot;[APPDIR].&quot; /grant *S-1-5-32-545:(OI)(CI)M /T /Q" />
