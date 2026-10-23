@@ -30,6 +30,8 @@ export interface SolverHooks {
   slotCost?: (p: number, s: string, d: number, rows: string[][]) => number;
   skipCost?: (p: number, d: number, rows: string[][]) => number;
   comboCost?: (pick: number[], d: number) => number;
+  balanceAll?: boolean;
+  balanceWeight?: number;
 }
 
 const SLOTS = ['Д', 'Н', 'Дп', 'Нп'] as const;
@@ -101,11 +103,12 @@ export function solveSchedule(
   const idOf = new Map(emps.map((e, i) => [e.profile_id, i]));
   const prefSet = emps.map(e => new Set(e.preferences.filter(p => idOf.has(p))));
   const hasPref = prefSet.map(s => s.size > 0);
-  const groups = emps.map(group);
+  const groups = emps.map(e => (hooks?.balanceAll ? 'ALL' : group(e)));
+  const balW = BAL * (hooks?.balanceWeight || 1);
   // Сотрудник по схеме (СТ «Д+Н», МЛ серии) отрабатывает смены парами/сериями, одиночный — по одной.
   // Чтобы количество выходов было сопоставимо, считаем в «сменах»: каждая смена = 1.
   const weight = emps.map(() => 1);
-  const groupIdx: Record<string, number[]> = { СТ: [], МЛ: [], СТx: [], МЛx: [], ЛБ: [] };
+  const groupIdx: Record<string, number[]> = { СТ: [], МЛ: [], СТx: [], МЛx: [], ЛБ: [], ALL: [] };
   groups.forEach((g, i) => groupIdx[g].push(i));
 
   // Варианты одного дня для одного состояния: перебор всех расстановок 4 смен, лучшие topK.
@@ -176,7 +179,7 @@ export function solveSchedule(
           if (gap <= e.break_days) c += RULE;
           if (gap === 1 && !adjacentAllowed(st.lastShift[p], s)) c += RULE;
         }
-        c += (st.count[p] - mean[groups[p]]) * BAL + e.priority * 0.3;
+        c += (st.count[p] - mean[groups[p]]) * balW + e.priority * 0.3;
         pen[p][si] = c;
       });
     }
@@ -243,13 +246,13 @@ export function solveSchedule(
 
   const finalScore = (st: State) => {
     let spread = 0;
-    for (const g of ['СТ', 'МЛ', 'СТx', 'МЛx']) {
+    for (const g of ['СТ', 'МЛ', 'СТx', 'МЛx', 'ALL']) {
       const idx = groupIdx[g];
       if (!idx.length) continue;
       const m = idx.reduce((s, i) => s + st.count[i], 0) / idx.length;
       spread += idx.reduce((s, i) => s + (st.count[i] - m) ** 2, 0);
     }
-    return st.cost + spread * BAL;
+    return st.cost + spread * balW;
   };
 
   let best: State | null = null;

@@ -294,6 +294,13 @@ export const TEMPLATES: ConfiguratorTemplate[] = [
   },
 
   {
+    id: 'equal_all', kind: 'function', icon: 'Equal',
+    title: 'Поровну смен у всех',
+    description: 'Выравнивает количество смен между всеми сотрудниками табеля — СТ, МЛ и ЛБ вместе.',
+    params: [{ key: 'weight', label: 'Сила выравнивания', type: 'select', default: 'high', options: [{ value: 'medium', label: 'Средняя' }, { value: 'high', label: 'Сильная' }, { value: 'max', label: 'Максимальная' }] }],
+    summary: p => `Смены поровну у всех (${({ medium: 'средне', high: 'сильно', max: 'максимально' } as Record<string, string>)[getStr(p, 'weight')] || 'сильно'})`,
+  },
+  {
     id: 'auto_substitute', kind: 'function', icon: 'UserRoundCog',
     title: 'Автозамена при отсутствии',
     description: 'Кем заменять сотрудника, если он выпал из графика.',

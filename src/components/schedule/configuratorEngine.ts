@@ -94,6 +94,8 @@ export function buildConfiguratorEngine(
     return c ? ({ low: 4, medium: 10, high: 25 } as Record<string, number>)[getStr(c.p, 'weight')] ?? 10 : 0;
   });
 
+  const equalAll = per.flat().find(c => c.p.template === 'equal_all');
+
   const pairs: Pair[] = [];
   per.forEach((l, a) => l.forEach(c => {
     if (c.p.template !== 'not_with' && c.p.template !== 'only_with') return;
@@ -345,6 +347,8 @@ export function buildConfiguratorEngine(
       slotCost: (p, s, d, rows) => (per[p].length ? check(p, s, d, rows) : 0),
       skipCost: (p, d, rows) => (per[p].length ? skipExtra(p, d, rows) : 0),
       comboCost,
+      balanceAll: !!equalAll,
+      balanceWeight: equalAll ? ({ medium: 2, high: 4, max: 8 } as Record<string, number>)[getStr(equalAll.p, 'weight')] ?? 4 : 1,
     },
     notify: per.some(l => l.some(c => c.p.template === 'notify_deputy')),
     findViolations,

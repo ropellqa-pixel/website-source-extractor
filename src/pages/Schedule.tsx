@@ -9,7 +9,6 @@ import AnodBizLogo from '../components/AnodBizLogo';
 import EmployeeSettingsModal from '../components/EmployeeSettingsModal';
 import { apiUrl } from '@/lib/apiUrls';
 import Icon from '@/components/ui/icon';
-import SchedulePinLock from '@/components/schedule/SchedulePinLock';
 import ConfiguratorDialog from '@/components/schedule/ConfiguratorDialog';
 import { loadConfigurators, parseIdList } from '@/components/schedule/configuratorApi';
 import { buildConfiguratorEngine, EngineViolation } from '@/components/schedule/configuratorEngine';
@@ -250,12 +249,7 @@ function printSchedule(monthYear: string, rows: ScheduleRow[], days: number) {
 }
 
 export default function Schedule() {
-  const navigate = useNavigate();
-  return (
-    <SchedulePinLock onBack={() => navigate('/dashboard')}>
-      <ScheduleContent />
-    </SchedulePinLock>
-  );
+  return <ScheduleContent />;
 }
 
 function ScheduleContent() {
@@ -623,6 +617,12 @@ function ScheduleContent() {
                 <Lock className="w-3 h-3" /> Заблокировано
               </span>
             )}
+            {isLocked && canUnlock && (
+              <button onClick={handleUnlock}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full bg-amber-500 text-white hover:bg-amber-600">
+                <Unlock className="w-3 h-3" /> Разблокировать
+              </button>
+            )}
             {!isDeputy && isResponsible && (
               <span className="flex items-center gap-1 text-blue-600 text-xs bg-blue-500/10 px-2 py-1 rounded-full">
                 Ответственный
@@ -847,6 +847,12 @@ function ScheduleContent() {
               {broadcasting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               {broadcasting ? 'Отправка...' : 'Рассылка'}
             </button>
+            {canUnlock && isLocked && (
+              <button onClick={handleUnlock}
+                className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium text-sm">
+                <Unlock className="w-4 h-4" /> Разблокировать
+              </button>
+            )}
             {canSave && !isLocked && (
               <button onClick={handleSave} disabled={saving}
                 className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium text-sm disabled:opacity-50">
