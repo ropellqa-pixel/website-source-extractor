@@ -301,6 +301,16 @@ export const TEMPLATES: ConfiguratorTemplate[] = [
     summary: p => `Смены поровну у всех (${({ medium: 'средне', high: 'сильно', max: 'максимально' } as Record<string, string>)[getStr(p, 'weight')] || 'сильно'})`,
   },
   {
+    id: 'transfer', kind: 'function', icon: 'ArrowDownToLine',
+    title: 'Передача',
+    description: 'Сотрудник забирает смены, которые остальные не могут взять по своим правилам и конфигураторам (например, ночь после «Д» у СТ без ночей). Обычные смены он берёт только если больше некому.',
+    params: [
+      { key: 'codes', label: 'Какие смены принимать', type: 'codes', default: ['Д', 'Н'] },
+      { key: 'strength', label: 'Брать обычные смены', type: 'select', default: 'rare', options: [{ value: 'never', label: 'Никогда — только переданные' }, { value: 'rare', label: 'Редко — если смен мало' }, { value: 'normal', label: 'Наравне со всеми' }] },
+    ],
+    summary: p => `Принимает переданные смены: ${codesText(getArr<string>(p, 'codes'))}`,
+  },
+  {
     id: 'auto_substitute', kind: 'function', icon: 'UserRoundCog',
     title: 'Автозамена при отсутствии',
     description: 'Кем заменять сотрудника, если он выпал из графика.',

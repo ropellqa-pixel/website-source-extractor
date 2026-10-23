@@ -16,6 +16,8 @@ import {
 
 export interface EngineEmployee {
   profile_id: string;
+  status?: string;
+  no_night?: boolean;
   full_name?: string;
   configurator_ids?: string[];
 }
@@ -95,6 +97,18 @@ export function buildConfiguratorEngine(
   });
 
   const equalAll = per.flat().find(c => c.p.template === 'equal_all');
+  const transfer = per.map(l => l.find(c => c.p.template === 'transfer'));
+  const transferIdx = transfer.map((t, i) => (t ? i : -1)).filter(i => i >= 0);
+  const orphan = (s: string, d: number, rows: string[][], self: number): boolean => {
+    if (d === 0) return false;
+    const pairOf: Record<string, string> = { 'Н': 'Д', 'Нп': 'Дп' };
+    const need = pairOf[s];
+    if (!need) return false;
+    const who = rows.findIndex(r => r[d - 1] === need);
+    if (who < 0 || who === self) return false;
+    const e = emps[who];
+    return !!e.no_night;
+  };
 
   const pairs: Pair[] = [];
   per.forEach((l, a) => l.forEach(c => {
@@ -259,7 +273,15 @@ export function buildConfiguratorEngine(
           if (wantDay !== isDayCode(s)) hit(150, c.name);
           break;
         }
-        case 'even_nights':
+        case 'transfer': {
+          if (!s) break;
+          const codes = getArr<string>(q, 'codes');
+          if (codes.length && !codes.includes(s)) { hit(HARD, c.name); break; }
+          if (orphan(s, d, rows, p)) { cost -= 30; break; }
+          hit(({ never: 90, rare: 45, normal: 0 } as Record<string, number>)[getStr(q, 'strength')] ?? 45, c.name);
+          break;
+        }
+                case 'even_nights':
           if (isNightCode(s)) {
             let mine = 0;
             for (let k = 0; k < d; k++) if (isNightCode(row[k])) mine++;
@@ -344,10 +366,16 @@ export function buildConfiguratorEngine(
 
   return {
     hooks: {
-      slotCost: (p, s, d, rows) => (per[p].length ? check(p, s, d, rows) : 0),
+      slotCost: (p, s, d, rows) => {
+        let c = per[p].length ? check(p, s, d, rows) : 0;
+        if (transferIdx.length && !transfer[p] && orphan(s, d, rows, p)) c += 150;
+        return c;
+      },
       skipCost: (p, d, rows) => (per[p].length ? skipExtra(p, d, rows) : 0),
       comboCost,
       balanceAll: !!equalAll,
+      balanceExclude: transferIdx,
+      noNightCost: transferIdx.length ? 80 : undefined,
       balanceWeight: equalAll ? ({ medium: 2, high: 4, max: 8 } as Record<string, number>)[getStr(equalAll.p, 'weight')] ?? 4 : 1,
     },
     notify: per.some(l => l.some(c => c.p.template === 'notify_deputy')),

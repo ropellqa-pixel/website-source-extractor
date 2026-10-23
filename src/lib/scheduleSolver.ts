@@ -32,6 +32,8 @@ export interface SolverHooks {
   comboCost?: (pick: number[], d: number) => number;
   balanceAll?: boolean;
   balanceWeight?: number;
+  balanceExclude?: number[];
+  noNightCost?: number;
 }
 
 const SLOTS = ['Д', 'Н', 'Дп', 'Нп'] as const;
@@ -103,12 +105,13 @@ export function solveSchedule(
   const idOf = new Map(emps.map((e, i) => [e.profile_id, i]));
   const prefSet = emps.map(e => new Set(e.preferences.filter(p => idOf.has(p))));
   const hasPref = prefSet.map(s => s.size > 0);
-  const groups = emps.map(e => (hooks?.balanceAll ? 'ALL' : group(e)));
+  const excl = new Set(hooks?.balanceExclude || []);
+  const groups = emps.map((e, i) => (excl.has(i) ? 'X' : hooks?.balanceAll ? 'ALL' : group(e)));
   const balW = BAL * (hooks?.balanceWeight || 1);
   // Сотрудник по схеме (СТ «Д+Н», МЛ серии) отрабатывает смены парами/сериями, одиночный — по одной.
   // Чтобы количество выходов было сопоставимо, считаем в «сменах»: каждая смена = 1.
   const weight = emps.map(() => 1);
-  const groupIdx: Record<string, number[]> = { СТ: [], МЛ: [], СТx: [], МЛx: [], ЛБ: [], ALL: [] };
+  const groupIdx: Record<string, number[]> = { СТ: [], МЛ: [], СТx: [], МЛx: [], ЛБ: [], ALL: [], X: [] };
   groups.forEach((g, i) => groupIdx[g].push(i));
 
   // Варианты одного дня для одного состояния: перебор всех расстановок 4 смен, лучшие topK.
@@ -152,7 +155,7 @@ export function solveSchedule(
           // это единственное допустимое исключение, иначе такой сотрудник не смог бы работать вовсе.
           if (s === 'Н') {
             if (prev !== 'Д' && d > 0) {
-              c += dayByNoNight[d - 1] ? NO_NIGHT_COST : RULE;
+              c += dayByNoNight[d - 1] ? (hooks?.noNightCost ?? NO_NIGHT_COST) : RULE;
               if (gap <= Math.max(1, e.break_days)) c += RULE;
             }
           } else {
@@ -179,7 +182,8 @@ export function solveSchedule(
           if (gap <= e.break_days) c += RULE;
           if (gap === 1 && !adjacentAllowed(st.lastShift[p], s)) c += RULE;
         }
-        c += (st.count[p] - mean[groups[p]]) * balW + e.priority * 0.3;
+        if (groups[p] !== 'X') c += (st.count[p] - mean[groups[p]]) * balW;
+        c += e.priority * 0.3;
         pen[p][si] = c;
       });
     }
