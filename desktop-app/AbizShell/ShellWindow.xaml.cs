@@ -27,6 +27,16 @@ namespace AbizShell
         public string ApiToken { get; set; } = "";
         public string DeviceCode { get; set; } = "";
         public string EmployeeName { get; set; } = "";
+        public string DeviceToken { get; set; } = "";
+        public bool IsForeignSession { get; set; }
+        public string LoginCardNumber { get; set; } = "";
+        public string CurrentUserId { get; set; } = "";
+
+        private string AgentToken => string.IsNullOrEmpty(DeviceToken) ? ApiToken : DeviceToken;
+        private CardReader? _cardReader;
+        private bool _cardBusy;
+        private bool _firstPageShown;
+        private DispatcherTimer? _splashTimer;
 
         private RemoteAgent? _remoteAgent;
 
@@ -110,12 +120,15 @@ namespace AbizShell
             _networkTimer?.Stop(); _remoteDesktopTimer?.Stop(); _notificationTimer?.Stop();
             if (_remoteAgent != null)
             {
-                _ = RemoteControlClient.LogAsync(ApiToken, "signout", "Выход из системы");
+                _ = RemoteControlClient.LogAsync(AgentToken, "signout", "Выход из системы");
                 _remoteAgent.Stop();
                 _remoteAgent = null;
             }
             _keyboardHook?.Dispose();
             _keyboardHook = null;
+            _cardReader?.Dispose();
+            _cardReader = null;
+            _splashTimer?.Stop();
             if (_explorer != null) { _explorer.ForceClose(); _explorer = null; }
             if (_topBar != null) { _topBar.ForceClose(); _topBar = null; }
         }
@@ -187,6 +200,12 @@ namespace AbizShell
                 return false;
             };
 
+            StartCardReader();
+
+            _splashTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(25) };
+            _splashTimer.Tick += (s, a) => HideLoadingSplash();
+            _splashTimer.Start();
+
             BuildTilesFromDefaults();
             await InitBrowserAsync();
 
@@ -200,10 +219,11 @@ namespace AbizShell
         /// удалённые команды зам. директора. Команда «Выход» возвращает на экран входа.</summary>
         private void StartRemoteAgent()
         {
-            if (_remoteAgent != null || string.IsNullOrEmpty(ApiToken)) return;
-            _ = RemoteControlClient.LogAsync(ApiToken, "signin",
-                $"Вход в систему: {(string.IsNullOrEmpty(EmployeeName) ? (IsAdmin ? "администратор" : "сотрудник") : EmployeeName)}");
-            _remoteAgent = new RemoteAgent(ApiToken)
+            if (_remoteAgent != null || string.IsNullOrEmpty(AgentToken)) return;
+            _ = RemoteControlClient.LogAsync(AgentToken, "signin",
+                $"Вход в систему: {(string.IsNullOrEmpty(EmployeeName) ? (IsAdmin ? "администратор" : "сотрудник") : EmployeeName)}" +
+                (IsForeignSession ? " (по карте, сотрудник другого ПК)" : ""));
+            _remoteAgent = new RemoteAgent(AgentToken)
             {
                 Presence = "working",
                 UserName = string.IsNullOrEmpty(EmployeeName) ? (IsAdmin ? "Администратор" : "") : EmployeeName,
@@ -276,6 +296,7 @@ namespace AbizShell
             }
             catch (WebView2RuntimeNotFoundException)
             {
+                HideLoadingSplash();
                 MessageBox.Show(this,
                     "На компьютере не установлен компонент Microsoft Edge WebView2 — без него браузер не работает.\n\n" +
                     "Переустановите АБИЗ из полного установщика.",
@@ -284,6 +305,7 @@ namespace AbizShell
             }
             catch (Exception ex)
             {
+                HideLoadingSplash();
                 MessageBox.Show(this, "Не удалось запустить встроенный браузер:\n" + ex.Message,
                     "АБИЗ — браузер", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
@@ -309,7 +331,21 @@ namespace AbizShell
             core.SourceChanged += (s, a) => Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (IsChatOpen()) _ = RemoteControlClient.MarkChatReadAsync(ApiToken);
+                if (!_firstPageShown)
+                {
+                    string src = Browser?.Source ?? "";
+                    if (src.StartsWith("https://bizwor.ru/", StringComparison.OrdinalIgnoreCase)
+                        && !src.Contains("/device-login", StringComparison.OrdinalIgnoreCase))
+                        HideLoadingSplash();
+                }
             }));
+
+            core.NavigationCompleted += (s, a) =>
+            {
+                bool ok = a.IsSuccess;
+                var status = a.WebErrorStatus;
+                Dispatcher.BeginInvoke(new Action(() => OnNavigationCompleted(ok, status)));
+            };
 
             await PasswordVault.AttachAsync(core);
 
@@ -317,6 +353,36 @@ namespace AbizShell
 
             try { await LoadButtonsAsync(); } catch { BuildTilesFromDefaults(); }
             await AutoLoginAndNavigateAsync();
+        }
+
+        private void OnNavigationCompleted(bool isSuccess, CoreWebView2WebErrorStatus st)
+        {
+            if (_firstPageShown) return;
+            if (!isSuccess)
+            {
+                if (st == CoreWebView2WebErrorStatus.OperationCanceled || st == CoreWebView2WebErrorStatus.ConnectionAborted
+                    || st == CoreWebView2WebErrorStatus.Unknown)
+                    return;
+                HideLoadingSplash();
+                return;
+            }
+            string url = Browser?.Source ?? "";
+            if (url.Contains("/device-login", StringComparison.OrdinalIgnoreCase) || url == "about:blank")
+            {
+                var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+                t.Tick += (s2, e2) => { t.Stop(); HideLoadingSplash(); };
+                t.Start();
+                return;
+            }
+            HideLoadingSplash();
+        }
+
+        private void HideLoadingSplash()
+        {
+            _splashTimer?.Stop();
+            if (_firstPageShown) return;
+            _firstPageShown = true;
+            LoadingSplash.Visibility = Visibility.Collapsed;
         }
 
         public void NavigateBrowser(string url)
@@ -464,7 +530,7 @@ namespace AbizShell
             try
             {
                 var (added, updated) = PasswordVault.ImportCsv(dlg.FileName);
-                _ = RemoteControlClient.LogAsync(ApiToken, "note", $"Загружены пароли сайтов: новых {added}, обновлено {updated}");
+                _ = RemoteControlClient.LogAsync(AgentToken, "note", $"Загружены пароли сайтов: новых {added}, обновлено {updated}");
                 var del = MessageBox.Show(this,
                     $"Готово. Новых паролей: {added}, обновлено: {updated}.\nВсего на этом ПК: {PasswordVault.All().Count}.\n\nУдалить исходный файл .csv (рекомендуется)?",
                     "АБИЗ — пароли", MessageBoxButton.YesNo, MessageBoxImage.Question);
@@ -541,7 +607,7 @@ namespace AbizShell
             _networkFailures = online ? 0 : _networkFailures + 1;
             bool showOffline = _networkFailures >= 2;
             if (online) _networkOverlayDismissed = false;
-            ShellNetworkOverlay.Visibility = showOffline && !_networkOverlayDismissed ? Visibility.Visible : Visibility.Collapsed;
+            ShellNetworkOverlay.Visibility = showOffline && !_networkOverlayDismissed && _firstPageShown ? Visibility.Visible : Visibility.Collapsed;
             _topBar?.SetOnline(online);
         }
 
@@ -560,11 +626,92 @@ namespace AbizShell
 
         // --- Блокировка, выключение, выход ---
 
-        public void LockScreen()
+        public void LockScreen() => LockScreenWithCard(null);
+
+        public void LockScreenWithCard(string? pendingCard)
         {
             _allowClose = true;
-            new MainWindow().Show();
+            _cardReader?.Dispose();
+            _cardReader = null;
+            new MainWindow { PendingCard = pendingCard }.Show();
             Close();
+        }
+
+        // --- Карта доступа ---
+
+        private void StartCardReader()
+        {
+            if (_cardReader != null) return;
+            try
+            {
+                _cardReader = new CardReader(Dispatcher) { OnlyWhenOwnProcessForeground = !Edition.Kiosk };
+                _cardReader.CardRead += raw => _ = OnCardReadAsync(raw);
+            }
+            catch
+            {
+                _cardReader = null;
+            }
+        }
+
+        private async Task OnCardReadAsync(string raw)
+        {
+            if (_cardBusy || _allowClose) return;
+            string deviceToken = AgentToken;
+            if (string.IsNullOrEmpty(deviceToken))
+            {
+                ShowNotification("\U0001F4B3", "Карта доступа", "ПК не привязан — вход по карте недоступен");
+                return;
+            }
+            _cardBusy = true;
+            try
+            {
+                var r = await AnodBizClient.DeviceCardSignInAsync(deviceToken, raw);
+                if (_allowClose) return;
+                switch (r.Result)
+                {
+                    case AnodBizClient.CardSignInResult.Ok:
+                        bool sameUser;
+                        if (IsAdmin) sameUser = false;
+                        else if (IsForeignSession)
+                            sameUser = r.Foreign && ((!string.IsNullOrEmpty(CurrentUserId) && r.UserId == CurrentUserId)
+                                                     || (!string.IsNullOrEmpty(r.ForeignToken) && r.ForeignToken == ApiToken));
+                        else sameUser = !r.Foreign;
+
+                        if (sameUser || (!string.IsNullOrEmpty(LoginCardNumber) && r.CardNumber == LoginCardNumber))
+                        {
+                            _ = RemoteControlClient.LogAsync(AgentToken, "note", "Выход по карте " + r.CardNumber);
+                            LockScreen();
+                        }
+                        else
+                        {
+                            _ = RemoteControlClient.LogAsync(AgentToken, "note", "Смена пользователя по карте: " + r.FullName);
+                            LockScreenWithCard(raw);
+                        }
+                        break;
+                    case AnodBizClient.CardSignInResult.DeviceRevoked:
+                        LockScreen();
+                        break;
+                    case AnodBizClient.CardSignInResult.UnknownCard:
+                        ShowNotification("\U0001F4B3", "Карта не зарегистрирована",
+                            string.IsNullOrEmpty(r.CardNumber) ? "Обратитесь к руководителю" : "Номер " + r.CardNumber + ". Обратитесь к руководителю");
+                        break;
+                    case AnodBizClient.CardSignInResult.NoOwnPc:
+                        ShowNotification("\U0001F4B3", "Карта доступа",
+                            string.IsNullOrEmpty(r.Error) ? "У сотрудника нет зарегистрированного ПК" : r.Error);
+                        break;
+                    case AnodBizClient.CardSignInResult.NoNetwork:
+                        ShowNotification("\U0001F4B3", "Карта доступа", "Нет связи с сервером — приложите карту ещё раз");
+                        break;
+                    default:
+                        ShowNotification("\U0001F4B3", "Карта доступа", string.IsNullOrEmpty(r.Error) ? "Не удалось проверить карту" : r.Error);
+                        break;
+                }
+            }
+            catch { }
+            finally
+            {
+                _cardBusy = false;
+            }
         }
 
         public void ShutdownPc()

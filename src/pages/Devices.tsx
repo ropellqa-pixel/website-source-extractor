@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '@/components/ui/icon';
 import ReleasePanel from '@/components/devices/ReleasePanel';
+import CardAccessSection from '@/components/devices/CardAccessSection';
 import {
-  getDevicesStatus, sendDeviceCommand, getDeviceLogs, deleteDevice,
+  getDevicesStatus, sendDeviceCommand, getDeviceLogs, deleteDevice, setEmployeePassword,
   type DeviceStatus, type DeviceLogEntry, type RemoteCommand,
 } from '@/lib/devices';
 
@@ -31,6 +32,9 @@ export default function Devices() {
   const [msgText, setMsgText] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState('');
+  const [editDevice, setEditDevice] = useState<DeviceStatus | null>(null);
+  const [editPassword, setEditPassword] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
 
   const load = useCallback(async () => {
     const { devices } = await getDevicesStatus();
@@ -90,6 +94,20 @@ export default function Devices() {
     setSelected(device);
     setLogsOpen(true);
     setLogs(await getDeviceLogs(device.device_code, 150));
+  };
+
+  const savePassword = async () => {
+    if (!editDevice?.profile_id || editPassword.length < 6) return;
+    setEditSaving(true);
+    try {
+      await setEmployeePassword(editDevice.profile_id, editPassword);
+      setEditPassword('');
+      notify('Пароль обновлён');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Не удалось сменить пароль');
+    } finally {
+      setEditSaving(false);
+    }
   };
 
   const sendMessage = async () => {
@@ -210,6 +228,12 @@ export default function Devices() {
                     className="flex items-center gap-1 rounded-lg bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/70 disabled:opacity-40">
                     <Icon name="CloudDownload" size={13} /> Обновить программу
                   </button>
+                  {d.profile_id && (
+                    <button onClick={() => { setEditDevice(d); setEditPassword(''); }}
+                      className="flex items-center gap-1 rounded-lg bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/70">
+                      <Icon name="UserCog" size={13} /> Изменить сведения
+                    </button>
+                  )}
                   <button onClick={() => openLogs(d)}
                     className="flex items-center gap-1 rounded-lg bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/70">
                     <Icon name="ScrollText" size={13} /> Журнал
@@ -268,6 +292,32 @@ export default function Devices() {
                   ))}
                 </ul>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editDevice && editDevice.profile_id && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditDevice(null)}>
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-card p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-foreground">Изменить сведения · {editDevice.profile_name || editDevice.hostname}</h3>
+              <button onClick={() => setEditDevice(null)} className="rounded-full p-1.5 hover:bg-secondary"><Icon name="X" size={18} /></button>
+            </div>
+            <CardAccessSection profileId={editDevice.profile_id} notify={(text) => notify(text)} />
+            <div className="mt-5">
+              <label className="mb-1 block text-sm font-semibold text-foreground">Пароль</label>
+              <p className="mb-2 text-xs text-muted-foreground">Новый пароль для входа сотрудника в АнодБИЗ и АБИЗ.</p>
+              <div className="flex gap-2">
+                <input type="password" value={editPassword} onChange={(e) => setEditPassword(e.target.value)}
+                  placeholder="Не менее 6 символов"
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+                <button disabled={editPassword.length < 6 || editSaving} onClick={savePassword}
+                  className="flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
+                  {editSaving ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Check" size={14} />}
+                  Сохранить
+                </button>
+              </div>
             </div>
           </div>
         </div>

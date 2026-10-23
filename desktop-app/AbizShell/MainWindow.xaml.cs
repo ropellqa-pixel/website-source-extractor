@@ -26,6 +26,9 @@ namespace AbizShell
         private bool _busy;
         private int _networkFailures;
         private double _spinnerAngle;
+        private CardReader? _cardReader;
+
+        public string? PendingCard { get; set; }
 
         public MainWindow()
         {
@@ -37,6 +40,7 @@ namespace AbizShell
             _clockTimer.Tick += (s, e) => UpdateClockUi();
             _clockTimer.Start();
             Closed += (s, e) => _clockTimer.Stop();
+            Closed += (s, e) => StopCardReader();
 
             if (Edition.Kiosk)
             {
@@ -61,7 +65,7 @@ namespace AbizShell
                 Title = Edition.Name;
                 AppTitleLabel.Text = Edition.Name;
                 AppTitleLabel.FontSize = 26;
-                VersionLabel.Text = Edition.Name + " v3.2";
+                VersionLabel.Text = Edition.Name + " v" + RemoteControlClient.AppVersion;
                 Closing += (s, e) =>
                 {
                     if (_openingNext) return;
@@ -149,6 +153,7 @@ namespace AbizShell
 
             _apiToken = DeviceManager.GetApiToken();
             _isLinked = !string.IsNullOrEmpty(_apiToken);
+            StartCardReader();
 
             await EnsureDeviceCodeAsync();
             UpdateLinkUi();
@@ -167,8 +172,121 @@ namespace AbizShell
             StartRemoteAgent();
             RecorderService.Start(_apiToken);
 
+            if (!string.IsNullOrEmpty(PendingCard))
+            {
+                string pending = PendingCard!;
+                PendingCard = null;
+                await HandleCardAsync(pending);
+                if (_openingNext) return;
+            }
+
             // Сотрудник вышел, а обновление уже скачано — ставим его сейчас.
             if (Updater.StagedDir != null) ApplyUpdateNow();
+        }
+
+        private void StartCardReader()
+        {
+            if (_cardReader != null) return;
+            try
+            {
+                _cardReader = new CardReader(Dispatcher) { OnlyWhenOwnProcessForeground = !Edition.Kiosk };
+                _cardReader.CardRead += raw => _ = HandleCardAsync(raw);
+            }
+            catch
+            {
+                _cardReader = null;
+            }
+        }
+
+        private void StopCardReader()
+        {
+            _cardReader?.Dispose();
+            _cardReader = null;
+        }
+
+        private void SetCardHint(string title, string subtitle, Color? color = null)
+        {
+            CardHintTitle.Text = title;
+            CardHintSubtitle.Text = subtitle;
+            CardHintTitle.Foreground = color.HasValue
+                ? new SolidColorBrush(color.Value)
+                : (Brush)FindResource("TextBrush");
+        }
+
+        private void ResetCardHint() =>
+            SetCardHint("Приложите карту доступа", "к считывателю — вход выполнится автоматически");
+
+        private async Task HandleCardAsync(string raw)
+        {
+            if (_openingNext) return;
+            PasswordBox.Clear();
+            if (_busy)
+                return;
+
+            if (!_isLinked || string.IsNullOrEmpty(_apiToken))
+            {
+                BindingStatusLabel.Text = "Устройство не привязано — вход по карте недоступен";
+                SetStatus("Устройство не привязано — обратитесь к директору", Color.FromRgb(0xDC, 0x26, 0x26));
+                return;
+            }
+
+            _busy = true;
+            SetCardHint("Проверка карты...", "Подождите секунду", Color.FromRgb(0x0E, 0x74, 0x90));
+            SetStatus("Проверка карты...", Color.FromRgb(0x1E, 0x1E, 0x20));
+            AnodBizClient.CardSignInResponse r;
+            try
+            {
+                r = await AnodBizClient.DeviceCardSignInAsync(_apiToken, raw);
+            }
+            finally
+            {
+                _busy = false;
+            }
+
+            switch (r.Result)
+            {
+                case AnodBizClient.CardSignInResult.Ok:
+                    _ = RemoteControlClient.LogAsync(_apiToken ?? "", "note",
+                        "Вход по карте " + r.CardNumber + (r.Foreign ? " (сотрудник другого ПК): " : ": ") + r.FullName);
+                    CompleteSignIn(r.FullName, r.Foreign ? r.ForeignToken : null, r.CardNumber, r.UserId);
+                    return;
+                case AnodBizClient.CardSignInResult.DeviceRevoked:
+                    await HandleDeviceRevokedAsync();
+                    break;
+                case AnodBizClient.CardSignInResult.UnknownCard:
+                    SetStatus("Карта не зарегистрирована" + (string.IsNullOrEmpty(r.CardNumber) ? "" : " (" + r.CardNumber + ")"),
+                        Color.FromRgb(0xDC, 0x26, 0x26));
+                    break;
+                case AnodBizClient.CardSignInResult.NoOwnPc:
+                    SetStatus(string.IsNullOrEmpty(r.Error) ? "У сотрудника нет зарегистрированного ПК" : r.Error,
+                        Color.FromRgb(0xDC, 0x26, 0x26));
+                    break;
+                case AnodBizClient.CardSignInResult.NoNetwork:
+                    SetStatus("Нет связи с сервером — приложите карту ещё раз", Color.FromRgb(0xDC, 0x26, 0x26));
+                    break;
+                default:
+                    SetStatus(string.IsNullOrEmpty(r.Error) ? "Не удалось войти по карте" : r.Error, Color.FromRgb(0xDC, 0x26, 0x26));
+                    break;
+            }
+            ResetCardHint();
+            PasswordBox.Focus();
+        }
+
+        private async Task HandleDeviceRevokedAsync()
+        {
+            DeviceManager.ClearApiToken();
+            _apiToken = null;
+            _isLinked = false;
+            _deviceCode = await DeviceManager.ResetDeviceAsync();
+            await EnsureDeviceCodeAsync();
+            UpdateLinkUi();
+            _devicePollTimer?.Start();
+            BindingStatusLabel.Text = "Устройство отвязано в личном кабинете. Выдан новый код.";
+        }
+
+        private void CompleteSignIn(string fullName, string? sessionToken = null, string? cardNumber = null, string? userId = null)
+        {
+            OpenShell(false, fullName, sessionToken, cardNumber, userId);
         }
 
         private RemoteAgent? _remoteAgent;
@@ -236,7 +354,7 @@ namespace AbizShell
             {
                 BindingOverlay.Visibility = Visibility.Collapsed;
                 EmployeeInfoLabel.Text = "Устройство привязано";
-                SetStatus("Введите пароль для входа", Color.FromRgb(0x0E, 0x74, 0x90));
+                SetStatus("Приложите карту или введите пароль", Color.FromRgb(0x0E, 0x74, 0x90));
                 PasswordBox.Focus();
             }
             else
@@ -279,7 +397,7 @@ namespace AbizShell
                         RecorderService.Start(_apiToken);
                         _devicePollTimer?.Stop();
                         UpdateLinkUi();
-                        SetStatus("Устройство привязано. Введите пароль", Color.FromRgb(0x16, 0xA3, 0x4A));
+                        SetStatus("Устройство привязано. Приложите карту или введите пароль", Color.FromRgb(0x16, 0xA3, 0x4A));
                         break;
                     case "reset":
                         // Сервер не знает этот код (например, его выдумала старая версия
@@ -370,6 +488,12 @@ namespace AbizShell
 
         private async void PasswordBox_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.Key == Key.Enter && CardReader.JustRead())
+            {
+                e.Handled = true;
+                PasswordBox.Clear();
+                return;
+            }
             if (e.Key != Key.Enter || _busy) return;
             string pwd = PasswordBox.Password;
             if (string.IsNullOrEmpty(pwd)) return;
@@ -403,17 +527,10 @@ namespace AbizShell
             switch (result)
             {
                 case AnodBizClient.SignInResult.Ok:
-                    OpenShell(false, fullName);
+                    CompleteSignIn(fullName);
                     return;
                 case AnodBizClient.SignInResult.DeviceRevoked:
-                    DeviceManager.ClearApiToken();
-                    _apiToken = null;
-                    _isLinked = false;
-                    _deviceCode = await DeviceManager.ResetDeviceAsync();
-                    await EnsureDeviceCodeAsync();
-                    UpdateLinkUi();
-                    _devicePollTimer?.Start();
-                    BindingStatusLabel.Text = "Устройство отвязано в личном кабинете. Выдан новый код.";
+                    await HandleDeviceRevokedAsync();
                     break;
                 case AnodBizClient.SignInResult.NoNetwork:
                     SetStatus("Нет связи с сервером — попробуйте ещё раз", Color.FromRgb(0xDC, 0x26, 0x26));
@@ -426,19 +543,25 @@ namespace AbizShell
             PasswordBox.Focus();
         }
 
-        private void OpenShell(bool isAdmin, string fullName)
+        private void OpenShell(bool isAdmin, string fullName, string? sessionToken = null, string? cardNumber = null, string? userId = null)
         {
             _devicePollTimer?.Stop();
             _networkTimer?.Stop();
             _spinnerTimer?.Stop();
             StopRemoteAgent();
+            StopCardReader();
 
             try
             {
+                bool foreign = !isAdmin && !string.IsNullOrEmpty(sessionToken);
                 var shell = new ShellWindow
                 {
                     IsAdmin = isAdmin,
-                    ApiToken = _apiToken ?? "",
+                    ApiToken = foreign ? sessionToken! : (_apiToken ?? ""),
+                    DeviceToken = _apiToken ?? "",
+                    IsForeignSession = foreign,
+                    LoginCardNumber = cardNumber ?? "",
+                    CurrentUserId = userId ?? "",
                     DeviceCode = _deviceCode,
                     EmployeeName = fullName ?? "",
                 };
@@ -453,6 +576,8 @@ namespace AbizShell
                 // Рабочий стол не открылся — остаёмся на экране входа, а не в пустом окне.
                 TaskbarManager.Restore();
                 _networkTimer?.Start();
+                StartCardReader();
+                ResetCardHint();
                 SetStatus("Ошибка запуска рабочего стола", Color.FromRgb(0xDC, 0x26, 0x26));
                 MessageBox.Show(this,
                     "Не удалось открыть рабочий стол АБИЗ:\n" + ex.Message +

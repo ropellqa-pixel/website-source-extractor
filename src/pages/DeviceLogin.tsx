@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { Loader2, AlertTriangle } from 'lucide-react';
@@ -15,6 +15,9 @@ export default function DeviceLogin() {
   const { signInWithLoginCode } = useAuth();
   const navigate = useNavigate();
   const [error, setError] = useState('');
+  const handledCode = useRef<string | null>(null);
+  const signInRef = useRef(signInWithLoginCode);
+  signInRef.current = signInWithLoginCode;
 
   useEffect(() => {
     const code = searchParams.get('code');
@@ -22,14 +25,16 @@ export default function DeviceLogin() {
       setError('Ссылка неполная: отсутствует код входа.');
       return;
     }
+    if (handledCode.current === code) return;
+    handledCode.current = code;
     const next = searchParams.get('next') || '';
     const target = /^\/[a-z0-9/-]*$/i.test(next) ? next : '/dashboard';
-    signInWithLoginCode(code)
+    signInRef.current(code)
       .then(() => navigate(target, { replace: true }))
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Не удалось выполнить вход.');
       });
-  }, [searchParams, signInWithLoginCode, navigate]);
+  }, [searchParams, navigate]);
 
   return (
     <div className="auth-bg flex min-h-[100dvh] items-center justify-center p-4">

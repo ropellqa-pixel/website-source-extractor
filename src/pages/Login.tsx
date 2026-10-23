@@ -1,17 +1,89 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { Lock, User, LogIn, Zap, AlertCircle, Loader2 } from 'lucide-react';
+import { Lock, User, LogIn, Zap, AlertCircle, Loader2, IdCard } from 'lucide-react';
 import AnodBizLogo from '../components/AnodBizLogo';
 import { SITE_VERSION } from '@/lib/apiUrls';
+import { looksLikeCard } from '@/lib/cardsApi';
+
+const READER_GAP_MS = 50;
+
+function readerChar(e: KeyboardEvent): string | null {
+  const code = e.code || '';
+  let m = /^(?:Digit|Numpad)(\d)$/.exec(code);
+  if (m) return m[1];
+  m = /^Key([A-F])$/.exec(code);
+  if (m) return m[1];
+  if (code === 'Comma' || code === 'Period' || code === 'NumpadDecimal') return ',';
+  if (!code && e.key.length === 1 && /[0-9A-Fa-f,.]/.test(e.key)) return e.key.toUpperCase();
+  return null;
+}
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const [cardBusy, setCardBusy] = useState(false);
+  const { signIn, signInWithCard } = useAuth();
   const navigate = useNavigate();
+  const bufRef = useRef<{ chars: string; last: number }>({ chars: '', last: 0 });
+  const cardBusyRef = useRef(false);
+  const signInWithCardRef = useRef(signInWithCard);
+  signInWithCardRef.current = signInWithCard;
+
+  useEffect(() => {
+    const loginByCard = async (raw: string) => {
+      if (cardBusyRef.current) return;
+      cardBusyRef.current = true;
+      setCardBusy(true);
+      setError('');
+      try {
+        await signInWithCardRef.current(raw);
+        navigate('/dashboard');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Не удалось войти по карте');
+      } finally {
+        cardBusyRef.current = false;
+        setCardBusy(false);
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const now = performance.now();
+      const b = bufRef.current;
+      const fast = now - b.last < READER_GAP_MS;
+      if (e.key === 'Enter') {
+        const raw = b.chars;
+        const ok = fast && raw.length >= 6 && looksLikeCard(raw);
+        b.chars = '';
+        b.last = 0;
+        if (!ok) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const target = e.target as HTMLElement | null;
+        if (target instanceof HTMLInputElement) {
+          const strip = (v: string) => (v.length >= raw.length ? v.slice(0, -raw.length) : '');
+          if (target.type === 'password') setPassword(strip);
+          else setEmail(strip);
+        }
+        void loginByCard(raw);
+        return;
+      }
+      if (e.key === 'Shift') return;
+      const ch = e.ctrlKey || e.altKey || e.metaKey ? null : readerChar(e);
+      if (!ch) {
+        b.chars = '';
+        b.last = 0;
+        return;
+      }
+      b.chars = fast ? b.chars + ch : ch;
+      b.last = now;
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,7 +152,7 @@ export default function Login() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || cardBusy}
               className="!mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 font-medium text-primary-foreground shadow-[0_1px_2px_hsl(240_10%_10%/0.2),0_8px_20px_-8px_hsl(240_10%_10%/0.45)] transition-all duration-150 hover:bg-primary/90 focus:outline-none focus-visible:ring-4 focus-visible:ring-ring/25 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
@@ -92,6 +164,19 @@ export default function Login() {
             <div className="h-px flex-1 bg-border"></div>
             <span className="text-xs uppercase tracking-[0.08em] text-muted-foreground">или</span>
             <div className="h-px flex-1 bg-border"></div>
+          </div>
+
+          <div
+            className={`mb-3 flex items-center gap-3 rounded-xl border border-dashed px-4 py-3 transition-colors ${cardBusy ? 'border-primary/50 bg-primary/5' : 'border-border bg-secondary/40'}`}
+            aria-live="polite"
+          >
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-card shadow-soft">
+              {cardBusy ? <Loader2 className="h-5 w-5 animate-spin text-primary" /> : <IdCard className="h-5 w-5 text-muted-foreground" />}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">{cardBusy ? 'Вход по карте...' : 'Приложите карту доступа'}</p>
+              <p className="text-xs text-muted-foreground">К считывателю — вход выполнится автоматически</p>
+            </div>
           </div>
 
           <button

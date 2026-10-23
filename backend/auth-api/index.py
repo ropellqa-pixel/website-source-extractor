@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import uuid as uuidlib
 from datetime import datetime, timedelta, timezone
@@ -107,6 +108,60 @@ def require_session_user(cur, event: Dict[str, Any], body: Dict[str, Any]) -> Op
     if token.startswith('Bearer '):
         token = token[7:]
     return get_user_by_token(cur, token) if token else None
+
+
+def norm_card(raw: str) -> str:
+    s = (raw or '').strip().upper().replace(' ', '').replace('.', ',').replace('/', ',')
+    m = re.fullmatch(r'(\d{1,3}),(\d{1,5})', s)
+    if m:
+        return f'{int(m.group(1)):03d},{int(m.group(2)):05d}'
+    if re.fullmatch(r'\d{6,10}', s):
+        v = int(s)
+        return f'{(v >> 16) & 0xFF:03d},{v & 0xFFFF:05d}'
+    if re.fullmatch(r'[0-9A-F]{6,12}', s):
+        v = int(s, 16)
+        return f'{(v >> 16) & 0xFF:03d},{v & 0xFFFF:05d}'
+    return s
+
+
+def valid_card(card: str) -> bool:
+    return bool(re.fullmatch(r'\d{3},\d{5}', card or ''))
+
+
+def is_manager(cur, user: Dict[str, Any]) -> bool:
+    if user.get('is_admin'):
+        return True
+    cur.execute(
+        f"SELECT role FROM {SCHEMA}.profiles WHERE user_id::text = %s OR lower(email) = lower(%s) "
+        f"ORDER BY (user_id::text = %s) DESC LIMIT 1",
+        (str(user['id']), user.get('email') or '', str(user['id'])),
+    )
+    row = cur.fetchone()
+    return bool(row and row[0] in ('director', 'deputy_director'))
+
+
+def resolve_card_target(cur, body: Dict[str, Any]):
+    profile_id = (body.get('profile_id') or '').strip()
+    user_id = (body.get('user_id') or '').strip()
+    if profile_id:
+        cur.execute(f'SELECT user_id FROM {SCHEMA}.profiles WHERE id::text = %s', (profile_id,))
+        row = cur.fetchone()
+        if not row:
+            return None, None, 'Сотрудник не найден'
+        if not row[0]:
+            return None, profile_id, 'У сотрудника нет учётной записи для входа — сначала задайте пароль'
+        return str(row[0]), profile_id, None
+    if user_id:
+        cur.execute(f'SELECT id FROM {SCHEMA}.profiles WHERE user_id::text = %s LIMIT 1', (user_id,))
+        row = cur.fetchone()
+        return user_id, (str(row[0]) if row else None), None
+    return None, None, 'Не указан сотрудник'
+
+
+def full_name_of(cur, user_id: str) -> str:
+    cur.execute(f'SELECT full_name FROM {SCHEMA}.profiles WHERE user_id::text = %s LIMIT 1', (str(user_id),))
+    row = cur.fetchone()
+    return row[0] if row and row[0] else ''
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -565,6 +620,119 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 cur.execute(f'UPDATE {SCHEMA}.api_tokens SET last_used_at = now() WHERE token = %s', (api_token,))
                 conn.commit()
                 return _resp(200, {'ok': True, 'full_name': prof[0] if prof else ''})
+
+            elif action == 'card_bind':
+                user = require_session_user(cur, event, body)
+                if not user:
+                    return _resp(401, {'error': 'Требуется вход в систему'})
+                if not is_manager(cur, user):
+                    return _resp(403, {'error': 'Привязывать карты может только директор или заместитель'})
+                card = norm_card(str(body.get('card_number') or ''))
+                if not valid_card(card):
+                    return _resp(400, {'error': 'Некорректный номер карты'})
+                target_user_id, profile_id, err = resolve_card_target(cur, body)
+                if err:
+                    return _resp(400, {'error': err})
+                cur.execute(f'SELECT user_id FROM {SCHEMA}.login_cards WHERE card_number = %s', (card,))
+                existing = cur.fetchone()
+                if existing and str(existing[0]) != target_user_id:
+                    other = full_name_of(cur, existing[0]) or 'другому сотруднику'
+                    if not body.get('force'):
+                        return _resp(409, {'error': f'Карта уже привязана: {other}', 'owner_name': other})
+                cur.execute(
+                    f'INSERT INTO {SCHEMA}.login_cards (card_number, user_id, profile_id, created_by) VALUES (%s, %s, %s, %s) '
+                    f'ON CONFLICT (card_number) DO UPDATE SET user_id = EXCLUDED.user_id, profile_id = EXCLUDED.profile_id, '
+                    f'created_by = EXCLUDED.created_by, created_at = now()',
+                    (card, target_user_id, profile_id, str(user['id'])),
+                )
+                conn.commit()
+                return _resp(200, {'ok': True, 'card_number': card})
+
+            elif action == 'card_unbind':
+                user = require_session_user(cur, event, body)
+                if not user:
+                    return _resp(401, {'error': 'Требуется вход в систему'})
+                if not is_manager(cur, user):
+                    return _resp(403, {'error': 'Отвязывать карты может только директор или заместитель'})
+                card = norm_card(str(body.get('card_number') or ''))
+                if not card:
+                    return _resp(400, {'error': 'Не указан номер карты'})
+                cur.execute(f'DELETE FROM {SCHEMA}.login_cards WHERE card_number = %s', (card,))
+                conn.commit()
+                return _resp(200, {'ok': True, 'card_number': card})
+
+            elif action == 'card_list':
+                user = require_session_user(cur, event, body)
+                if not user:
+                    return _resp(401, {'error': 'Требуется вход в систему'})
+                if not is_manager(cur, user):
+                    return _resp(403, {'error': 'Недостаточно прав'})
+                profile_id = (body.get('profile_id') or '').strip()
+                user_id = (body.get('user_id') or '').strip()
+                if profile_id and not user_id:
+                    cur.execute(f'SELECT user_id FROM {SCHEMA}.profiles WHERE id::text = %s', (profile_id,))
+                    row = cur.fetchone()
+                    user_id = str(row[0]) if row and row[0] else ''
+                if not user_id and not profile_id:
+                    return _resp(400, {'error': 'Не указан сотрудник'})
+                cur.execute(
+                    f'SELECT card_number, created_at FROM {SCHEMA}.login_cards '
+                    f'WHERE user_id = %s OR (%s <> \'\' AND profile_id = %s) ORDER BY created_at',
+                    (user_id, profile_id, profile_id),
+                )
+                cards = [{'card_number': r[0], 'created_at': r[1]} for r in cur.fetchall()]
+                return _resp(200, {'cards': cards})
+
+            elif action == 'card_signin':
+                card = norm_card(str(body.get('card_number') or ''))
+                if not valid_card(card):
+                    return _resp(400, {'error': 'Некорректный номер карты'})
+                cur.execute(
+                    f'SELECT a.id, a.email, a.is_admin FROM {SCHEMA}.login_cards c '
+                    f'JOIN {SCHEMA}.auth_users a ON a.id::text = c.user_id WHERE c.card_number = %s',
+                    (card,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return _resp(404, {'error': 'Карта не зарегистрирована'})
+                token = create_session(cur, row[0])
+                conn.commit()
+                return _resp(200, {'user': {'id': row[0], 'email': row[1]}, 'token': token, 'is_admin': row[2], 'card_number': card})
+
+            elif action == 'device_card_signin':
+                api_token = body.get('api_token') or ''
+                card = norm_card(str(body.get('card_number') or ''))
+                if not api_token:
+                    return _resp(400, {'error': 'api_token обязателен'})
+                if not valid_card(card):
+                    return _resp(400, {'error': 'Некорректный номер карты'})
+                cur.execute(f'SELECT user_id, revoked_at FROM {SCHEMA}.api_tokens WHERE token = %s', (api_token,))
+                token_row = cur.fetchone()
+                if not token_row or token_row[1] is not None:
+                    return _resp(403, {'error': 'Устройство отвязано', 'revoked': True})
+                device_user_id = str(token_row[0])
+                cur.execute(f'SELECT user_id FROM {SCHEMA}.login_cards WHERE card_number = %s', (card,))
+                card_row = cur.fetchone()
+                if not card_row:
+                    return _resp(404, {'error': 'Карта не зарегистрирована', 'card_number': card})
+                owner_id = str(card_row[0])
+                cur.execute(f'UPDATE {SCHEMA}.api_tokens SET last_used_at = now() WHERE token = %s', (api_token,))
+                if owner_id == device_user_id:
+                    conn.commit()
+                    return _resp(200, {'ok': True, 'full_name': full_name_of(cur, owner_id), 'user_id': owner_id,
+                                       'foreign': False, 'card_number': card})
+                cur.execute(
+                    f'SELECT t.token FROM {SCHEMA}.api_tokens t JOIN {SCHEMA}.devices d ON d.device_code = t.device_code '
+                    f"WHERE t.user_id::text = %s AND t.revoked_at IS NULL AND d.status = 'linked' "
+                    f'ORDER BY t.created_at DESC LIMIT 1',
+                    (owner_id,),
+                )
+                own = cur.fetchone()
+                conn.commit()
+                if not own:
+                    return _resp(403, {'error': 'У сотрудника нет зарегистрированного ПК', 'card_number': card})
+                return _resp(200, {'ok': True, 'full_name': full_name_of(cur, owner_id), 'user_id': owner_id,
+                                   'foreign': True, 'api_token': own[0], 'card_number': card})
 
             elif action == 'api_verify':
                 # Проверка постоянного API-токена — используется другими backend-функциями

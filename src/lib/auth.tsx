@@ -38,6 +38,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>;
   signInWithPin: (pin: string, adpodSlug: string) => Promise<void>;
   signInWithLoginCode: (code: string) => Promise<void>;
+  signInWithCard: (cardNumber: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
   refreshRoles: () => Promise<boolean>;
@@ -272,6 +273,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   };
 
+  const signInWithCard = async (cardNumber: string) => {
+    const result = await auth.cardSignIn(cardNumber);
+
+    if (!result.user) {
+      throw new Error('Не удалось войти по карте.');
+    }
+
+    const comp = await loadCompany();
+    setCompany(comp);
+    const u = await buildUser(result.user, comp);
+    setUser(u);
+  };
+
   const signOut = async () => {
     await auth.signOut();
     setUser(null);
@@ -299,7 +313,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, company, loading, signUp, signIn, signInWithPin, signInWithLoginCode, signOut, refreshUser, refreshRoles }}>
+    <AuthContext.Provider value={{ user, company, loading, signUp, signIn, signInWithPin, signInWithLoginCode, signInWithCard, signOut, refreshUser, refreshRoles }}>
       {children}
     </AuthContext.Provider>
   );

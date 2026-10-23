@@ -267,6 +267,11 @@ export const auth = {
     setToken(json.token);
     return { user: json.user };
   },
+  async cardSignIn(cardNumber: string) {
+    const json = await callAuthApi({ action: 'card_signin', card_number: cardNumber });
+    setToken(json.token);
+    return { user: json.user };
+  },
   /** Директор меняет пароль сотрудника (например, из карточки привязанного устройства). */
   async setEmployeePassword(profileId: string, password: string): Promise<void> {
     const token = getToken();

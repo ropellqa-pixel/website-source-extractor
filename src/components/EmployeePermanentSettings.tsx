@@ -1,3 +1,6 @@
+import EmployeeConfiguratorPicker from './schedule/EmployeeConfiguratorPicker';
+import type { ConfiguratorRecord } from './schedule/configuratorCatalog';
+
 const ASSIGNMENT_OPTIONS = [
   { value: 'СТ', label: 'СТ (Старший)' },
   { value: 'МЛ', label: 'МЛ (Младший)' },
@@ -53,6 +56,10 @@ interface EmployeePermanentSettingsProps {
   onChangeMlNoNight: (value: boolean) => void;
   onChangePermDelays: (value: string) => void;
   onChangePermUnavailable: (value: string) => void;
+  configurators?: ConfiguratorRecord[];
+  configuratorIds?: string[];
+  onChangeConfiguratorIds?: (ids: string[]) => void;
+  configuratorNames?: (id: string) => string;
   children?: React.ReactNode;
 }
 
@@ -79,6 +86,10 @@ export default function EmployeePermanentSettings({
   onChangeMlNoNight,
   onChangePermDelays,
   onChangePermUnavailable,
+  configurators,
+  configuratorIds,
+  onChangeConfiguratorIds,
+  configuratorNames,
   children,
 }: EmployeePermanentSettingsProps) {
   const parsePermDelayDates = (): number[] => parseDateRangeString(permDelays);
@@ -200,6 +211,15 @@ export default function EmployeePermanentSettings({
             </div>
           )}
         </div>
+
+        {onChangeConfiguratorIds && (
+          <EmployeeConfiguratorPicker
+            configurators={configurators || []}
+            selectedIds={configuratorIds || []}
+            onChange={onChangeConfiguratorIds}
+            employeeName={configuratorNames}
+          />
+        )}
 
         {children}
       </div>

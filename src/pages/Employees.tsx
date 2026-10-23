@@ -4,6 +4,7 @@ import { db, auth } from '@/lib/sdk';
 import { createVkBindCode, getVkStatus, getAllVkStatuses, unbindVk } from '../lib/vkBinding';
 import { PIN_ADPODS } from '../lib/pinAdpods';
 import { listDevices, linkDevice, revokeDevice, setEmployeePassword, type Device } from '../lib/devices';
+import CardAccessSection from '@/components/devices/CardAccessSection';
 import {
   Users, UserPlus, Search, Trash2, Shield, Pencil,
   MoreVertical, Check, X, KeyRound, Plus, Copy, RefreshCw, LogIn,
@@ -1101,7 +1102,7 @@ export default function Employees() {
                             onClick={() => { setPasswordDevice(device); setNewDevicePassword(''); }}
                             className="px-3 py-1.5 bg-secondary border border-border text-foreground rounded-lg text-sm font-medium hover:bg-border transition-all"
                           >
-                            Сменить пароль
+                            Изменить сведения
                           </button>
                           <button
                             onClick={() => handleRevokeDevice(device)}
@@ -1206,11 +1207,20 @@ export default function Employees() {
         <div className="fixed inset-0 bg-foreground/30 backdrop-blur-sm flex items-center justify-center z-[70] p-4" onClick={() => setPasswordDevice(null)}>
           <div className="bg-card rounded-2xl p-6 w-full max-w-md border border-border" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-foreground">Сменить пароль</h2>
+              <h2 className="text-lg font-bold text-foreground">Изменить сведения</h2>
               <button onClick={() => setPasswordDevice(null)} className="p-2 text-muted-foreground hover:text-foreground rounded-lg">
                 <X className="w-5 h-5" />
               </button>
             </div>
+            {passwordDevice.profile_id && (
+              <div className="mb-5">
+                <CardAccessSection
+                  profileId={passwordDevice.profile_id}
+                  notify={(text, type) => showToast(text, type === 'error' ? 'error' : 'success')}
+                />
+              </div>
+            )}
+            <label className="block text-sm font-semibold text-foreground mb-1">Пароль</label>
             <p className="text-sm text-muted-foreground mb-4">
               Новый пароль для входа сотрудника «{passwordDevice.profile_name}» на сайте АнодБИЗ.
             </p>

@@ -26,6 +26,12 @@ export interface SolverEmployee {
   ml_no_night: boolean;
 }
 
+export interface SolverHooks {
+  slotCost?: (p: number, s: string, d: number, rows: string[][]) => number;
+  skipCost?: (p: number, d: number, rows: string[][]) => number;
+  comboCost?: (pick: number[], d: number) => number;
+}
+
 const SLOTS = ['Д', 'Н', 'Дп', 'Нп'] as const;
 const PARTNER = [2, 3, 0, 1];
 const RULE = 100;
@@ -88,6 +94,7 @@ export function solveSchedule(
   days: number,
   adjacentAllowed: (a: string, b: string) => boolean,
   beamWidth = 60,
+  hooks?: SolverHooks,
 ): string[][] {
   const n = emps.length;
   if (n === 0) return [];
@@ -127,9 +134,15 @@ export function solveSchedule(
         const atStart = d - dpn === 0;
         if (dpn >= 3 || (dpn > 0 && !atStart)) skip[p] = RULE;
       }
+      if (hooks?.skipCost) skip[p] += hooks.skipCost(p, d, st.rows);
       SLOTS.forEach((s, si) => {
         if (!allowed(e, s, dayNum)) return;
         let c = 0;
+        if (hooks?.slotCost) {
+          const h = hooks.slotCost(p, s, d, st.rows);
+          if (!Number.isFinite(h)) return;
+          c += h;
+        }
         if (isSt(e)) {
           // В первый день месяца «Н» — продолжение пары с прошлого месяца.
           // Если вчерашнюю «Д» отработал СТ без ночей (запрет ночей) — его пару закрывает другой СТ:
@@ -180,6 +193,7 @@ export function solveSchedule(
     const rec = (si: number) => {
       if (si === 4) {
         let c = skipTotal;
+        if (hooks?.comboCost) c += hooks.comboCost(pick, d);
         for (let k = 0; k < 4; k++) {
           const p = pick[k];
           if (p < 0) { c += EMPTY; continue; }

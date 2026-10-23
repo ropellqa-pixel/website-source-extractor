@@ -8,6 +8,12 @@ import { LogOut, ArrowLeft, Save, Send, Lock, Unlock, RefreshCw, Pencil, Trash2,
 import AnodBizLogo from '../components/AnodBizLogo';
 import EmployeeSettingsModal from '../components/EmployeeSettingsModal';
 import { apiUrl } from '@/lib/apiUrls';
+import Icon from '@/components/ui/icon';
+import SchedulePinLock from '@/components/schedule/SchedulePinLock';
+import ConfiguratorDialog from '@/components/schedule/ConfiguratorDialog';
+import { loadConfigurators, parseIdList } from '@/components/schedule/configuratorApi';
+import { buildConfiguratorEngine, EngineViolation } from '@/components/schedule/configuratorEngine';
+import type { ConfiguratorRecord } from '@/components/schedule/configuratorCatalog';
 
 const VK_API_URL = apiUrl('vk-api');
 
@@ -59,6 +65,7 @@ interface ScheduleEmployee {
   st_no_night: boolean;
   ml_no_day: boolean;
   ml_no_night: boolean;
+  configurator_ids: string[];
 }
 
 interface ScheduleRow {
@@ -75,9 +82,19 @@ function isAdjacentAllowed(prevShift: string, nextShift: string): boolean {
 }
 
 // Генерация табеля: ровно 4 смены в день, правила СТ/МЛ, равномерность смен (см. scheduleSolver).
-function generateSchedule(employees: ScheduleEmployee[], totalDays: number): string[][] {
+function generateSchedule(
+  employees: ScheduleEmployee[],
+  totalDays: number,
+  year?: number,
+  month?: number,
+  configurators: ConfiguratorRecord[] = [],
+): { rows: string[][]; violations: EngineViolation[]; notify: boolean } {
   const active = employees.filter(e => !e.excluded);
-  return solveSchedule(active, totalDays, isAdjacentAllowed);
+  const engine = year !== undefined && month !== undefined && configurators.length
+    ? buildConfiguratorEngine(active, configurators, year, month, totalDays)
+    : null;
+  const rows = solveSchedule(active, totalDays, isAdjacentAllowed, 60, engine?.hooks);
+  return { rows, violations: engine ? engine.findViolations(rows) : [], notify: !!engine?.notify };
 }
 
 function createScheduleImage(monthYear: string, rows: ScheduleRow[], days: number): Promise<string> {
@@ -233,6 +250,15 @@ function printSchedule(monthYear: string, rows: ScheduleRow[], days: number) {
 }
 
 export default function Schedule() {
+  const navigate = useNavigate();
+  return (
+    <SchedulePinLock onBack={() => navigate('/dashboard')}>
+      <ScheduleContent />
+    </SchedulePinLock>
+  );
+}
+
+function ScheduleContent() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const isDeputy = user?.role === 'deputy_director' || user?.role === 'director';
@@ -256,6 +282,12 @@ export default function Schedule() {
   const [allProfiles, setAllProfiles] = useState<{ id: string; full_name: string; vk_id: string }[]>([]);
   const [selectedEmployeeForSettings, setSelectedEmployeeForSettings] = useState<{ employee: ScheduleEmployee; index: number } | null>(null);
   const [showExcluded, setShowExcluded] = useState(false);
+  const [configurators, setConfigurators] = useState<ConfiguratorRecord[]>([]);
+  const [showConfigurator, setShowConfigurator] = useState(false);
+
+  useEffect(() => {
+    loadConfigurators(user?.companyId).then(setConfigurators);
+  }, [user?.companyId]);
 
   const monthYear = `${RUSSIAN_MONTHS[selectedMonth]} ${selectedYear}`;
   const getDaysInMonth = useCallback(() => new Date(selectedYear, selectedMonth + 1, 0).getDate(), [selectedMonth, selectedYear]);
@@ -329,6 +361,7 @@ export default function Schedule() {
         st_no_night: (cfg?.st_no_night as boolean) || false,
         ml_no_day: (cfg?.ml_no_day as boolean) || false,
         ml_no_night: (cfg?.ml_no_night as boolean) || false,
+        configurator_ids: parseIdList(cfg?.configurator_ids),
       };
     });
   }, [monthYear]);
@@ -384,14 +417,21 @@ export default function Schedule() {
     setStatusMessage('Подбираю лучший вариант табеля...');
     // Даём странице нарисовать индикатор, затем считаем (1–3 секунды).
     setTimeout(() => {
-      const schedule = generateSchedule(employees, getDaysInMonth());
+      const { rows: schedule, violations, notify } = generateSchedule(employees, getDaysInMonth(), selectedYear, selectedMonth, configurators);
       const activeEmps = employees.filter(e => !e.excluded);
       setRows(activeEmps.map((emp, i) => ({
         profile_id: emp.profile_id, full_name: emp.full_name, shifts: schedule[i] || Array(getDaysInMonth()).fill(''),
       })));
       setGenerating(false);
-      setStatusMessage('Расписание сгенерировано: 4 смены каждый день');
-      setTimeout(() => setStatusMessage(''), 3000);
+      if (notify && violations.length && isDeputy) {
+        const nameOf = (id: string) => activeEmps.find(e => e.profile_id === id)?.full_name || '';
+        const sample = violations.slice(0, 3).map(v => `${nameOf(v.profile_id)}, ${v.day} — ${v.rule}`).join('; ');
+        setStatusMessage(`Сгенерировано. Нарушено условий конфигуратора: ${violations.length}. ${sample}${violations.length > 3 ? '…' : ''}`);
+        setTimeout(() => setStatusMessage(''), 12000);
+      } else {
+        setStatusMessage('Расписание сгенерировано: 4 смены каждый день');
+        setTimeout(() => setStatusMessage(''), 3000);
+      }
     }, 50);
   };
 
@@ -587,6 +627,13 @@ export default function Schedule() {
               <span className="flex items-center gap-1 text-blue-600 text-xs bg-blue-500/10 px-2 py-1 rounded-full">
                 Ответственный
               </span>
+            )}
+            {isDeputy && (
+              <button onClick={() => setShowConfigurator(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-secondary text-foreground hover:bg-border">
+                <Icon name="SlidersHorizontal" className="w-4 h-4" />
+                <span className="hidden sm:inline">Конфигуратор</span>
+              </button>
             )}
             <button onClick={() => signOut().then(() => navigate('/login'))} className="p-2 text-muted-foreground hover:text-foreground rounded-lg">
               <LogOut className="w-5 h-5" />
@@ -817,6 +864,17 @@ export default function Schedule() {
           </div>
         )}
       </main>
+
+      {isDeputy && (
+        <ConfiguratorDialog
+          open={showConfigurator}
+          onOpenChange={setShowConfigurator}
+          companyId={user?.companyId}
+          userId={user?.profileId || user?.id}
+          employees={allEmployeesForModal}
+          onChanged={setConfigurators}
+        />
+      )}
 
       {selectedEmployeeForSettings && (
         <EmployeeSettingsModal

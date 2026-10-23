@@ -62,6 +62,7 @@ namespace AbizShell
 
         protected override void OnExit(ExitEventArgs e)
         {
+            CardReader.DisposeCurrent();
             SkudRecorder.StopAll();
             TaskbarManager.Restore();
             base.OnExit(e);

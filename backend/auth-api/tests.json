@@ -154,6 +154,69 @@
         "password": "anodbiz"
       },
       "expectedStatus": 401
+    },
+    {
+      "name": "Card signin with empty card rejected",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "card_signin",
+        "card_number": ""
+      },
+      "expectedStatus": 400
+    },
+    {
+      "name": "Card signin unknown card",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "card_signin",
+        "card_number": "255,65535"
+      },
+      "expectedStatus": 404
+    },
+    {
+      "name": "Card bind without session rejected",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "card_bind",
+        "profile_id": "x",
+        "card_number": "012,34567"
+      },
+      "expectedStatus": 401
+    },
+    {
+      "name": "Card list without session rejected",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "card_list",
+        "profile_id": "x"
+      },
+      "expectedStatus": 401
+    },
+    {
+      "name": "Device card signin with bad token rejected",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "device_card_signin",
+        "api_token": "not_a_real_token",
+        "card_number": "012,34567"
+      },
+      "expectedStatus": 403
+    },
+    {
+      "name": "Device card signin without card rejected",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "device_card_signin",
+        "api_token": "x",
+        "card_number": ""
+      },
+      "expectedStatus": 400
     }
   ]
 }

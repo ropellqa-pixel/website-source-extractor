@@ -3,6 +3,8 @@ import { db } from '@/lib/sdk';
 import EmployeeVariableSettings from './EmployeeVariableSettings';
 import EmployeePermanentSettings from './EmployeePermanentSettings';
 import EmployeePreferencesAndExclude from './EmployeePreferencesAndExclude';
+import { loadConfigurators, parseIdList } from './schedule/configuratorApi';
+import type { ConfiguratorRecord } from './schedule/configuratorCatalog';
 
 interface EmployeeConfig {
   id: string;
@@ -23,6 +25,7 @@ interface EmployeeConfig {
   ml_no_night?: boolean;
   perm_delays: string;
   perm_unavailable: string;
+  configurator_ids: string[];
 }
 
 interface EmployeeProfile {
@@ -78,12 +81,18 @@ export default function EmployeeSettingsModal({
     ml_no_night: false,
     perm_delays: '',
     perm_unavailable: '',
+    configurator_ids: [],
   });
+  const [configurators, setConfigurators] = useState<ConfiguratorRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [showPrefList, setShowPrefList] = useState(false);
   const [showExcludeConfirm, setShowExcludeConfirm] = useState(false);
+
+  useEffect(() => {
+    loadConfigurators().then(setConfigurators);
+  }, []);
 
   useEffect(() => {
     loadConfig();
@@ -124,6 +133,7 @@ export default function EmployeeSettingsModal({
         ml_no_night: p?.ml_no_night || false,
         perm_delays: (p?.delays as string) || '',
         perm_unavailable: (p?.unavailable as string) || '',
+        configurator_ids: parseIdList(p?.configurator_ids),
       }));
     } catch (err) {
       console.error('Load config error:', err);
@@ -150,6 +160,7 @@ export default function EmployeeSettingsModal({
         ml_no_night: config.ml_no_night,
         delays: config.perm_delays,
         unavailable: config.perm_unavailable,
+        configurator_ids: config.configurator_ids,
       };
 
       const { data: existing } = await db.from('schedule_config')
@@ -309,6 +320,10 @@ export default function EmployeeSettingsModal({
             onChangeMlNoNight={value => setConfig({ ...config, ml_no_night: value })}
             onChangePermDelays={value => setConfig({ ...config, perm_delays: value })}
             onChangePermUnavailable={value => setConfig({ ...config, perm_unavailable: value })}
+            configurators={configurators}
+            configuratorIds={config.configurator_ids}
+            onChangeConfiguratorIds={ids => setConfig({ ...config, configurator_ids: ids })}
+            configuratorNames={id => allEmployees.find(e => e.id === id)?.full_name || ''}
           >
             <EmployeePreferencesAndExclude
               employeeId={employee.id}

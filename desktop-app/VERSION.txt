@@ -1,3 +1,5 @@
+ABIZ project version 23 (program 4.0, build 1.7.0)
+New: sign in with an Em-Marine access card (TS-RDR-USB-EM reader); card of the logged-in user logs out, card of another employee switches user. Fixed brief error while loading AnodBIZ (loading screen until the site opens).
 ABIZ project version 22 (program 3.9, build 1.6.0)
 New: works with own server bizwor.ru (site and API at https://bizwor.ru/api).
 New: light redesign of the program (login, lock screen, top panel, explorer, camera), new icon and installer artwork.

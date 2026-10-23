@@ -85,6 +85,63 @@ namespace AbizShell
             }
         }
 
+        public enum CardSignInResult { Ok, UnknownCard, NoOwnPc, DeviceRevoked, NoNetwork, Error }
+
+        public sealed class CardSignInResponse
+        {
+            public CardSignInResult Result { get; init; }
+            public string FullName { get; init; } = "";
+            public string UserId { get; init; } = "";
+            public string CardNumber { get; init; } = "";
+            public bool Foreign { get; init; }
+            public string? ForeignToken { get; init; }
+            public string Error { get; init; } = "";
+        }
+
+        public static async Task<CardSignInResponse> DeviceCardSignInAsync(string apiToken, string cardNumber)
+        {
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                string json = JsonSerializer.Serialize(new { action = "device_card_signin", api_token = apiToken, card_number = cardNumber });
+                using var resp = await http.PostAsync(AuthApiUrl, new StringContent(json, Encoding.UTF8, "application/json"));
+                string body = await resp.Content.ReadAsStringAsync();
+                JsonElement root;
+                try { root = JsonDocument.Parse(body).RootElement; }
+                catch { return new CardSignInResponse { Result = CardSignInResult.Error, Error = "Некорректный ответ сервера" }; }
+
+                string Str(string name) =>
+                    root.ValueKind == JsonValueKind.Object && root.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String
+                        ? p.GetString() ?? "" : "";
+                bool Bool(string name) =>
+                    root.ValueKind == JsonValueKind.Object && root.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.True;
+
+                int code = (int)resp.StatusCode;
+                if (code == 200)
+                {
+                    string token = Str("api_token");
+                    return new CardSignInResponse
+                    {
+                        Result = CardSignInResult.Ok,
+                        FullName = Str("full_name"),
+                        UserId = Str("user_id"),
+                        CardNumber = Str("card_number"),
+                        Foreign = Bool("foreign"),
+                        ForeignToken = string.IsNullOrEmpty(token) ? null : token,
+                    };
+                }
+                string error = Str("error");
+                if (code == 404) return new CardSignInResponse { Result = CardSignInResult.UnknownCard, Error = error, CardNumber = Str("card_number") };
+                if (code == 403 && Bool("revoked")) return new CardSignInResponse { Result = CardSignInResult.DeviceRevoked, Error = error };
+                if (code == 403) return new CardSignInResponse { Result = CardSignInResult.NoOwnPc, Error = error };
+                return new CardSignInResponse { Result = CardSignInResult.Error, Error = error };
+            }
+            catch
+            {
+                return new CardSignInResponse { Result = CardSignInResult.NoNetwork };
+            }
+        }
+
         /// <summary>Универсальный запрос к data-api (CRUD по любой разрешённой таблице).</summary>
         public async Task<JsonElement> QueryAsync(object body)
         {
