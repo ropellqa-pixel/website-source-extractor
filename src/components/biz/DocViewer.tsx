@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '@/components/ui/icon';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { BizDocument, BizOrg } from '@/lib/bizDocs';
 import { bizCall } from '@/lib/bizApi';
-import { FULL_DOC_CSS, docTitle, downloadHtml, downloadWord, printDoc, renderBizDocument, renderGenerated } from '@/lib/bizRender';
+import { FULL_DOC_CSS, docTitle, downloadHtml, downloadWord, pagedHtml, printDoc, renderBizDocument, renderGenerated } from '@/lib/bizRender';
+import { PAGE_CSS } from '@/lib/bizPaginate';
 
 interface Props {
   doc: BizDocument | null;
@@ -43,6 +44,7 @@ export default function DocViewer({ doc, org, onClose, editable, onSaved }: Prop
 
   const html = current ? renderBizDocument(current, org) : '';
   const title = current ? docTitle(current) : '';
+  const paged = useMemo(() => (current && !edit ? pagedHtml(title, html) : ''), [current, edit, html, title]);
 
   useEffect(() => {
     if (edit && ref.current) ref.current.innerHTML = html;
@@ -81,8 +83,8 @@ export default function DocViewer({ doc, org, onClose, editable, onSaved }: Prop
 
   return (
     <Dialog open={!!doc} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-h-[94vh] max-w-[1000px] overflow-hidden p-0">
-        <style>{FULL_DOC_CSS}</style>
+      <DialogContent className="max-h-[94vh] max-w-[880px] overflow-hidden p-0">
+        <style>{FULL_DOC_CSS + PAGE_CSS}</style>
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 pr-12">
           <DialogTitle className="mr-auto truncate text-base">{title}</DialogTitle>
           {current?.custom_html && !edit && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs text-amber-700">Изменён вручную</span>}
@@ -129,13 +131,13 @@ export default function DocViewer({ doc, org, onClose, editable, onSaved }: Prop
         {msg && <div className={`px-4 py-2 text-sm ${msg.startsWith('Ошибка') ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{msg}</div>}
 
         <div className={`overflow-auto bg-secondary/50 p-4 ${edit ? 'max-h-[calc(94vh-230px)]' : 'max-h-[calc(94vh-64px)]'}`}>
-          <div className="mx-auto w-full max-w-[21cm] bg-white px-[1.5cm] pb-[2cm] pt-[1.5cm] text-black shadow">
-            {edit ? (
+          {edit ? (
+            <div className="mx-auto w-[210mm] max-w-full bg-white px-[15mm] pb-[20mm] pt-[15mm] text-black shadow">
               <div ref={ref} contentEditable suppressContentEditableWarning className="bizdoc outline-none ring-amber-300 focus:ring-2" />
-            ) : (
-              <div className="bizdoc" dangerouslySetInnerHTML={{ __html: html }} />
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="text-black" dangerouslySetInnerHTML={{ __html: paged }} />
+          )}
         </div>
       </DialogContent>
     </Dialog>

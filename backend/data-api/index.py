@@ -129,8 +129,10 @@ def _extract_token(event: Dict[str, Any], body: Dict[str, Any]) -> str:
     return token.strip()
 
 
-LIC_SQL = ("(u.is_biz_admin OR (u.org_id = 'org-main' AND o.status = 'active' "
-           "AND (o.license_until IS NULL OR o.license_until >= CURRENT_DATE)))")
+LIC_SQL = 'true'
+
+
+_CURRENT: Dict[str, str] = {'uid': ''}
 
 
 def _authenticate(cur, token: str) -> Optional[Dict[str, Any]]:
@@ -184,7 +186,9 @@ def _run(cur, conn, body: Dict[str, Any]) -> tuple:
         if filters:
             clauses, params = _build_where(filters)
         if table == 'profiles':
-            clauses = list(clauses) + ["id <> 'demo-director-profile'"]
+            clauses = list(clauses) + ["id <> 'demo-director-profile'",
+                                       f"(user_id IS NULL OR user_id NOT IN (SELECT id FROM \"{SCHEMA}\".auth_users "
+                                       f"WHERE org_id IS DISTINCT FROM (SELECT org_id FROM \"{SCHEMA}\".auth_users WHERE id = '{_CURRENT['uid']}')))"]
         elif table in ('schedule_config', 'employee_schedule_settings', 'salary_data'):
             clauses = list(clauses) + ["profile_id IS DISTINCT FROM 'demo-director-profile'"]
         if clauses:
@@ -250,7 +254,7 @@ def _run(cur, conn, body: Dict[str, Any]) -> tuple:
     return 400, {'error': f'Неизвестная операция: {op}'}
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Универсальный REST-бэкенд для CRUD-операций над таблицами компании: сотрудники,
     табель, зарплата, документы, чат, шаблоны ДТО и т.д. Поддерживает пакетный режим
     {batch: [...]} — много операций одним запросом. Доступ только по сессии сайта
@@ -279,6 +283,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         conn.autocommit = False
         with conn.cursor() as cur:
             user = _authenticate(cur, token)
+            _CURRENT['uid'] = str(user['id']).replace("'", '') if user else ''
+
             conn.commit()
             if not user:
                 return _resp(401, {'data': None, 'error': {'message': 'Не авторизован: нужен действующий токен входа'}})
@@ -303,3 +309,22 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     finally:
         if conn is not None:
             conn.close()
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    return []
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''Универсальный REST-бэкенд для CRUD-операций над таблицами компании: сотрудники,
+    табель, зарплата, документы, чат, шаблоны ДТО и т.д. Поддерживает пакетный режим
+    {batch: [...]} — много операций одним запросом. Доступ только по сессии сайта
+    или API-токену десктоп-приложения (X-Authorization).
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

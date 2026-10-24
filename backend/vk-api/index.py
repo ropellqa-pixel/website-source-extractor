@@ -13,7 +13,7 @@ SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 'public')
 CORS_HEADERS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-User-Id, X-Auth-Token, X-Session-Id',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Authorization, X-User-Id, X-Auth-Token, X-Session-Id',
     'Access-Control-Max-Age': '86400',
 }
 
@@ -176,7 +176,7 @@ def send_broadcast(items: List[Dict[str, Any]], photo_base64: Optional[str]) -> 
     return {'sent': sent, 'failed': failed, 'photo_error': photo_error}
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Backend для интеграции с VK: генерация/проверка кода привязки сотрудника,
     отвязка VK и отправка рассылок табеля/зарплаты сообщением ВКонтакте.'''
     method = event.get('httpMethod', 'GET')
@@ -233,3 +233,20 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return _resp(405, {'error': 'Метод не поддерживается'})
     except Exception as e:
         return _resp(500, {'error': str(e)})
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    return []
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, (), CORS_HEADERS, require_user=True)
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''Backend для интеграции с VK: генерация/проверка кода привязки сотрудника,
+    отвязка VK и отправка рассылок табеля/зарплаты сообщением ВКонтакте.
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

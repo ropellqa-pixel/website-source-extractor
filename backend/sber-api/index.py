@@ -511,7 +511,7 @@ def _refresh_statuses(cur) -> None:
 
 # ---------------------------------------------------------------- обработчик
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Раздел «СБЕР»: подключение СберБизнес API (OAuth + сертификат), ежедневная автозагрузка выписки по расчётному
     счёту в бухгалтерию, реквизиты контрагентов (меняет только замдиректора), недельные заявки на оплату от старшего
     сотрудника и оплата директором через СберБизнес с подтверждением паролем и лимитами.'''
@@ -1127,3 +1127,25 @@ def _pay(cur, user: Dict[str, Any], body: Dict[str, Any], s: Dict[str, Any]) -> 
                         (f'{resp.status_code}: {msg}'[:500], 'ERROR', r['id']))
             results.append({'id': r['id'], 'ok': False, 'error': msg or f'Банк ответил {resp.status_code}'})
     return _resp(200, {'ok': True, 'results': results})
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    if qs.get('state'):
+        return [('sber_oauth', 'state = %s', [qs.get('state')])]
+    if qs.get('cron') is not None:
+        return [('app_settings', "key = 'sber' AND value->>'cron_key' = %s", [qs.get('cron') or ''])]
+    return []
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''Раздел «СБЕР»: подключение СберБизнес API (OAuth + сертификат), ежедневная автозагрузка выписки по расчётному
+    счёту в бухгалтерию, реквизиты контрагентов (меняет только замдиректора), недельные заявки на оплату от старшего
+    сотрудника и оплата директором через СберБизнес с подтверждением паролем и лимитами.
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

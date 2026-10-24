@@ -3,6 +3,12 @@ import { apiUrl } from '@/lib/apiUrls';
 
 const VK_API_URL = apiUrl('vk-api');
 
+export function vkAuth(): Record<string, string> {
+  let t = '';
+  try { t = localStorage.getItem('anod_session_token') || ''; } catch { /* */ }
+  return t ? { 'X-Authorization': t } : {};
+}
+
 interface VkStatusResponse {
   code: string | null;
   binding: {
@@ -18,7 +24,7 @@ export async function createVkBindCode(profileId: string): Promise<string | null
   try {
     const res = await fetch(VK_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...vkAuth() },
       body: JSON.stringify({ action: 'generate_code', profile_id: profileId }),
     });
     if (!res.ok) return null;
@@ -33,7 +39,7 @@ export async function createVkBindCode(profileId: string): Promise<string | null
 /** Проверяет, есть ли активный код для профиля, и статус привязки. */
 export async function getVkBindCode(profileId: string): Promise<string | null> {
   try {
-    const res = await fetch(`${VK_API_URL}?action=status&profile_id=${encodeURIComponent(profileId)}`);
+    const res = await fetch(`${VK_API_URL}?action=status&profile_id=${encodeURIComponent(profileId)}`, { headers: vkAuth() });
     if (!res.ok) return null;
     const data: VkStatusResponse = await res.json();
     return data.code || null;
@@ -46,7 +52,7 @@ export async function getVkBindCode(profileId: string): Promise<string | null> {
 /** Полный статус привязки (код + подтверждённая привязка), для страницы Сотрудники. */
 export async function getVkStatus(profileId: string): Promise<VkStatusResponse | null> {
   try {
-    const res = await fetch(`${VK_API_URL}?action=status&profile_id=${encodeURIComponent(profileId)}`);
+    const res = await fetch(`${VK_API_URL}?action=status&profile_id=${encodeURIComponent(profileId)}`, { headers: vkAuth() });
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {
@@ -58,7 +64,7 @@ export async function getVkStatus(profileId: string): Promise<VkStatusResponse |
 /** Возвращает все подтверждённые привязки VK разом: { profile_id -> vk_user_id }. Используется для рассылок. */
 export async function getAllVkBindings(): Promise<Record<string, string>> {
   try {
-    const res = await fetch(`${VK_API_URL}?action=bindings_list`);
+    const res = await fetch(`${VK_API_URL}?action=bindings_list`, { headers: vkAuth() });
     if (!res.ok) return {};
     const data = await res.json();
     const map: Record<string, string> = {};
@@ -75,7 +81,7 @@ export async function getAllVkBindings(): Promise<Record<string, string>> {
 /** Все привязки VK (любого статуса) одним запросом — для страницы Сотрудники. */
 export async function getAllVkStatuses(): Promise<Array<{ profile_id: string; vk_user_id: number | null; vk_link: string | null; status: string; message: string | null }>> {
   try {
-    const res = await fetch(`${VK_API_URL}?action=statuses_all`);
+    const res = await fetch(`${VK_API_URL}?action=statuses_all`, { headers: vkAuth() });
     if (!res.ok) return [];
     const data = await res.json();
     return data.bindings || [];
@@ -89,7 +95,7 @@ export async function getAllVkStatuses(): Promise<Array<{ profile_id: string; vk
 export async function unbindVk(profileId: string): Promise<void> {
   await fetch(VK_API_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...vkAuth() },
     body: JSON.stringify({ action: 'unbind', profile_id: profileId }),
   });
   await db.from('profiles').update({ vk_link: null, vk_id: null }).eq('id', profileId);

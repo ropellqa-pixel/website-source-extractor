@@ -628,7 +628,7 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
     return _resp(400, {'error': 'Неизвестное действие'})
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''СКУД (дверь склада): журнал проходов, ключ-карты сотрудников (запись, привязка, блокировка,
     удаление), открытие двери с сайта. Контроллер Gate-4000-Ethernet связывается через «мост»
     (программа в локальной сети), который присылает события и забирает карты/команды по ключу X-Skud-Key.'''
@@ -681,3 +681,29 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     finally:
         cur.close()
         conn.close()
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    h = event.get('headers') or {}
+    t = _tenant.token_from(event, body)
+    out = []
+    key = (h.get('X-Skud-Key') or h.get('x-skud-key') or body.get('key') or '').strip()
+    if str(body.get('action') or '').startswith('bridge_') and key:
+        out.append(('skud_controllers', 'secret = %s', [key]))
+    if t.startswith('rec_'):
+        out.append(('recorder_keys', 'key = %s AND revoked_at IS NULL', [t]))
+    return out
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''СКУД (дверь склада): журнал проходов, ключ-карты сотрудников (запись, привязка, блокировка,
+    удаление), открытие двери с сайта. Контроллер Gate-4000-Ethernet связывается через «мост»
+    (программа в локальной сети), который присылает события и забирает карты/команды по ключу X-Skud-Key.
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

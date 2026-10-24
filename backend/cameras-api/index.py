@@ -350,7 +350,7 @@ def _list(cur, can_manage: bool):
     return out
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Раздел «Камеры»: список камер компании, живое видео и архив с карты памяти через облако
     производителя (режим RPS, по серийному номеру). Смотреть могут все сотрудники; добавлять,
     удалять, менять порядок и камеру по умолчанию — директор и зам. директора.
@@ -481,3 +481,23 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     finally:
         cur.close()
         conn.close()
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    t = _tenant.token_from(event, body)
+    return [('recorder_keys', 'key = %s AND revoked_at IS NULL', [t])] if t.startswith('rec_') else []
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''Раздел «Камеры»: список камер компании, живое видео и архив с карты памяти через облако
+    производителя (режим RPS, по серийному номеру). Смотреть могут все сотрудники; добавлять,
+    удалять, менять порядок и камеру по умолчанию — директор и зам. директора.
+    Логины и пароли камер на сайт не отдаются — ссылки на видео выдаёт только сервер.
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

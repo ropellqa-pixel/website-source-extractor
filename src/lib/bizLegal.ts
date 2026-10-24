@@ -198,9 +198,11 @@ export function legalHtml(slug: LegalSlug, v: Vendor = DEFAULT_VENDOR, t: Tariff
 export const DOC_CSS = `
   @page { size: A4; margin: 1.5cm 1.5cm 2cm 1.5cm; }
   .bizdoc { font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1.4; color: #000; }
-  .bizdoc h1 { font-size: 14pt; text-align: center; margin: 0 0 6pt; font-weight: bold; }
-  .bizdoc h2 { font-size: 12pt; margin: 12pt 0 4pt; font-weight: bold; }
-  .bizdoc p { margin: 0 0 6pt; text-align: justify; }
+  .bizdoc h1 { font-size: 14pt; text-align: center; margin: 0 0 6pt; font-weight: bold; page-break-after: avoid; break-after: avoid; }
+  .bizdoc h2 { font-size: 12pt; margin: 10pt 0 4pt; font-weight: bold; page-break-after: avoid; break-after: avoid; }
+  .bizdoc p { margin: 0 0 5pt; text-align: justify; orphans: 3; widows: 3; hyphens: auto; -webkit-hyphens: auto; }
+  .bizdoc tr, .bizdoc .sign, .bizdoc .lh { page-break-inside: avoid; break-inside: avoid; }
+  .bizdoc thead { display: table-header-group; }
   .bizdoc .center { text-align: center; }
   .bizdoc .right { text-align: right; }
   .bizdoc .muted { color: #444; font-size: 10.5pt; }

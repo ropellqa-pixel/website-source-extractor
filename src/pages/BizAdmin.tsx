@@ -46,6 +46,18 @@ export default function BizAdmin() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const removeDoc = async (d: BizDocument) => {
+    if (!window.confirm(`Удалить документ ${d.number} (${d.org_name})? Действие необратимо и будет записано в журнал.`)) return;
+    const reason = window.prompt('Причина удаления (для журнала):', '') || '';
+    let r = await bizCall<{ need_force?: boolean }>({ action: 'admin_doc_delete', id: d.id, reason });
+    if (r.need_force) {
+      if (!window.confirm(`${r.error}\n\nВсё равно удалить?`)) return;
+      r = await bizCall({ action: 'admin_doc_delete', id: d.id, reason, force: true });
+    }
+    if (r.error && !r.need_force) window.alert(r.error);
+    load();
+  };
+
   const orgs = useMemo(() => (data?.organizations || []).filter(o =>
     (!status || o.status === status) &&
     (!q || `${o.name} ${o.inn} ${o.account_no} ${o.email} ${o.director_name}`.toLowerCase().includes(q.toLowerCase()))), [data, q, status]);
@@ -70,7 +82,7 @@ export default function BizAdmin() {
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-6">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold"><img src="/biz/nemzor-logo.jpg" alt="" className="h-9 w-9 rounded-lg object-contain" /> Личный кабинет {vendor.short_name || 'ООО "Компания "Немзор"'}</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold"><img src="/biz/nemzor-logo.png" alt="" className="h-9 w-9 rounded-lg object-contain" /> Личный кабинет {vendor.short_name || 'ООО "Компания "Немзор"'}</h1>
           <p className="text-sm text-muted-foreground">Правообладатель БИЗ: все организации, лицензии, договоры и документы АнодБИЗ и ПО АБИЗ</p>
         </div>
         <button onClick={load} className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm hover:bg-secondary"><Icon name="RefreshCw" size={16} /> Обновить</button>
@@ -145,7 +157,8 @@ export default function BizAdmin() {
                   <td>{Number(d.amount) ? money(Number(d.amount)) : '—'}</td>
                   <td><span className={`rounded-full px-2 py-0.5 text-xs ${DOC_STATUS[d.status]?.cls}`}>{DOC_STATUS[d.status]?.label}</span></td>
                   <td className="whitespace-nowrap"><button onClick={() => setView(d)} className="rounded-lg border border-border px-2.5 py-1 text-xs hover:bg-secondary">Открыть / править</button>
-                    <button onClick={() => downloadWord(d)} className="ml-1 rounded-lg border border-border px-2 py-1 text-xs hover:bg-secondary" title="Скачать Word"><Icon name="FileDown" size={14} /></button></td>
+                    <button onClick={() => downloadWord(d)} className="ml-1 rounded-lg border border-border px-2 py-1 text-xs hover:bg-secondary" title="Скачать Word"><Icon name="FileDown" size={14} /></button>
+                    <button onClick={() => removeDoc(d)} className="ml-1 rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50" title="Удалить"><Icon name="Trash2" size={14} /></button></td>
                 </tr>
               ))}
             </tbody>

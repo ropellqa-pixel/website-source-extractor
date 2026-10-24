@@ -27,6 +27,9 @@ export const DOC_TITLES: Record<string, string> = {
   usage_certificate: 'Свидетельство о праве пользования (БИЗ)',
   certificate_web: 'Свидетельство — АнодБИЗ (сайт-платформа)',
   certificate_win: 'Свидетельство — ПО АБИЗ (ОС Windows)',
+  access_director: 'Свидетельство о доступе — директор',
+  access_deputy: 'Свидетельство о доступе — зам. директора',
+  access_senior: 'Свидетельство о доступе — старший сотрудник',
   invoice: 'Счёт на оплату',
   act: 'Акт предоставления прав',
   pd_assignment: 'Поручение на обработку ПДн',
@@ -42,6 +45,7 @@ export const DOC_TITLES: Record<string, string> = {
 export const DOC_GROUPS: { title: string; types: string[] }[] = [
   { title: 'Договоры', types: ['license_agreement', 'contract', 'service_contract', 'supplementary', 'termination'] },
   { title: 'Лицензия и права', types: ['license_issue', 'usage_certificate', 'certificate_web', 'certificate_win', 'act'] },
+  { title: 'Свидетельства о доступе', types: ['access_director', 'access_deputy', 'access_senior'] },
   { title: 'Персональные данные и ЭДО', types: ['pd_assignment', 'pd_consent', 'nda', 'edo_agreement'] },
   { title: 'Расчёты и уведомления', types: ['invoice', 'reconciliation', 'suspension_notice'] },
 ];

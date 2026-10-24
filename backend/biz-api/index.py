@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 
 import psycopg2
 
+import tenant as _tenant
+
 SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 'public')
 CORS = {
     'Access-Control-Allow-Origin': '*',
@@ -25,6 +27,9 @@ DOC_TYPES = {
     'usage_certificate': {'prefix': 'СП', 'title': 'Свидетельство о праве пользования (БИЗ)'},
     'certificate_web': {'prefix': 'СП-А', 'title': 'Свидетельство о праве пользования АнодБИЗ'},
     'certificate_win': {'prefix': 'СП-П', 'title': 'Свидетельство о праве пользования ПО АБИЗ'},
+    'access_director': {'prefix': 'СД-Д', 'title': 'Свидетельство о предоставлении доступа директора'},
+    'access_deputy': {'prefix': 'СД-З', 'title': 'Свидетельство о предоставлении доступа заместителя директора'},
+    'access_senior': {'prefix': 'СД-С', 'title': 'Свидетельство о предоставлении доступа старшего сотрудника'},
     'invoice': {'prefix': 'СЧ', 'title': 'Счёт на оплату'},
     'act': {'prefix': 'АКТ', 'title': 'Акт предоставления прав'},
     'pd_assignment': {'prefix': 'ПОР', 'title': 'Поручение на обработку персональных данных'},
@@ -239,7 +244,8 @@ def _add_months(d: date, m: int) -> date:
 
 
 def _issue(cur, org: Dict[str, Any], doc_type: str, actor: str, months: int = 0, amount: float = 0.0,
-           period_from: Optional[date] = None, base_id: str = '', doc_date: Optional[date] = None) -> Dict[str, Any]:
+           period_from: Optional[date] = None, base_id: str = '', doc_date: Optional[date] = None,
+           extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     on = doc_date or date.today()
     settings = _settings(cur)
     pf = period_from or on
@@ -248,6 +254,7 @@ def _issue(cur, org: Dict[str, Any], doc_type: str, actor: str, months: int = 0,
         'vendor': settings.get('vendor', {}), 'tariff': settings.get('tariff', {}),
         'org': {k: org.get(k) for k in ORG_FIELDS + ['account_no', 'users_limit']},
         'base_id': base_id,
+        **(extra or {}),
     }
     if base_id:
         cur.execute(f'SELECT number, doc_date FROM {_t("biz_documents")} WHERE id = %s', (base_id,))
@@ -289,11 +296,32 @@ def _license_state(o: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     st = o['status']
     until = o.get('license_until')
     if st == 'active' and (until is None or until >= date.today()):
-        if o['id'] != 'org-main':
+        if o['id'] != 'org-main' and not o.get('data_schema'):
             return {'allowed': False, 'status': st, 'reason': 'workspace', 'license_until': until}
         return {'allowed': True, 'status': st, 'license_until': until}
     reason = 'expired' if st == 'active' else st
     return {'allowed': False, 'status': st, 'reason': reason, 'license_until': until}
+
+
+def _provision_safe(org_id: str) -> str:
+    """Создаёт отдельное хранилище организации отдельной транзакцией.
+    Возвращает текст ошибки (пусто — успешно)."""
+    c = psycopg2.connect(os.environ['DATABASE_URL'])
+    try:
+        with c.cursor() as cur:
+            cur.execute(f'SELECT * FROM {_t("biz_organizations")} WHERE id = %s', (org_id,))
+            org = _one(cur)
+            if not org:
+                return 'Организация не найдена'
+            _tenant.provision(cur, org)
+        c.commit()
+        return ''
+    except Exception as e:
+        c.rollback()
+        print('provision error', org_id, repr(e))
+        return 'Не удалось создать отдельное хранилище данных: ' + str(e)[:200]
+    finally:
+        c.close()
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -358,9 +386,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 user_id = str(uuidlib.uuid4())
                 cur.execute(f'INSERT INTO {_t("auth_users")} (id, email, password_hash, is_admin, org_id) VALUES (%s, %s, %s, false, %s)',
                             (user_id, email, ph, org_id))
-                cur.execute(f'INSERT INTO {_t("profiles")} (id, user_id, full_name, email, role, department, status, has_system_access) '
-                            f"VALUES (%s, %s, %s, %s, 'director', 'Руководство', 'active', true)",
-                            (str(uuidlib.uuid4()), user_id, full_name, email))
+                cur.execute(f'UPDATE {_t("biz_organizations")} SET owner_name = %s WHERE id = %s', (full_name, org_id))
                 cur.execute(f'SELECT * FROM {_t("biz_organizations")} WHERE id = %s', (org_id,))
                 o = _one(cur)
                 tariff = _settings(cur).get('tariff', {})
@@ -455,11 +481,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     if t in DOC_TYPES and t != 'license_agreement':
                         issued.append(_issue(cur, o, t, actor, months=months, amount=price * months, period_from=start, base_id=base['id'])['number'])
                 cur.execute(f"UPDATE {_t('biz_organizations')} SET status = 'active', license_until = %s, updated_at = now() WHERE id = %s", (until, oid))
+
                 if lic:
                     cur.execute(f"UPDATE {_t('biz_documents')} SET status = 'signed', signed_at = COALESCE(signed_at, now()) WHERE id = %s", (base['id'],))
                 _audit(cur, actor, oid, 'activate', {'months': months, 'from': start, 'until': until, 'docs': issued})
                 conn.commit()
-                return _resp(200, {'ok': True, 'license_until': until, 'issued': issued})
+                ws_error = _provision_safe(oid) if oid != _tenant.MAIN_ORG else ''
+                return _resp(200, {'ok': True, 'license_until': until, 'issued': issued, 'workspace_error': ws_error})
 
             if action == 'admin_set_status':
                 oid, st = body.get('id'), body.get('status')
@@ -483,7 +511,15 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 amount = float(body['amount']) if body.get('amount') not in (None, '') else price * max(1, months)
                 pf = date.fromisoformat(body['period_from']) if body.get('period_from') else None
                 dd = date.fromisoformat(body['doc_date']) if body.get('doc_date') else None
-                d = _issue(cur, o, t, actor, months=months, amount=amount, period_from=pf, base_id=body.get('base_id') or '', doc_date=dd)
+                extra = {}
+                if t.startswith('access_'):
+                    extra = {'person_name': str(body.get('person_name') or '')[:200], 'person_email': str(body.get('person_email') or '')[:200]}
+                    if not pf and o.get('license_until'):
+                        lu = o['license_until']
+                        pf = date.today()
+                        months = max(1, (lu.year - pf.year) * 12 + lu.month - pf.month + (1 if lu.day >= pf.day else 0))
+                    amount = 0.0
+                d = _issue(cur, o, t, actor, months=months, amount=amount, period_from=pf, base_id=body.get('base_id') or '', doc_date=dd, extra=extra)
                 conn.commit()
                 return _resp(200, {'ok': True, 'number': d['number'], 'id': d['id']})
 
@@ -499,6 +535,49 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     _audit(cur, actor, r[0], 'doc_status', {'number': r[1], 'status': st})
                 conn.commit()
                 return _resp(200, {'ok': True})
+
+            if action == 'admin_provision':
+                err = _provision_safe(str(body.get('id') or ''))
+                _audit(cur, actor, str(body.get('id') or ''), 'provision', {'error': err})
+                conn.commit()
+                return _resp(200 if not err else 500, {'ok': not err, 'error': err or None})
+
+            if action == 'admin_sync_schemas':
+                c2 = psycopg2.connect(os.environ['DATABASE_URL'])
+                try:
+                    with c2.cursor() as cur2:
+                        res = _tenant.sync_all(cur2)
+                    c2.commit()
+                finally:
+                    c2.close()
+                return _resp(200, {'ok': True, 'result': res})
+
+            if action == 'admin_doc_delete':
+                did = body.get('id')
+                cur.execute(f'SELECT org_id, number, doc_type, status FROM {_t("biz_documents")} WHERE id = %s', (did,))
+                r = cur.fetchone()
+                if not r:
+                    return _resp(404, {'error': 'Документ не найден'})
+                if r[3] in ('signed', 'paid') and not body.get('force'):
+                    return _resp(409, {'error': 'Документ подписан или оплачен. Для бухгалтерского учёта такие документы рекомендуется аннулировать, а не удалять. Подтвердите удаление ещё раз.', 'need_force': True})
+                cur.execute(f'DELETE FROM {_t("biz_documents")} WHERE id = %s', (did,))
+                _audit(cur, actor, r[0], 'doc_delete', {'number': r[1], 'type': r[2], 'status': r[3], 'reason': str(body.get('reason') or '')[:300]})
+                conn.commit()
+                return _resp(200, {'ok': True})
+
+            if action == 'admin_org_people':
+                cur.execute(f'SELECT data_schema FROM {_t("biz_organizations")} WHERE id = %s', (body.get('id'),))
+                r = cur.fetchone()
+                schema = (r[0] if r and r[0] else _tenant.MAIN)
+                try:
+                    cur.execute(f'SELECT p.full_name, p.email, p.role FROM "{schema}".profiles p '
+                                f"WHERE p.role IN ('director','deputy_director','senior_employee') AND COALESCE(p.status,'active') <> 'moved' "
+                                f'ORDER BY p.role, p.full_name')
+                    people = [{'full_name': x[0], 'email': x[1], 'role': x[2]} for x in cur.fetchall()]
+                except Exception:
+                    conn.rollback()
+                    people = []
+                return _resp(200, {'people': people})
 
             if action == 'admin_doc_save':
                 did = body.get('id')

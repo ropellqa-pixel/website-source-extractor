@@ -3,8 +3,11 @@ import { BASE_RENDERERS, BizDocument, BizOrg, DOC_TITLES } from '@/lib/bizDocs';
 import { EXTRA_RENDERERS } from '@/lib/bizDocsExtra';
 import { CERT_CSS, CERT_TYPES, renderCertificate } from '@/lib/bizCertificates';
 import { LETTERHEAD_CSS, letterhead } from '@/lib/bizLetterhead';
+import { PAGE_CSS, pagesHtml, paginate } from '@/lib/bizPaginate';
+import { licenseAgreementFull } from '@/lib/bizLicenseFull';
+import { ACCESS_CERT_CSS, ACCESS_CERT_TYPES, renderAccessCertificate } from '@/lib/bizAccessCert';
 
-export const FULL_DOC_CSS = DOC_CSS + LETTERHEAD_CSS + CERT_CSS;
+export const FULL_DOC_CSS = DOC_CSS + LETTERHEAD_CSS + CERT_CSS + ACCESS_CERT_CSS;
 
 export function renderGenerated(d: BizDocument, fallbackOrg?: BizOrg): string {
   const v = { ...DEFAULT_VENDOR, ...(d.snapshot?.vendor || {}) };
@@ -12,6 +15,8 @@ export function renderGenerated(d: BizDocument, fallbackOrg?: BizOrg): string {
   const o = { ...(fallbackOrg || {}), ...(d.snapshot?.org || {}) };
   const dd = { ...d, amount: Number(d.amount || 0), months: Number(d.months || 0) };
   if (CERT_TYPES.includes(d.doc_type)) return renderCertificate(dd, v, t, o);
+  if (ACCESS_CERT_TYPES.includes(d.doc_type)) return renderAccessCertificate(dd, v, t, o);
+  if (d.doc_type === 'license_agreement') return letterhead(v) + licenseAgreementFull(dd, v, t, o);
   const r = BASE_RENDERERS[d.doc_type] || EXTRA_RENDERERS[d.doc_type];
   if (!r) return '<p>Неизвестный тип документа</p>';
   return letterhead(v) + r(dd, v, t, o);
@@ -22,6 +27,10 @@ export function renderBizDocument(d: BizDocument, fallbackOrg?: BizOrg): string 
   return renderGenerated(d, fallbackOrg);
 }
 
+export function isCertificateHtml(html: string): boolean {
+  return /class="cert2/.test(html);
+}
+
 export function docTitle(d: BizDocument): string {
   return `${d.title || DOC_TITLES[d.doc_type] || 'Документ'} № ${d.number}`;
 }
@@ -30,13 +39,21 @@ export function docFileName(d: BizDocument): string {
   return `${docTitle(d)} от ${d.doc_date}`.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim();
 }
 
+/** Документ, разложенный по листам A4 с колонтитулом «Страница N из M». */
+export function pagedHtml(title: string, inner: string): string {
+  const cert = isCertificateHtml(inner);
+  const pages = paginate(inner, FULL_DOC_CSS);
+  return pagesHtml(pages, title.replace(/</g, '&lt;'), cert);
+}
+
 export function standaloneHtml(title: string, inner: string, autoPrint = false): string {
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${title.replace(/</g, '&lt;')}</title>
-<style>${FULL_DOC_CSS}
-body{margin:0;background:#e5e7eb}
-.sheet{width:21cm;min-height:29.7cm;margin:12px auto;background:#fff;padding:1.5cm 1.5cm 2cm 1.5cm;box-sizing:border-box;box-shadow:0 2px 12px rgba(0,0,0,.15)}
-@media print{body{background:#fff}.sheet{margin:0;box-shadow:none;padding:0;width:auto;min-height:0}}
-</style></head><body><div class="sheet"><div class="bizdoc">${inner}</div></div>${autoPrint ? '<script>window.onload=function(){setTimeout(function(){window.print()},300)}</script>' : ''}</body></html>`;
+<style>${FULL_DOC_CSS}${PAGE_CSS}
+@page{size:A4;margin:0}
+html,body{margin:0;padding:0}
+body{background:#e5e7eb;padding:12px 0}
+@media print{body{background:#fff;padding:0}}
+</style></head><body>${pagedHtml(title, inner)}${autoPrint ? '<script>window.onload=function(){setTimeout(function(){window.print()},400)}</script>' : ''}</body></html>`;
 }
 
 export function printDoc(title: string, inner: string): void {
@@ -56,11 +73,23 @@ function save(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
+const WORD_CSS = `
+@page WordSection1{size:21.0cm 29.7cm;margin:1.5cm 1.5cm 2.0cm 1.5cm;mso-header-margin:0.8cm;mso-footer-margin:0.8cm;mso-footer:f1}
+@page CertSection{size:21.0cm 29.7cm;margin:0.8cm 0.8cm 0.8cm 0.8cm}
+div.WordSection1{page:WordSection1}
+div.CertSection{page:CertSection}
+p.MsoFooter{margin:0;text-align:right;font-size:9.0pt;font-family:"Times New Roman"}
+table{border-collapse:collapse}
+`;
+
 function wordBlob(title: string, inner: string): Blob {
+  const cert = isCertificateHtml(inner);
+  const section = cert ? 'CertSection' : 'WordSection1';
+  const footer = cert ? '' : `<div style="mso-element:footer" id="f1"><p class="MsoFooter">${title.replace(/</g, '&lt;')} — страница <span style="mso-field-code:' PAGE '"></span> из <span style="mso-field-code:' NUMPAGES '"></span></p></div>`;
   const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title}</title>
-<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
-<style>@page WordSection1{size:21cm 29.7cm;margin:1.5cm 1.5cm 2cm 1.5cm}div.WordSection1{page:WordSection1}${FULL_DOC_CSS}</style></head>
-<body><div class="WordSection1"><div class="bizdoc">${inner}</div></div></body></html>`;
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->
+<style>${FULL_DOC_CSS}${WORD_CSS}</style></head>
+<body><div class="${section}"><div class="bizdoc">${inner}</div>${footer}</div></body></html>`;
   return new Blob(['\ufeff', html], { type: 'application/msword' });
 }
 
@@ -85,6 +114,7 @@ export async function downloadZip(docs: BizDocument[], name: string, org?: BizOr
     while (used.has(fn)) fn += '_';
     used.add(fn);
     zip.file(`${fn}.html`, standaloneHtml(docTitle(d), renderBizDocument(d, org)));
+    zip.file(`Word/${fn}.doc`, wordBlob(docTitle(d), renderBizDocument(d, org)));
   }
   const blob = await zip.generateAsync({ type: 'blob' });
   save(blob, `${name.replace(/[\\/:*?"<>|]+/g, '_')}.zip`);

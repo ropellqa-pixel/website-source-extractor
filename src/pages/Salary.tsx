@@ -1,3 +1,4 @@
+import { vkAuth } from '@/lib/vkBinding';
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../lib/auth';
 import { db } from '@/lib/sdk';
@@ -580,7 +581,7 @@ export default function Salary() {
 
       const res = await fetch(VK_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...vkAuth() },
         body: JSON.stringify({ action: 'broadcast', items }),
       });
       const result = await res.json();

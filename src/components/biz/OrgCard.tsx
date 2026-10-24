@@ -32,7 +32,26 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [act, setAct] = useState({ months: '1', start: '' });
-  const [issue, setIssue] = useState({ doc_type: 'invoice', months: '1', amount: '', period_from: '', doc_date: '' });
+  const [issue, setIssue] = useState({ doc_type: 'invoice', months: '1', amount: '', period_from: '', doc_date: '', person_name: '', person_email: '' });
+  const [people, setPeople] = useState<{ full_name: string; email: string; role: string }[]>([]);
+  const isAccess = issue.doc_type.startsWith('access_');
+
+  useEffect(() => {
+    if (!orgId || !isAccess) return;
+    bizCall<{ people: { full_name: string; email: string; role: string }[] }>({ action: 'admin_org_people', id: orgId }).then(r => setPeople(r.people || []));
+  }, [orgId, isAccess]);
+
+  const removeDoc = async (d: BizDocument) => {
+    if (!window.confirm(`Удалить документ ${d.number}? Действие необратимо и будет записано в журнал.`)) return;
+    const reason = window.prompt('Причина удаления (для журнала):', '') || '';
+    let r = await bizCall<{ need_force?: boolean }>({ action: 'admin_doc_delete', id: d.id, reason });
+    if (r.need_force) {
+      if (!window.confirm(`${r.error}\n\nВсё равно удалить?`)) return;
+      r = await bizCall({ action: 'admin_doc_delete', id: d.id, reason, force: true });
+    }
+    setMsg(r.error && !r.need_force ? `Ошибка: ${r.error}` : `Документ ${d.number} удалён`);
+    await load(); onChanged();
+  };
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -51,7 +70,8 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
     const r = await bizCall<{ issued?: string[]; number?: string }>(body);
     setBusy(false);
     if (r.error) { setMsg(`Ошибка: ${r.error}`); return; }
-    setMsg(ok + (r.issued?.length ? `: ${r.issued.join(', ')}` : r.number ? `: ${r.number}` : ''));
+    const ws = (r as { workspace_error?: string }).workspace_error;
+    setMsg(ws ? `Ошибка: лицензия выдана, но ${ws}` : ok + (r.issued?.length ? `: ${r.issued.join(', ')}` : r.number ? `: ${r.number}` : ''));
     await load(); onChanged();
   };
 
@@ -98,7 +118,7 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
                   <p className="mb-2 font-semibold">Выдать / продлить лицензию</p>
                   <label className="mb-2 block text-xs">Месяцев<input value={act.months} onChange={e => setAct(a => ({ ...a, months: e.target.value }))} className={inp} /></label>
                   <label className="mb-3 block text-xs">С даты (пусто — сегодня/продолжение)<input type="date" value={act.start} onChange={e => setAct(a => ({ ...a, start: e.target.value }))} className={inp} /></label>
-                  <p className="mb-2 text-xs text-muted-foreground">Будут выпущены: Акт о выдаче лицензии, 3 Свидетельства (БИЗ, АнодБИЗ, ПО АБИЗ), Акт. Лицензионный договор отметится подписанным. Доступ откроется.</p>
+                  <p className="mb-2 text-xs text-muted-foreground">Будут выпущены: Акт о выдаче лицензии, 3 Свидетельства (БИЗ, АнодБИЗ, ПО АБИЗ), Акт. Лицензионный договор отметится подписанным. Для организации создаётся отдельное хранилище данных, доступ откроется.</p>
                   <button disabled={busy} onClick={() => run({ action: 'admin_activate', id: org.id, months: Number(act.months), start: act.start || undefined }, 'Лицензия выдана')} className="h-10 w-full rounded-lg bg-emerald-600 text-sm font-medium text-white hover:bg-emerald-700">Выдать лицензию</button>
                 </div>
                 <div className="rounded-xl border border-border p-4">
@@ -119,6 +139,20 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
                       </optgroup>
                     ))}
                   </select>
+                  {isAccess && (
+                    <div className="mb-2 space-y-2">
+                      <select value={issue.person_email} onChange={e => {
+                        const p = people.find(x => x.email === e.target.value);
+                        setIssue(i => ({ ...i, person_email: e.target.value, person_name: p?.full_name || i.person_name }));
+                      }} className={inp}>
+                        <option value="">— выберите сотрудника —</option>
+                        {people.map(p => <option key={p.email} value={p.email}>{p.full_name} ({p.role === 'director' ? 'директор' : p.role === 'deputy_director' ? 'зам. директора' : 'старший сотрудник'})</option>)}
+                      </select>
+                      <input value={issue.person_name} onChange={e => setIssue(i => ({ ...i, person_name: e.target.value }))} placeholder="ФИО полностью" className={inp} />
+                      <input value={issue.person_email} onChange={e => setIssue(i => ({ ...i, person_email: e.target.value }))} placeholder="Логин (e-mail)" className={inp} />
+                      <p className="text-[11px] text-muted-foreground">Срок доступа по умолчанию — до окончания лицензии организации.</p>
+                    </div>
+                  )}
                   <div className="mb-2 grid grid-cols-2 gap-2">
                     <label className="text-xs">Месяцев<input value={issue.months} onChange={e => setIssue(i => ({ ...i, months: e.target.value }))} className={inp} /></label>
                     <label className="text-xs">Сумма (пусто — авто)<input value={issue.amount} onChange={e => setIssue(i => ({ ...i, amount: e.target.value }))} className={inp} /></label>
@@ -154,6 +188,7 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
                     <td className="whitespace-nowrap">
                       <button onClick={() => setView(d)} className="rounded-lg border border-border px-2.5 py-1 text-xs hover:bg-secondary">Открыть / править</button>
                       <button onClick={() => downloadWord(d, org)} className="ml-1 rounded-lg border border-border px-2 py-1 text-xs hover:bg-secondary" title="Скачать Word"><Icon name="FileDown" size={14} /></button>
+                      <button onClick={() => removeDoc(d)} className="ml-1 rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50" title="Удалить документ"><Icon name="Trash2" size={14} /></button>
                     </td>
                   </tr>
                 ))}

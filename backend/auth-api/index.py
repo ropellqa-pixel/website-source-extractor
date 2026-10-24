@@ -170,7 +170,7 @@ def full_name_of(cur, user_id: str) -> str:
     return row[0] if row and row[0] else ''
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Сервер аутентификации компании: регистрация с хешированием пароля (PBKDF2-SHA256),
     вход по email+паролю, вход по PIN-коду (двухшаговый), проверка сессии по токену, выход.
     Выдаёт и проверяет постоянные API-токены для внешних приложений (десктоп-клиент):
@@ -449,6 +449,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 if not profile_id:
                     return _resp(400, {'error': 'Не выбран сотрудник'})
 
+                _tenant.claim_device(cur, SCHEMA, device_code)
                 cur.execute(f'SELECT status FROM {SCHEMA}.devices WHERE device_code = %s', (device_code,))
                 device_row = cur.fetchone()
                 if not device_row:
@@ -763,3 +764,30 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 return _resp(400, {'error': f'Неизвестное действие: {action}'})
     finally:
         conn.close()
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    a = body.get('action') or qs.get('action') or ''
+    if a in ('pin_lookup', 'pin_signin'):
+        return [('pin_codes', 'pin = %s', [str(body.get('pin') or '').strip()])]
+    if a == 'device_status':
+        return [('devices', 'device_code = %s', [str(body.get('device_code') or '').strip()])]
+    return []
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ('session', 'signout', 'get_roles', 'get_api_token', 'revoke_api_token', 'api_verify', 'ping'))
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''Сервер аутентификации компании: регистрация с хешированием пароля (PBKDF2-SHA256),
+    вход по email+паролю, вход по PIN-коду (двухшаговый), проверка сессии по токену, выход.
+    Выдаёт и проверяет постоянные API-токены для внешних приложений (десктоп-клиент):
+    get_api_token, revoke_api_token, api_verify. Управляет привязкой ПК по 9-значному коду:
+    register_device, device_status, list_devices, link_device, revoke_device,
+    set_employee_password. Автовход браузера по одноразовому коду от программы:
+    request_login_link, redeem_login_link.
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

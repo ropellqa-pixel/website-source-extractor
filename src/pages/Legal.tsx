@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import AnodBizLogo from '@/components/AnodBizLogo';
 import { bizCall } from '@/lib/bizApi';
 import { DEFAULT_TARIFF, DEFAULT_VENDOR, LEGAL_DOCS, LegalSlug, Tariff, Vendor, legalHtml } from '@/lib/bizLegal';
 import { letterhead } from '@/lib/bizLetterhead';
-import { FULL_DOC_CSS, downloadLegalWord, printDoc } from '@/lib/bizRender';
+import { FULL_DOC_CSS, downloadLegalWord, pagedHtml, printDoc } from '@/lib/bizRender';
+import { PAGE_CSS } from '@/lib/bizPaginate';
 
 export function useBizPublic() {
   const [vendor, setVendor] = useState<Vendor>(DEFAULT_VENDOR);
@@ -24,10 +25,11 @@ export default function Legal() {
   const { vendor, tariff } = useBizPublic();
   const doc = LEGAL_DOCS.find(d => d.slug === slug) || LEGAL_DOCS[0];
   const html = letterhead(vendor) + legalHtml(doc.slug as LegalSlug, vendor, tariff);
+  const paged = useMemo(() => pagedHtml(doc.title, html), [doc.title, html]);
 
   return (
     <div className="min-h-[100dvh] bg-secondary/40">
-      <style>{FULL_DOC_CSS}</style>
+      <style>{FULL_DOC_CSS + PAGE_CSS}</style>
       <header className="sticky top-0 z-20 border-b border-border bg-card/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           <Link to="/login" className="flex items-center gap-2">
@@ -45,7 +47,7 @@ export default function Legal() {
           </div>
         </div>
       </header>
-      <div className="mx-auto grid max-w-6xl gap-4 px-4 py-6 lg:grid-cols-[260px_1fr]">
+      <div className="mx-auto grid max-w-6xl gap-4 px-4 py-6 lg:grid-cols-[240px_auto]">
         <nav className="flex flex-col gap-1 self-start rounded-2xl border border-border bg-card p-2 lg:sticky lg:top-20">
           {LEGAL_DOCS.map(d => (
             <Link key={d.slug} to={`/legal/${d.slug}`}
@@ -57,8 +59,8 @@ export default function Legal() {
             Правообладатель и издатель: {vendor.short_name}, ИНН {vendor.inn}. Вопросы: <a className="underline" href={`mailto:${vendor.email}`}>{vendor.email}</a>
           </div>
         </nav>
-        <article className="overflow-x-auto rounded-2xl border border-border bg-white px-[1.5cm] pb-[2cm] pt-[1.5cm] text-black shadow-sm">
-          <div className="bizdoc" dangerouslySetInnerHTML={{ __html: html }} />
+        <article className="overflow-x-auto text-black">
+          <div dangerouslySetInnerHTML={{ __html: paged }} />
         </article>
       </div>
     </div>

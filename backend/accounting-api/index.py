@@ -823,7 +823,7 @@ def _edit(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
     return _err('Неизвестное действие')
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Бухгалтерия (как в 1С): доходы/расходы по статьям, автоматический перенос по месяцам
     ИТОГО к выдаче из «Зарплаты» и фактической инкассации, закрытие месяца, прибыль, отчёт ДДС,
     план-факт бюджет, контрагенты и взаиморасчёты, зарплата с долгами и расчётными листками.
@@ -929,3 +929,22 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     finally:
         cur.close()
         conn.close()
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    return []
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''Бухгалтерия (как в 1С): доходы/расходы по статьям, автоматический перенос по месяцам
+    ИТОГО к выдаче из «Зарплаты» и фактической инкассации, закрытие месяца, прибыль, отчёт ДДС,
+    план-факт бюджет, контрагенты и взаиморасчёты, зарплата с долгами и расчётными листками.
+    Права — по должностям из админ-панели заместителя директора.
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

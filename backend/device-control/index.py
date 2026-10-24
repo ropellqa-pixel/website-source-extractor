@@ -130,7 +130,7 @@ def _presence_row(d) -> Dict[str, Any]:
     }
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Удалённое управление компьютерами с АБИЗ. Для сотрудника на ПК: heartbeat (сообщает, что
     он онлайн и где — на экране входа или в системе) и получение команд. Для зама директора на
     сайте: список ПК со статусом, отправка команд (заблокировать/разблокировать/сообщение на весь
@@ -426,3 +426,22 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return _resp(400, {'error': f'Неизвестное действие: {action}'})
     finally:
         conn.close()
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    return []
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''Удалённое управление компьютерами с АБИЗ. Для сотрудника на ПК: heartbeat (сообщает, что
+    он онлайн и где — на экране входа или в системе) и получение команд. Для зама директора на
+    сайте: список ПК со статусом, отправка команд (заблокировать/разблокировать/сообщение на весь
+    экран/скриншот/запустить RuDesktop), просмотр журнала активности. Управлять может только зам.
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

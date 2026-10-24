@@ -1,3 +1,4 @@
+import { vkAuth } from '@/lib/vkBinding';
 import { useEffect, useMemo, useState } from 'react';
 import { db } from '@/lib/sdk';
 import { apiUrl } from '@/lib/apiUrls';
@@ -83,7 +84,7 @@ export default function VkBroadcastPanel() {
     try {
       const res = await fetch(VK_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...vkAuth() },
         body: JSON.stringify({ action: 'broadcast', items, photo_base64: photo }),
       });
       const data = await res.json();

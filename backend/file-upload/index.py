@@ -64,7 +64,7 @@ def _authenticate(token: str) -> Optional[str]:
         conn.close()
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Загружает файл (документ из базы документов) в S3-совместимое хранилище и
     возвращает публичную CDN-ссылку. Доступ только для авторизованных запросов: сессия
     сайта либо постоянный API-токен десктоп-приложения (заголовок X-Authorization).'''
@@ -107,3 +107,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return _resp(200, {'url': cdn_url})
     except Exception as e:
         return _resp(500, {'error': str(e)})
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    return []
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''Загружает файл (документ из базы документов) в S3-совместимое хранилище и
+    возвращает публичную CDN-ссылку. Доступ только для авторизованных запросов: сессия
+    сайта либо постоянный API-токен десктоп-приложения (заголовок X-Authorization).
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

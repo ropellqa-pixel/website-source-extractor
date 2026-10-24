@@ -39,7 +39,7 @@ def reply(user_id: int, text: str) -> None:
         pass
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Принимает Callback API сообщества VK: подтверждает адрес сервера и обрабатывает
     входящие сообщения с 6-значным кодом привязки сотрудника к личному кабинету АнодБИЗ.'''
     plain_headers = {'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*'}
@@ -102,3 +102,22 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             reply(from_id, 'Здравствуйте! Чтобы привязать аккаунт, отправьте сюда 6-значный код из личного кабинета АнодБИЗ (раздел «Сотрудники» → «Привязка VK»).')
 
     return {'statusCode': 200, 'headers': plain_headers, 'body': 'ok'}
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    msg = ((body.get('object') or {}).get('message') or {})
+    text = str(msg.get('text') or '').strip()
+    return [('vk_bind_codes', "code = %s AND status = 'pending'", [text])] if text else []
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''Принимает Callback API сообщества VK: подтверждает адрес сервера и обрабатывает
+    входящие сообщения с 6-значным кодом привязки сотрудника к личному кабинету АнодБИЗ.
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

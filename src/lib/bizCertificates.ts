@@ -37,7 +37,7 @@ const KINDS: Record<string, CertKind> = {
 export const CERT_TYPES = Object.keys(KINDS);
 
 export const CERT_CSS = `
-  .bizdoc .cert2 { position: relative; min-height: 25.6cm; padding: 16pt 20pt 18pt; border: 2.5pt solid var(--c1); outline: 1pt solid var(--c1); outline-offset: -7pt; box-sizing: border-box; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bizdoc .cert2 { position: relative; height: 281mm; display: flex; flex-direction: column; padding: 12pt 18pt 10pt; font-size: 11pt; line-height: 1.3; border: 2.5pt solid var(--c1); outline: 1pt solid var(--c1); outline-offset: -7pt; box-sizing: border-box; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .bizdoc .cert2 > * { position: relative; z-index: 1; }
   .bizdoc .cert2 .c-bg { position: absolute; inset: 0; z-index: 0; opacity: .3; background:
       radial-gradient(circle at 15% 12%, var(--c2) 0, transparent 45%),
@@ -45,24 +45,27 @@ export const CERT_CSS = `
       repeating-linear-gradient(45deg, var(--c3) 0 1px, transparent 1px 9px),
       repeating-linear-gradient(-45deg, var(--c3) 0 1px, transparent 1px 9px),
       linear-gradient(160deg, var(--c4), #ffffff 55%, var(--c4)); }
-  .bizdoc .cert2 .c-mark { position: absolute; z-index: 0; left: 50%; top: 52%; width: 11cm; height: 11cm; transform: translate(-50%, -50%); opacity: .07; background-size: contain; background-repeat: no-repeat; background-position: center; }
-  .bizdoc .cert2 .lh { border-bottom-color: var(--c1); }
+  .bizdoc .cert2 .c-mark { position: absolute; z-index: 0; left: 50%; top: 55%; width: 13cm; height: 13cm; transform: translate(-50%, -50%); opacity: .08; background-size: contain; background-repeat: no-repeat; background-position: center; }
+  .bizdoc .cert2 .lh { border-bottom-color: var(--c1); margin-bottom: 6pt; }
+  .bizdoc .cert2 .lh-logo { width: 58pt; height: 58pt; }
   .bizdoc .cert2 .lh-req { border-color: var(--c1); }
-  .bizdoc .c-title { text-align: center; font-size: 30pt; font-weight: bold; letter-spacing: 6pt; color: var(--c1); margin: 10pt 0 0; font-family: 'Times New Roman', serif; }
+  .bizdoc .c-title { text-align: center; font-size: 28pt; font-weight: bold; letter-spacing: 6pt; color: var(--c1); margin: 4pt 0 0; font-family: 'Times New Roman', serif; }
   .bizdoc .c-sub { text-align: center; font-size: 12.5pt; font-weight: bold; margin: 2pt 0 4pt; text-transform: uppercase; letter-spacing: .5pt; }
-  .bizdoc .c-num { text-align: center; font-size: 12pt; margin-bottom: 10pt; }
+  .bizdoc .c-num { text-align: center; font-size: 11.5pt; margin-bottom: 4pt; }
   .bizdoc .c-num b { color: var(--c1); }
-  .bizdoc .c-rule { height: 0; border-top: 1pt solid var(--c1); width: 50%; margin: 6pt auto 10pt; }
+  .bizdoc .c-rule { height: 0; border-top: 1pt solid var(--c1); width: 50%; margin: 4pt auto 6pt; }
   .bizdoc .c-holder { text-align: center; font-size: 16pt; font-weight: bold; margin: 6pt 0 2pt; color: #111; }
-  .bizdoc .c-holder-req { text-align: center; font-size: 11pt; margin-bottom: 10pt; }
-  .bizdoc .c-product { text-align: center; font-size: 17pt; font-weight: bold; color: var(--c1); margin: 6pt 0 10pt; line-height: 1.25; }
+  .bizdoc .c-holder-req { text-align: center; font-size: 10.5pt; margin-bottom: 6pt; }
+  .bizdoc .c-product { text-align: center; font-size: 16pt; font-weight: bold; color: var(--c1); margin: 4pt 0 6pt; line-height: 1.2; }
   .bizdoc .c-small { font-size: 11pt; font-weight: normal; color: #222; }
-  .bizdoc .cert2 table.c-tab td { border: 1px solid var(--c1); background: rgba(255,255,255,.75); font-size: 10.5pt; padding: 3pt 6pt; }
+  .bizdoc .cert2 table.c-tab td { border: 1px solid var(--c1); background: rgba(255,255,255,.75); font-size: 10pt; padding: 2pt 6pt; }
   .bizdoc .cert2 table.c-tab td:first-child { width: 38%; font-weight: bold; color: var(--c1); }
-  .bizdoc .c-scope { margin: 6pt 0 6pt 14pt; padding: 0; font-size: 11pt; }
-  .bizdoc .c-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 18pt; gap: 12pt; }
-  .bizdoc .c-seal { width: 3.6cm; height: 3.6cm; border: 1.5pt dashed var(--c1); border-radius: 50%; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 9pt; color: var(--c1); }
-  .bizdoc .c-verify { font-size: 9pt; color: #333; text-align: center; margin-top: 12pt; border-top: 1px solid var(--c1); padding-top: 4pt; }
+  .bizdoc .c-scope { margin: 2pt 0 4pt 14pt; padding: 0; font-size: 10.5pt; }
+  .bizdoc .cert2 p { margin: 0 0 4pt; }
+  .bizdoc .c-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; padding-top: 8pt; gap: 10pt; font-size: 10.5pt; }
+  .bizdoc .cert2 .lh { flex-shrink: 0; }
+  .bizdoc .c-seal { width: 3cm; height: 3cm; flex-shrink: 0; border: 1.5pt dashed var(--c1); border-radius: 50%; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 9pt; color: var(--c1); }
+  .bizdoc .c-verify { font-size: 8.5pt; color: #333; text-align: center; margin-top: 6pt; border-top: 1px solid var(--c1); padding-top: 4pt; }
   .bizdoc .cert2.navy { --c1: #1e3a6e; --c2: #6f8fc9; --c3: #9fb4dc; --c4: #dfe7f5; }
   .bizdoc .cert2.teal { --c1: #0f5e5a; --c2: #4fb3a9; --c3: #8fd1c8; --c4: #d9f1ee; }
   .bizdoc .cert2.burgundy { --c1: #6b1f2e; --c2: #c27a86; --c3: #ddb0b7; --c4: #f5e3e6; }

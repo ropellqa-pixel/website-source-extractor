@@ -1,0 +1,1 @@
+UPDATE auth_users SET is_biz_admin = true WHERE email = 'biz-selftest@example.com';

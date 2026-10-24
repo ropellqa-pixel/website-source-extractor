@@ -90,7 +90,7 @@ def _validate_formulas(formulas: Dict[str, str], fields: Dict[str, Any]) -> None
             raise FormulaError(f'{FORMULA_LABELS[k]}: {e}')
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''Админ-панель заместителя директора: должности, доступ к разделам и кнопкам по должностям,
     формулы зарплаты, поля форм (Зарплата, Инкассация), справочники. Также отдаёт права
     текущего пользователя (action=my_access) для меню и кнопок на сайте.'''
@@ -311,3 +311,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     finally:
         cur.close()
         conn.close()
+
+
+import tenant as _tenant  # noqa: E402
+
+
+def _finders(body, event, qs):
+    return []
+
+
+_wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ('my_access',))
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    '''Админ-панель заместителя директора: должности, доступ к разделам и кнопкам по должностям,
+    формулы зарплаты, поля форм (Зарплата, Инкассация), справочники. Также отдаёт права
+    текущего пользователя (action=my_access) для меню и кнопок на сайте.
+    Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    return _wrapped(event, context)

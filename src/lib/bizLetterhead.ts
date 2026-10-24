@@ -1,7 +1,7 @@
 import { esc } from '@/lib/bizText';
 import { Vendor } from '@/lib/bizLegal';
 
-export const LOGO_URL = '/biz/nemzor-logo.jpg';
+export const LOGO_URL = '/biz/nemzor-logo.png';
 export const MARK_URL = '/biz/nemzor-mark.png';
 
 export function absUrl(path: string): string {
@@ -31,7 +31,7 @@ export function letterhead(v: Vendor): string {
 
 export const LETTERHEAD_CSS = `
   .bizdoc .lh { display: flex; align-items: center; gap: 14pt; border-bottom: 2px solid #000; padding-bottom: 6pt; margin-bottom: 14pt; }
-  .bizdoc .lh-logo { width: 70pt; height: 70pt; object-fit: contain; flex-shrink: 0; mix-blend-mode: multiply; }
+  .bizdoc .lh-logo { width: 66pt; height: 66pt; object-fit: contain; flex-shrink: 0; background: transparent; }
   .bizdoc .lh-text { flex: 1; text-align: center; }
   .bizdoc .lh-name { font-weight: bold; font-size: 12pt; letter-spacing: .3pt; line-height: 1.25; }
   .bizdoc .lh-req { font-weight: bold; font-size: 11pt; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; margin-top: 3pt; padding: 1pt 0; }

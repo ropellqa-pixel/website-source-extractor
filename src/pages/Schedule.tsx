@@ -1,3 +1,4 @@
+import { vkAuth } from '@/lib/vkBinding';
 import { useState, useEffect, useCallback } from 'react';
 import { solveSchedule } from '@/lib/scheduleSolver';
 import { useNavigate } from 'react-router-dom';
@@ -536,7 +537,7 @@ function ScheduleContent() {
 
       const res = await fetch(VK_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...vkAuth() },
         body: JSON.stringify({ action: 'broadcast', items, photo_base64: photoDataUrl }),
       });
       const result = await res.json();

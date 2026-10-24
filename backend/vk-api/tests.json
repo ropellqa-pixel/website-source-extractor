@@ -7,34 +7,34 @@
       "expectedStatus": 200
     },
     {
-      "name": "GET status without profile_id fails",
+      "name": "Status without login rejected",
       "method": "GET",
-      "path": "/?action=status",
-      "expectedStatus": 400
+      "path": "/?action=status&profile_id=x",
+      "expectedStatus": 401
     },
     {
-      "name": "POST unknown action fails",
+      "name": "Generate code without login rejected",
       "method": "POST",
       "path": "/",
-      "body": {"action": "unknown"},
-      "expectedStatus": 400
+      "body": {
+        "action": "generate_code",
+        "profile_id": "x"
+      },
+      "expectedStatus": 401
     },
     {
-      "name": "Generate code for test profile",
+      "name": "Broadcast without login rejected",
       "method": "POST",
       "path": "/",
-      "body": {"action": "generate_code", "profile_id": "test-profile-tests-json"},
-      "expectedStatus": 200,
-      "expectedBody": {"code": "string"},
-      "bodyMatcher": "partial"
-    },
-    {
-      "name": "Status returns generated pending code",
-      "method": "GET",
-      "path": "/?action=status&profile_id=test-profile-tests-json",
-      "expectedStatus": 200,
-      "expectedBody": {"code": "string"},
-      "bodyMatcher": "partial"
+      "body": {
+        "action": "broadcast",
+        "items": [
+          {
+            "a": 1
+          }
+        ]
+      },
+      "expectedStatus": 401
     }
   ]
 }
