@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { Lock, User, LogIn, Zap, AlertCircle, Loader2, IdCard } from 'lucide-react';
 import AnodBizLogo from '../components/AnodBizLogo';
@@ -191,6 +191,14 @@ export default function Login() {
 
         <div className="mt-6 text-center text-[13px] text-muted-foreground">
           © 2026 АнодБИЗ. Все права защищены.{SITE_VERSION && <span className="block mt-1 text-xs">Версия {SITE_VERSION}</span>}
+        </div>
+
+        <div className="mt-5 space-y-2 text-center text-sm text-muted-foreground">
+          <p>Новая организация или ИП? <Link to="/register" className="font-medium text-foreground underline underline-offset-2">Зарегистрироваться в БИЗ</Link></p>
+          <p className="text-xs">
+            <Link to="/legal/license" className="hover:text-foreground">Лицензионный договор</Link> · <Link to="/legal/offer" className="hover:text-foreground">Оферта</Link> · <Link to="/legal/privacy" className="hover:text-foreground">Политика конфиденциальности</Link>
+          </p>
+          <p className="text-[11px]">АнодБИЗ и ПО АБИЗ — структура БИЗ. Правообладатель ООО "Компания "Немзор"</p>
         </div>
       </div>
     </div>

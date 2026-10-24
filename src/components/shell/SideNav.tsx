@@ -7,12 +7,15 @@ import { useAccess } from '@/lib/access';
 import { ROLE_LABELS, initials, shortName, visibleNav } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
 import { getUnreadCount, subscribeUnread } from '@/lib/chatUnread';
+import { useLicenseState } from '@/lib/license';
 
 export default function SideNav({ onNavigate }: { onNavigate?: () => void }) {
   const { user, signOut } = useAuth();
   const { access } = useAccess();
   const navigate = useNavigate();
-  const items = visibleNav(user?.role, access?.sections);
+  const { isBizAdmin } = useLicenseState();
+  const baseItems = visibleNav(user?.role, access?.sections);
+  const items = isBizAdmin ? [...baseItems, { label: 'Админка БИЗ', path: '/biz-admin', icon: 'ShieldCheck', group: 3 }] : baseItems;
   const name = user?.fullName || user?.email || '';
   const [unread, setUnread] = useState(0);
 

@@ -129,31 +129,37 @@ def _extract_token(event: Dict[str, Any], body: Dict[str, Any]) -> str:
     return token.strip()
 
 
+LIC_SQL = ("(u.is_biz_admin OR (u.org_id = 'org-main' AND o.status = 'active' "
+           "AND (o.license_until IS NULL OR o.license_until >= CURRENT_DATE)))")
+
+
 def _authenticate(cur, token: str) -> Optional[Dict[str, Any]]:
     """Проверяет токен запроса: либо обычная сессия сайта (30 дней), либо постоянный
     API-токен десктоп-приложения. Возвращает пользователя или None, если токен невалиден."""
     if not token:
         return None
     cur.execute(
-        f'SELECT u.id, u.email, u.is_admin FROM {SCHEMA}.auth_sessions s '
+        f'SELECT u.id, u.email, u.is_admin, {LIC_SQL} FROM {SCHEMA}.auth_sessions s '
         f'JOIN {SCHEMA}.auth_users u ON u.id = s.user_id '
+        f'LEFT JOIN {SCHEMA}.biz_organizations o ON o.id = u.org_id '
         f'WHERE s.token = %s AND s.expires_at > now()',
         (token,),
     )
     row = cur.fetchone()
     if row:
-        return {'id': row[0], 'email': row[1], 'is_admin': row[2]}
+        return {'id': row[0], 'email': row[1], 'is_admin': row[2], 'licensed': bool(row[3])}
 
     cur.execute(
-        f'SELECT u.id, u.email, u.is_admin FROM {SCHEMA}.api_tokens t '
+        f'SELECT u.id, u.email, u.is_admin, {LIC_SQL} FROM {SCHEMA}.api_tokens t '
         f'JOIN {SCHEMA}.auth_users u ON u.id = t.user_id '
+        f'LEFT JOIN {SCHEMA}.biz_organizations o ON o.id = u.org_id '
         f'WHERE t.token = %s AND t.revoked_at IS NULL',
         (token,),
     )
     row = cur.fetchone()
     if row:
         cur.execute(f'UPDATE {SCHEMA}.api_tokens SET last_used_at = now() WHERE token = %s', (token,))
-        return {'id': row[0], 'email': row[1], 'is_admin': row[2]}
+        return {'id': row[0], 'email': row[1], 'is_admin': row[2], 'licensed': bool(row[3])}
     return None
 
 
@@ -276,6 +282,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             conn.commit()
             if not user:
                 return _resp(401, {'data': None, 'error': {'message': 'Не авторизован: нужен действующий токен входа'}})
+            if not user.get('licensed'):
+                return _resp(402, {'data': None, 'license_blocked': True, 'error': {'message': 'Заключите лицензионный договор на подписку БИЗ (BIZ). Напишите на do@bizwor.ru'}})
 
             if batch is not None:
                 results = []

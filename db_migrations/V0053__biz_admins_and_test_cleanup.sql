@@ -1,0 +1,2 @@
+UPDATE biz_organizations SET status = 'terminated', notes = 'Тестовая регистрация при проверке системы (Юра), можно не учитывать' WHERE inn = '7707083893' AND name = 'ООО "Тест БИЗ"';
+UPDATE auth_users SET is_biz_admin = true WHERE lower(email) IN ('glv@saou.ru', 'ooorassvet29@yandex.ru');

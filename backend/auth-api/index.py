@@ -158,6 +158,12 @@ def resolve_card_target(cur, body: Dict[str, Any]):
     return None, None, 'Не указан сотрудник'
 
 
+def org_of(cur, user_id: str) -> str:
+    cur.execute(f'SELECT org_id FROM {SCHEMA}.auth_users WHERE id = %s', (str(user_id),))
+    row = cur.fetchone()
+    return row[0] if row and row[0] else 'org-main'
+
+
 def full_name_of(cur, user_id: str) -> str:
     cur.execute(f'SELECT full_name FROM {SCHEMA}.profiles WHERE user_id::text = %s LIMIT 1', (str(user_id),))
     row = cur.fetchone()
@@ -221,8 +227,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
                 user_id = str(uuidlib.uuid4())
                 cur.execute(
-                    f'INSERT INTO {SCHEMA}.auth_users (id, email, password_hash, is_admin) VALUES (%s, %s, %s, %s)',
-                    (user_id, email, hash_password(password), is_first),
+                    f'INSERT INTO {SCHEMA}.auth_users (id, email, password_hash, is_admin, org_id) VALUES (%s, %s, %s, %s, %s)',
+                    (user_id, email, hash_password(password), is_first, org_of(cur, creator['id']) if creator else 'org-main'),
                 )
                 if creator:
                     conn.commit()
@@ -467,8 +473,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     else:
                         target_user_id = str(uuidlib.uuid4())
                         cur.execute(
-                            f'INSERT INTO {SCHEMA}.auth_users (id, email, password_hash, is_admin) VALUES (%s, %s, %s, %s)',
-                            (target_user_id, profile_email, hash_password(password), False),
+                            f'INSERT INTO {SCHEMA}.auth_users (id, email, password_hash, is_admin, org_id) VALUES (%s, %s, %s, %s, %s)',
+                            (target_user_id, profile_email, hash_password(password), False, org_of(cur, user['id'])),
                         )
                     cur.execute(
                         f'UPDATE {SCHEMA}.profiles SET user_id = %s, has_system_access = true WHERE id = %s',
@@ -580,8 +586,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                         return _resp(400, {'error': 'У сотрудника не указан email'})
                     target_user_id = str(uuidlib.uuid4())
                     cur.execute(
-                        f'INSERT INTO {SCHEMA}.auth_users (id, email, password_hash, is_admin) VALUES (%s, %s, %s, %s)',
-                        (target_user_id, profile_email, hash_password(new_password), False),
+                        f'INSERT INTO {SCHEMA}.auth_users (id, email, password_hash, is_admin, org_id) VALUES (%s, %s, %s, %s, %s)',
+                        (target_user_id, profile_email, hash_password(new_password), False, org_of(cur, user['id'])),
                     )
                     cur.execute(
                         f'UPDATE {SCHEMA}.profiles SET user_id = %s, has_system_access = true WHERE id = %s',

@@ -1,0 +1,6 @@
+{"tests": [
+  {"name": "OPTIONS", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+  {"name": "Public info", "method": "POST", "path": "/", "body": {"action": "public_info"}, "expectedStatus": 200},
+  {"name": "No token", "method": "POST", "path": "/", "body": {"action": "my_license"}, "expectedStatus": 401},
+  {"name": "Register without consent", "method": "POST", "path": "/", "body": {"action": "register"}, "expectedStatus": 400}
+]}

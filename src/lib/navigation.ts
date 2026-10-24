@@ -24,6 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Сотрудники', path: '/employees', icon: 'Users', group: 3, roles: ['director', 'deputy_director'] },
   { label: 'Админ-панель', path: '/admin', icon: 'SlidersHorizontal', group: 3, roles: ['deputy_director'] },
   { label: 'Управление ПК', path: '/devices', icon: 'MonitorSmartphone', group: 3, roles: ['deputy_director'] },
+  { label: 'Лицензия БИЗ', path: '/license', icon: 'BadgeCheck', group: 3, roles: ['director', 'deputy_director'] },
   { label: 'Настройки', path: '/settings', icon: 'Settings', group: 3 },
 ];
 
