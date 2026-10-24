@@ -19,12 +19,25 @@ CORS = {
 
 DOC_TYPES = {
     'license_agreement': {'prefix': 'ЛД', 'title': 'Лицензионный договор'},
-    'service_contract': {'prefix': 'Д', 'title': 'Договор на оказание услуг сопровождения'},
+    'contract': {'prefix': 'Д', 'title': 'Договор'},
+    'service_contract': {'prefix': 'ДС', 'title': 'Договор на оказание услуг сопровождения'},
     'license_issue': {'prefix': 'ВЛ', 'title': 'Акт о выдаче лицензии'},
-    'usage_certificate': {'prefix': 'СП', 'title': 'Свидетельство о праве пользования'},
+    'usage_certificate': {'prefix': 'СП', 'title': 'Свидетельство о праве пользования (БИЗ)'},
+    'certificate_web': {'prefix': 'СП-А', 'title': 'Свидетельство о праве пользования АнодБИЗ'},
+    'certificate_win': {'prefix': 'СП-П', 'title': 'Свидетельство о праве пользования ПО АБИЗ'},
     'invoice': {'prefix': 'СЧ', 'title': 'Счёт на оплату'},
     'act': {'prefix': 'АКТ', 'title': 'Акт предоставления прав'},
+    'pd_assignment': {'prefix': 'ПОР', 'title': 'Поручение на обработку персональных данных'},
+    'pd_consent': {'prefix': 'СОГ', 'title': 'Согласие на обработку персональных данных'},
+    'nda': {'prefix': 'СК', 'title': 'Соглашение о конфиденциальности'},
+    'edo_agreement': {'prefix': 'ЭДО', 'title': 'Соглашение об электронном документообороте'},
+    'supplementary': {'prefix': 'ДС-', 'title': 'Дополнительное соглашение'},
+    'reconciliation': {'prefix': 'АС', 'title': 'Акт сверки взаимных расчётов'},
+    'suspension_notice': {'prefix': 'УВ', 'title': 'Уведомление о приостановлении доступа'},
+    'termination': {'prefix': 'СР', 'title': 'Соглашение о расторжении договора'},
 }
+REGISTER_DOCS = ['license_agreement', 'contract', 'pd_assignment', 'pd_consent', 'edo_agreement']
+ACTIVATE_DOCS = ['license_issue', 'usage_certificate', 'certificate_web', 'certificate_win', 'act']
 
 ORG_FIELDS = [
     'org_type', 'name', 'full_name', 'inn', 'kpp', 'ogrn', 'okved', 'legal_address', 'postal_address',
@@ -207,7 +220,13 @@ def _next_number(cur, doc_type: str, account: str, on: date) -> str:
     cur.execute(f'SELECT count(*) FROM {_t("biz_documents")} WHERE doc_type = %s AND EXTRACT(YEAR FROM doc_date) = %s',
                 (doc_type, on.year))
     n = cur.fetchone()[0] + 1
-    return f'{prefix}-{account}/{on.strftime("%y")}-{n:03d}'
+    sep = '' if prefix.endswith('-') else '-'
+    while True:
+        num = f'{prefix}{sep}{account}/{on.strftime("%y")}-{n:03d}'
+        cur.execute(f'SELECT 1 FROM {_t("biz_documents")} WHERE number = %s', (num,))
+        if not cur.fetchone():
+            return num
+        n += 1
 
 
 def _add_months(d: date, m: int) -> date:
@@ -227,7 +246,7 @@ def _issue(cur, org: Dict[str, Any], doc_type: str, actor: str, months: int = 0,
     pt = _add_months(pf, months) - timedelta(days=1) if months else None
     snap = {
         'vendor': settings.get('vendor', {}), 'tariff': settings.get('tariff', {}),
-        'org': {k: org.get(k) for k in ORG_FIELDS + ['account_no']},
+        'org': {k: org.get(k) for k in ORG_FIELDS + ['account_no', 'users_limit']},
         'base_id': base_id,
     }
     if base_id:
@@ -347,6 +366,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 tariff = _settings(cur).get('tariff', {})
                 price = float(tariff.get('price') or 1790)
                 lic = _issue(cur, o, 'license_agreement', 'регистрация', months=12, amount=price)
+                for t in REGISTER_DOCS[1:]:
+                    _issue(cur, o, t, 'регистрация', base_id=lic['id'])
                 _issue(cur, o, 'invoice', 'регистрация', months=1, amount=price, base_id=lic['id'])
                 _audit(cur, email, org_id, 'register', {'inn': org['inn'], 'name': org['name'], 'account_no': acc, 'ip': ip})
                 conn.commit()
@@ -430,7 +451,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 lic = [d for d in _docs_of(cur, oid) if d['doc_type'] == 'license_agreement' and d['status'] != 'cancelled']
                 base = lic[-1] if lic else _issue(cur, o, 'license_agreement', actor, months=12, amount=price)
                 issued = []
-                for t in body.get('docs') or ['license_issue', 'usage_certificate', 'act']:
+                for t in body.get('docs') or ACTIVATE_DOCS:
                     if t in DOC_TYPES and t != 'license_agreement':
                         issued.append(_issue(cur, o, t, actor, months=months, amount=price * months, period_from=start, base_id=base['id'])['number'])
                 cur.execute(f"UPDATE {_t('biz_organizations')} SET status = 'active', license_until = %s, updated_at = now() WHERE id = %s", (until, oid))
@@ -476,6 +497,62 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 r = cur.fetchone()
                 if r:
                     _audit(cur, actor, r[0], 'doc_status', {'number': r[1], 'status': st})
+                conn.commit()
+                return _resp(200, {'ok': True})
+
+            if action == 'admin_doc_save':
+                did = body.get('id')
+                cur.execute(f'SELECT org_id, number FROM {_t("biz_documents")} WHERE id = %s', (did,))
+                cur_doc = cur.fetchone()
+                if not cur_doc:
+                    return _resp(404, {'error': 'Документ не найден'})
+                upd: Dict[str, Any] = {}
+                if 'custom_html' in body:
+                    html = str(body.get('custom_html') or '')
+                    if len(html) > 400000:
+                        return _resp(400, {'error': 'Документ слишком большой'})
+                    upd['custom_html'] = html
+                num = str(body.get('number') or '').strip()
+                if num and num != cur_doc[1]:
+                    cur.execute(f'SELECT 1 FROM {_t("biz_documents")} WHERE number = %s AND id <> %s', (num, did))
+                    if cur.fetchone():
+                        return _resp(409, {'error': f'Номер {num} уже занят другим документом'})
+                    upd['number'] = num[:60]
+                for k in ('doc_date', 'period_from', 'period_to'):
+                    if k in body:
+                        upd[k] = body.get(k) or None
+                if upd.get('doc_date') is None and 'doc_date' in upd:
+                    upd.pop('doc_date')
+                if 'amount' in body and body.get('amount') not in (None, ''):
+                    upd['amount'] = float(body['amount'])
+                if 'months' in body and body.get('months') not in (None, ''):
+                    upd['months'] = int(body['months'])
+                for k in ('title', 'note'):
+                    if k in body:
+                        upd[k] = str(body.get(k) or '')[:500]
+                if not upd:
+                    return _resp(400, {'error': 'Нет изменений'})
+                sets = ', '.join(f'{k} = %s' for k in upd) + ', edited_at = now(), edited_by = %s'
+                cur.execute(f'UPDATE {_t("biz_documents")} SET {sets} WHERE id = %s', [*upd.values(), actor, did])
+                _audit(cur, actor, cur_doc[0], 'doc_edit', {'number': upd.get('number', cur_doc[1]), 'fields': [k for k in upd if k != 'custom_html'] + (['текст'] if 'custom_html' in upd else [])})
+                conn.commit()
+                return _resp(200, {'ok': True})
+
+            if action == 'admin_doc_refresh':
+                did = body.get('id')
+                cur.execute(f'SELECT d.snapshot, d.org_id, d.number FROM {_t("biz_documents")} d WHERE d.id = %s', (did,))
+                r = cur.fetchone()
+                if not r:
+                    return _resp(404, {'error': 'Документ не найден'})
+                cur.execute(f'SELECT * FROM {_t("biz_organizations")} WHERE id = %s', (r[1],))
+                o = _one(cur)
+                st = _settings(cur)
+                snap = dict(r[0] or {})
+                snap.update({'vendor': st.get('vendor', {}), 'tariff': st.get('tariff', {}),
+                             'org': {k: o.get(k) for k in ORG_FIELDS + ['account_no', 'users_limit']}})
+                cur.execute(f'UPDATE {_t("biz_documents")} SET snapshot = %s, edited_at = now(), edited_by = %s WHERE id = %s',
+                            (json.dumps(snap, ensure_ascii=False, default=_json_default), actor, did))
+                _audit(cur, actor, r[1], 'doc_refresh', {'number': r[2]})
                 conn.commit()
                 return _resp(200, {'ok': True})
 

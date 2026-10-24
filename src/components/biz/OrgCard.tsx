@@ -3,7 +3,8 @@ import Icon from '@/components/ui/icon';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import DocViewer from '@/components/biz/DocViewer';
 import { bizCall } from '@/lib/bizApi';
-import { BizDocument, BizOrg, DOC_STATUS, DOC_TITLES, ORG_STATUS } from '@/lib/bizDocs';
+import { BizDocument, BizOrg, DOC_GROUPS, DOC_STATUS, DOC_TITLES, ORG_STATUS } from '@/lib/bizDocs';
+import { downloadWord, downloadZip } from '@/lib/bizRender';
 import { dateShort, money } from '@/lib/bizText';
 
 interface OrgUser { id: string; email: string; full_name?: string; role?: string; created_at: string; last_login?: string; is_biz_admin: boolean }
@@ -97,7 +98,7 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
                   <p className="mb-2 font-semibold">Выдать / продлить лицензию</p>
                   <label className="mb-2 block text-xs">Месяцев<input value={act.months} onChange={e => setAct(a => ({ ...a, months: e.target.value }))} className={inp} /></label>
                   <label className="mb-3 block text-xs">С даты (пусто — сегодня/продолжение)<input type="date" value={act.start} onChange={e => setAct(a => ({ ...a, start: e.target.value }))} className={inp} /></label>
-                  <p className="mb-2 text-xs text-muted-foreground">Будут выпущены: Акт о выдаче лицензии, Свидетельство о праве пользования, Акт. Лицензионный договор отметится подписанным. Доступ откроется.</p>
+                  <p className="mb-2 text-xs text-muted-foreground">Будут выпущены: Акт о выдаче лицензии, 3 Свидетельства (БИЗ, АнодБИЗ, ПО АБИЗ), Акт. Лицензионный договор отметится подписанным. Доступ откроется.</p>
                   <button disabled={busy} onClick={() => run({ action: 'admin_activate', id: org.id, months: Number(act.months), start: act.start || undefined }, 'Лицензия выдана')} className="h-10 w-full rounded-lg bg-emerald-600 text-sm font-medium text-white hover:bg-emerald-700">Выдать лицензию</button>
                 </div>
                 <div className="rounded-xl border border-border p-4">
@@ -112,7 +113,11 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
                 <div className="rounded-xl border border-border p-4">
                   <p className="mb-2 font-semibold">Выставить документ</p>
                   <select value={issue.doc_type} onChange={e => setIssue(i => ({ ...i, doc_type: e.target.value }))} className={`${inp} mb-2`}>
-                    {Object.entries(DOC_TITLES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                    {DOC_GROUPS.map(g => (
+                      <optgroup key={g.title} label={g.title}>
+                        {g.types.map(k => <option key={k} value={k}>{DOC_TITLES[k]}</option>)}
+                      </optgroup>
+                    ))}
                   </select>
                   <div className="mb-2 grid grid-cols-2 gap-2">
                     <label className="text-xs">Месяцев<input value={issue.months} onChange={e => setIssue(i => ({ ...i, months: e.target.value }))} className={inp} /></label>
@@ -128,12 +133,16 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
               </div>
             </div>
           ) : tab === 'docs' ? (
+            <>
+            <div className="mb-3 flex justify-end">
+              <button onClick={() => downloadZip(docs, `Документы ${org.name} лс ${org.account_no}`, org)} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-secondary"><Icon name="Archive" size={16} /> Скачать все (ZIP)</button>
+            </div>
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-muted-foreground"><th className="py-2">Документ</th><th>Дата</th><th>Период</th><th>Сумма</th><th>Статус</th><th /></tr></thead>
               <tbody className="divide-y divide-border">
                 {docs.map(d => (
                   <tr key={d.id}>
-                    <td className="py-2"><b>{DOC_TITLES[d.doc_type]}</b><br /><span className="font-mono text-xs">{d.number}</span></td>
+                    <td className="py-2"><b>{d.title || DOC_TITLES[d.doc_type]}</b>{d.custom_html ? <span className="ml-1 text-[10px] text-amber-600">изм.</span> : null}<br /><span className="font-mono text-xs">{d.number}</span></td>
                     <td>{dateShort(d.doc_date)}</td>
                     <td className="text-xs">{d.period_from ? `${dateShort(d.period_from)} — ${dateShort(d.period_to)}` : '—'}</td>
                     <td>{Number(d.amount) ? money(Number(d.amount)) : '—'}</td>
@@ -142,11 +151,15 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
                         {Object.entries(DOC_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                       </select>
                     </td>
-                    <td><button onClick={() => setView(d)} className="rounded-lg border border-border px-2.5 py-1 text-xs hover:bg-secondary">Открыть</button></td>
+                    <td className="whitespace-nowrap">
+                      <button onClick={() => setView(d)} className="rounded-lg border border-border px-2.5 py-1 text-xs hover:bg-secondary">Открыть / править</button>
+                      <button onClick={() => downloadWord(d, org)} className="ml-1 rounded-lg border border-border px-2 py-1 text-xs hover:bg-secondary" title="Скачать Word"><Icon name="FileDown" size={14} /></button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </>
           ) : tab === 'users' ? (
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-muted-foreground"><th className="py-2">Пользователь</th><th>Роль</th><th>Создан</th><th>Последний вход</th><th>Админ БИЗ</th></tr></thead>
@@ -170,7 +183,7 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
             </ul>
           )}
         </div>
-        <DocViewer doc={view} org={org || undefined} onClose={() => setView(null)} />
+        <DocViewer doc={view} org={org || undefined} onClose={() => setView(null)} editable onSaved={load} />
       </DialogContent>
     </Dialog>
   );

@@ -16,16 +16,35 @@ export interface BizDocument {
   period_from?: string | null; period_to?: string | null; months: number; amount: number; status: string;
   snapshot: { vendor?: Vendor; tariff?: Tariff; org?: BizOrg; base_number?: string; base_date?: string };
   note?: string; created_at?: string; signed_at?: string | null; org_name?: string; account_no?: string;
+  custom_html?: string; title?: string; edited_at?: string | null; edited_by?: string;
 }
 
 export const DOC_TITLES: Record<string, string> = {
   license_agreement: 'Лицензионный договор',
+  contract: 'Договор',
   service_contract: 'Договор на сопровождение',
   license_issue: 'Акт о выдаче лицензии',
-  usage_certificate: 'Свидетельство о праве пользования',
+  usage_certificate: 'Свидетельство о праве пользования (БИЗ)',
+  certificate_web: 'Свидетельство — АнодБИЗ (сайт-платформа)',
+  certificate_win: 'Свидетельство — ПО АБИЗ (ОС Windows)',
   invoice: 'Счёт на оплату',
   act: 'Акт предоставления прав',
+  pd_assignment: 'Поручение на обработку ПДн',
+  pd_consent: 'Согласие на обработку ПДн',
+  nda: 'Соглашение о конфиденциальности',
+  edo_agreement: 'Соглашение об ЭДО',
+  supplementary: 'Дополнительное соглашение',
+  reconciliation: 'Акт сверки',
+  suspension_notice: 'Уведомление о приостановлении',
+  termination: 'Соглашение о расторжении',
 };
+
+export const DOC_GROUPS: { title: string; types: string[] }[] = [
+  { title: 'Договоры', types: ['license_agreement', 'contract', 'service_contract', 'supplementary', 'termination'] },
+  { title: 'Лицензия и права', types: ['license_issue', 'usage_certificate', 'certificate_web', 'certificate_win', 'act'] },
+  { title: 'Персональные данные и ЭДО', types: ['pd_assignment', 'pd_consent', 'nda', 'edo_agreement'] },
+  { title: 'Расчёты и уведомления', types: ['invoice', 'reconciliation', 'suspension_notice'] },
+];
 
 export const DOC_STATUS: Record<string, { label: string; cls: string }> = {
   issued: { label: 'Выставлен', cls: 'bg-slate-100 text-slate-700' },
@@ -43,25 +62,25 @@ export const ORG_STATUS: Record<string, { label: string; cls: string }> = {
   terminated: { label: 'Договор расторгнут', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
 };
 
-const isIp = (o: BizOrg) => o.org_type === 'ИП';
+export const isIp = (o: BizOrg) => o.org_type === 'ИП';
 
-function orgTitle(o: BizOrg): string {
+export function orgTitle(o: BizOrg): string {
   if (isIp(o)) return `Индивидуальный предприниматель ${esc(o.director_name || o.name)}`;
   return esc(o.full_name || o.name);
 }
 
-function orgParty(o: BizOrg, role: string): string {
+export function orgParty(o: BizOrg, role: string): string {
   if (isIp(o)) {
     return `${orgTitle(o)}, ОГРНИП ${blank(o.ogrn, 15)}, ИНН ${blank(o.inn, 12)}, именуемый в дальнейшем «${role}», действующий на основании ${esc(o.director_basis || 'свидетельства о государственной регистрации')}`;
   }
   return `${orgTitle(o)}, ОГРН ${blank(o.ogrn, 13)}, ИНН ${blank(o.inn, 10)}, именуемое в дальнейшем «${role}», в лице ${esc(o.director_position || 'Генерального директора')} ${blank(o.director_name, 30)}, действующего на основании ${esc(o.director_basis || 'Устава')}`;
 }
 
-function vendorParty(v: Vendor, role: string): string {
+export function vendorParty(v: Vendor, role: string): string {
   return `${esc(v.full_name)}, ОГРН ${esc(v.ogrn)}, ИНН ${esc(v.inn)}, именуемое в дальнейшем «${role}», в лице ${esc(v.director_position || 'Генерального директора')} ${blank(v.director_name, 30)}, действующего на основании ${esc(v.director_basis || 'Устава')}`;
 }
 
-function orgRequisites(o: BizOrg): string {
+export function orgRequisites(o: BizOrg): string {
   return `<p><b>${orgTitle(o)}</b><br/>
   ${isIp(o) ? '' : `Сокращённое наименование: ${esc(o.name)}<br/>`}
   ИНН ${blank(o.inn)}${isIp(o) ? '' : ` / КПП ${blank(o.kpp, 9)}`}<br/>
@@ -74,7 +93,7 @@ function orgRequisites(o: BizOrg): string {
   Лицевой счёт БИЗ: <b>${esc(o.account_no)}</b></p>`;
 }
 
-function signs(v: Vendor, o: BizOrg, left = 'Лицензиар', right = 'Лицензиат'): string {
+export function signs(v: Vendor, o: BizOrg, left = 'Лицензиар', right = 'Лицензиат'): string {
   const oPos = isIp(o) ? 'Индивидуальный предприниматель' : (o.director_position || 'Генеральный директор');
   return `<table class="sign"><tr>
     <td><b>${left}:</b><br/>${esc(v.short_name)}<br/>${esc(v.director_position || 'Генеральный директор')}<br/><br/>_______________ / ${blank(initialsName(v.director_name || ''), 16)}<br/><span class="muted">М.П.</span></td>
@@ -82,17 +101,17 @@ function signs(v: Vendor, o: BizOrg, left = 'Лицензиар', right = 'Ли�
   </tr></table>`;
 }
 
-function headerLine(num: string, date: string, v: Vendor): string {
+export function headerLine(num: string, date: string, v: Vendor): string {
   return `<table class="plain"><tr><td>${esc(v.city || 'г. ____________')}</td><td class="right">${dateLong(date)}</td></tr></table>`
     + (num ? '' : '');
 }
 
-function period(d: BizDocument): string {
+export function period(d: BizDocument): string {
   if (!d.period_from) return 'с даты выдачи лицензии на оплаченный период';
   return `с ${dateShort(d.period_from)} по ${dateShort(d.period_to)} (${d.months} ${plural(d.months, 'месяц', 'месяца', 'месяцев')})`;
 }
 
-function baseRef(d: BizDocument): string {
+export function baseRef(d: BizDocument): string {
   const s = d.snapshot;
   return s.base_number ? `Лицензионному договору № ${esc(s.base_number)} от ${dateShort(s.base_date)}` : 'Лицензионному договору (оферте)';
 }
@@ -168,27 +187,6 @@ function licenseIssue(d: BizDocument, v: Vendor, t: Tariff, o: BizOrg): string {
   ${signs(v, o)}`;
 }
 
-function usageCertificate(d: BizDocument, v: Vendor, t: Tariff, o: BizOrg): string {
-  return `<div class="cert">
-  <p class="center muted">${esc(v.full_name)} · ИНН ${esc(v.inn)} · ОГРН ${esc(v.ogrn)}</p>
-  <p class="big">СВИДЕТЕЛЬСТВО</p>
-  <p class="center"><b>о праве пользования программами для ЭВМ структуры БИЗ</b><br/>№ ${esc(d.number)} от ${dateShort(d.doc_date)}</p>
-  <p>Настоящим удостоверяется, что</p>
-  <p class="center" style="font-size:14pt"><b>${orgTitle(o)}</b><br/>ИНН ${esc(o.inn)}${isIp(o) ? '' : `, КПП ${esc(o.kpp)}`}, ${isIp(o) ? 'ОГРНИП' : 'ОГРН'} ${esc(o.ogrn)}</p>
-  <p>является законным пользователем (лицензиатом) программ для ЭВМ <b>«АнодБИЗ»</b> и <b>«ПО АБИЗ»</b> на условиях простой (неисключительной) лицензии по ${baseRef(d)}.</p>
-  <table>
-    <tr><td style="width:40%">Лицевой счёт</td><td><b>${esc(o.account_no)}</b></td></tr>
-    <tr><td>Тариф</td><td>${esc(t.name || 'Пакет БИЗ')} (${esc(t.code || 'BIZ')})</td></tr>
-    <tr><td>Срок права пользования</td><td>${period(d)}</td></tr>
-    <tr><td>Территория</td><td>весь мир</td></tr>
-    <tr><td>Количество рабочих мест</td><td>${o.users_limit ? esc(String(o.users_limit)) : 'без ограничения'}</td></tr>
-  </table>
-  <p>Свидетельство подтверждает право использования Программ в течение указанного срока. Проверить подлинность можно, направив запрос на ${esc(v.email || 'do@bizwor.ru')} с указанием номера свидетельства.</p>
-  <br/>
-  <table class="sign"><tr><td>${esc(v.director_position || 'Генеральный директор')}<br/>${esc(v.short_name)}</td><td class="right">_______________ / ${blank(initialsName(v.director_name || ''), 16)}<br/><span class="muted">М.П.</span></td></tr></table>
-  </div>`;
-}
-
 function invoice(d: BizDocument, v: Vendor, t: Tariff, o: BizOrg): string {
   const months = Math.max(1, d.months || 1);
   const price = d.amount / months;
@@ -228,18 +226,10 @@ function act(d: BizDocument, v: Vendor, t: Tariff, o: BizOrg): string {
   ${signs(v, o)}`;
 }
 
-export function renderBizDocument(d: BizDocument, fallbackOrg?: BizOrg): string {
-  const v = { ...DEFAULT_VENDOR, ...(d.snapshot?.vendor || {}) };
-  const t = { ...DEFAULT_TARIFF, ...(d.snapshot?.tariff || {}) };
-  const o = { ...(fallbackOrg || {}), ...(d.snapshot?.org || {}) };
-  d = { ...d, amount: Number(d.amount || 0), months: Number(d.months || 0) };
-  switch (d.doc_type) {
-    case 'license_agreement': return licenseAgreement(d, v, t, o);
-    case 'service_contract': return serviceContract(d, v, t, o);
-    case 'license_issue': return licenseIssue(d, v, t, o);
-    case 'usage_certificate': return usageCertificate(d, v, t, o);
-    case 'invoice': return invoice(d, v, t, o);
-    case 'act': return act(d, v, t, o);
-    default: return '<p>Неизвестный тип документа</p>';
-  }
-}
+export const BASE_RENDERERS: Record<string, (d: BizDocument, v: Vendor, t: Tariff, o: BizOrg) => string> = {
+  license_agreement: licenseAgreement,
+  service_contract: serviceContract,
+  license_issue: licenseIssue,
+  invoice,
+  act,
+};

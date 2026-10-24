@@ -3,7 +3,9 @@ import { Link, useParams } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import AnodBizLogo from '@/components/AnodBizLogo';
 import { bizCall } from '@/lib/bizApi';
-import { DEFAULT_TARIFF, DEFAULT_VENDOR, DOC_CSS, LEGAL_DOCS, LegalSlug, Tariff, Vendor, legalHtml, printHtml } from '@/lib/bizLegal';
+import { DEFAULT_TARIFF, DEFAULT_VENDOR, LEGAL_DOCS, LegalSlug, Tariff, Vendor, legalHtml } from '@/lib/bizLegal';
+import { letterhead } from '@/lib/bizLetterhead';
+import { FULL_DOC_CSS, downloadLegalWord, printDoc } from '@/lib/bizRender';
 
 export function useBizPublic() {
   const [vendor, setVendor] = useState<Vendor>(DEFAULT_VENDOR);
@@ -21,11 +23,11 @@ export default function Legal() {
   const { slug = 'license' } = useParams();
   const { vendor, tariff } = useBizPublic();
   const doc = LEGAL_DOCS.find(d => d.slug === slug) || LEGAL_DOCS[0];
-  const html = legalHtml(doc.slug as LegalSlug, vendor, tariff);
+  const html = letterhead(vendor) + legalHtml(doc.slug as LegalSlug, vendor, tariff);
 
   return (
     <div className="min-h-[100dvh] bg-secondary/40">
-      <style>{DOC_CSS}</style>
+      <style>{FULL_DOC_CSS}</style>
       <header className="sticky top-0 z-20 border-b border-border bg-card/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           <Link to="/login" className="flex items-center gap-2">
@@ -33,8 +35,11 @@ export default function Legal() {
             <span className="font-semibold">БИЗ · Документы</span>
           </Link>
           <div className="ml-auto flex items-center gap-2">
-            <button onClick={() => printHtml(doc.title, html)} className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm hover:bg-secondary">
+            <button onClick={() => printDoc(doc.title, html)} className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm hover:bg-secondary">
               <Icon name="Printer" size={16} /> Печать / PDF
+            </button>
+            <button onClick={() => downloadLegalWord(doc.slug as LegalSlug, doc.title, vendor, tariff)} className="hidden items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm hover:bg-secondary sm:flex">
+              <Icon name="FileDown" size={16} /> Word
             </button>
             <Link to="/login" className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">Вход</Link>
           </div>

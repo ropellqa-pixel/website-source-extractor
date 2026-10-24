@@ -7,6 +7,7 @@ import { bizCall } from '@/lib/bizApi';
 import { BizDocument, BizOrg, DOC_STATUS, DOC_TITLES, ORG_STATUS } from '@/lib/bizDocs';
 import { LEGAL_DOCS, Tariff, Vendor } from '@/lib/bizLegal';
 import { dateShort, money } from '@/lib/bizText';
+import { downloadLegalWord, downloadWord, downloadZip } from '@/lib/bizRender';
 
 interface Overview {
   organizations: BizOrg[]; documents: BizDocument[];
@@ -69,8 +70,8 @@ export default function BizAdmin() {
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-6">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Администрирование БИЗ</h1>
-          <p className="text-sm text-muted-foreground">Все организации, лицензии, договоры и документы АнодБИЗ и ПО АБИЗ</p>
+          <h1 className="flex items-center gap-2 text-2xl font-bold"><img src="/biz/nemzor-logo.jpg" alt="" className="h-9 w-9 rounded-lg object-contain" /> Личный кабинет {vendor.short_name || 'ООО "Компания "Немзор"'}</h1>
+          <p className="text-sm text-muted-foreground">Правообладатель БИЗ: все организации, лицензии, договоры и документы АнодБИЗ и ПО АБИЗ</p>
         </div>
         <button onClick={load} className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm hover:bg-secondary"><Icon name="RefreshCw" size={16} /> Обновить</button>
       </div>
@@ -129,18 +130,22 @@ export default function BizAdmin() {
 
       {tab === 'docs' && (
         <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+          <div className="flex justify-end border-b border-border px-4 py-2">
+            <button onClick={() => downloadZip(docs, 'Документы БИЗ — все организации')} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-secondary"><Icon name="Archive" size={16} /> Скачать все ({docs.length}) ZIP</button>
+          </div>
           <table className="w-full text-sm">
             <thead><tr className="border-b border-border text-left text-xs text-muted-foreground"><th className="px-4 py-2.5">Номер</th><th>Тип</th><th>Организация</th><th>Дата</th><th>Сумма</th><th>Статус</th><th /></tr></thead>
             <tbody className="divide-y divide-border">
               {docs.map(d => (
                 <tr key={d.id}>
                   <td className="px-4 py-2 font-mono text-xs">{d.number}</td>
-                  <td>{DOC_TITLES[d.doc_type]}</td>
+                  <td>{d.title || DOC_TITLES[d.doc_type]}</td>
                   <td><button onClick={() => setOpen(d.org_id)} className="text-left hover:underline">{d.org_name}</button><br /><span className="font-mono text-xs text-muted-foreground">л/с {d.account_no}</span></td>
                   <td>{dateShort(d.doc_date)}</td>
                   <td>{Number(d.amount) ? money(Number(d.amount)) : '—'}</td>
                   <td><span className={`rounded-full px-2 py-0.5 text-xs ${DOC_STATUS[d.status]?.cls}`}>{DOC_STATUS[d.status]?.label}</span></td>
-                  <td><button onClick={() => setView(d)} className="rounded-lg border border-border px-2.5 py-1 text-xs hover:bg-secondary">Открыть</button></td>
+                  <td className="whitespace-nowrap"><button onClick={() => setView(d)} className="rounded-lg border border-border px-2.5 py-1 text-xs hover:bg-secondary">Открыть / править</button>
+                    <button onClick={() => downloadWord(d)} className="ml-1 rounded-lg border border-border px-2 py-1 text-xs hover:bg-secondary" title="Скачать Word"><Icon name="FileDown" size={14} /></button></td>
                 </tr>
               ))}
             </tbody>
@@ -193,17 +198,21 @@ export default function BizAdmin() {
       {tab === 'legal' && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {LEGAL_DOCS.map(d => (
-            <Link key={d.slug} to={`/legal/${d.slug}`} target="_blank" className="rounded-2xl border border-border bg-card p-5 hover:bg-secondary/40">
+            <div key={d.slug} className="rounded-2xl border border-border bg-card p-5">
               <Icon name="Scale" size={20} className="mb-2 text-muted-foreground" />
               <p className="font-semibold">{d.short}</p>
-              <p className="text-xs text-muted-foreground">{d.title}</p>
-            </Link>
+              <p className="mb-3 text-xs text-muted-foreground">{d.title}</p>
+              <div className="flex gap-2">
+                <Link to={`/legal/${d.slug}`} target="_blank" className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-secondary">Открыть</Link>
+                <button onClick={() => downloadLegalWord(d.slug, d.title, vendor, tariff)} className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-secondary"><Icon name="FileDown" size={14} /> Word</button>
+              </div>
+            </div>
           ))}
         </div>
       )}
 
       <OrgCard orgId={open} onClose={() => setOpen(null)} onChanged={load} />
-      <DocViewer doc={view} onClose={() => setView(null)} />
+      <DocViewer doc={view} onClose={() => setView(null)} editable onSaved={load} />
     </div>
   );
 }

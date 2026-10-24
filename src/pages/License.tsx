@@ -8,6 +8,7 @@ import { bizCall, BIZ_EMAIL } from '@/lib/bizApi';
 import { LEGAL_DOCS } from '@/lib/bizLegal';
 import { BizDocument, BizOrg, DOC_STATUS, DOC_TITLES, ORG_STATUS } from '@/lib/bizDocs';
 import { dateShort, money } from '@/lib/bizText';
+import { downloadWord, downloadZip } from '@/lib/bizRender';
 
 interface LicenseResp {
   org: BizOrg | null;
@@ -95,20 +96,24 @@ export function LicenseContent({ data, blocked }: { data: LicenseResp; blocked?:
       )}
 
       <div className="rounded-2xl border border-border bg-card">
-        <div className="border-b border-border px-5 py-3 font-semibold">Документы организации</div>
+        <div className="flex items-center border-b border-border px-5 py-3">
+          <span className="font-semibold">Документы организации</span>
+          {data.documents.length > 0 && <button onClick={() => downloadZip(data.documents, `Документы БИЗ лс ${o?.account_no || ''}`, o || undefined)} className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-secondary"><Icon name="Archive" size={16} /> Скачать все</button>}
+        </div>
         {data.documents.length === 0 ? (
           <p className="px-5 py-6 text-sm text-muted-foreground">Документов пока нет</p>
         ) : (
           <ul className="divide-y divide-border">
             {data.documents.map(d => (
               <li key={d.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
-                <Icon name={d.doc_type === 'usage_certificate' ? 'Award' : d.doc_type === 'invoice' ? 'Receipt' : 'FileText'} size={18} className="text-muted-foreground" />
+                <Icon name={d.doc_type.includes('certificate') ? 'Award' : d.doc_type === 'invoice' ? 'Receipt' : 'FileText'} size={18} className="text-muted-foreground" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{DOC_TITLES[d.doc_type]} № {d.number}</p>
+                  <p className="truncate font-medium">{d.title || DOC_TITLES[d.doc_type]} № {d.number}</p>
                   <p className="text-xs text-muted-foreground">от {dateShort(d.doc_date)}{d.period_to ? ` · период до ${dateShort(d.period_to)}` : ''}{Number(d.amount) ? ` · ${money(Number(d.amount))}` : ''}</p>
                 </div>
                 <span className={`rounded-full px-2.5 py-0.5 text-xs ${DOC_STATUS[d.status]?.cls}`}>{DOC_STATUS[d.status]?.label}</span>
                 <button onClick={() => setView(d)} className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-secondary">Открыть</button>
+                <button onClick={() => downloadWord(d, o || undefined)} className="rounded-lg border border-border px-2.5 py-1.5 text-sm hover:bg-secondary" title="Скачать Word"><Icon name="FileDown" size={16} /></button>
               </li>
             ))}
           </ul>
