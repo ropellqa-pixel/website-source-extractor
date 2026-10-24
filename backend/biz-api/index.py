@@ -468,18 +468,20 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 o = _one(cur)
                 if not o:
                     return _resp(404, {'error': 'Организация не найдена'})
-                start = date.fromisoformat(body['start']) if body.get('start') else date.today()
+                explicit = bool(body.get('start'))
+                start = date.fromisoformat(body['start']) if explicit else date.today()
                 cur_until = o.get('license_until')
-                if cur_until and cur_until >= start and o['status'] == 'active':
+                if not explicit and cur_until and cur_until >= start and o['status'] == 'active':
                     start = cur_until + timedelta(days=1)
                 until = _add_months(start, months) - timedelta(days=1)
+                ddate = start if explicit else None
                 price = float(o.get('monthly_price') or 1790)
                 lic = [d for d in _docs_of(cur, oid) if d['doc_type'] == 'license_agreement' and d['status'] != 'cancelled']
-                base = lic[-1] if lic else _issue(cur, o, 'license_agreement', actor, months=12, amount=price)
+                base = lic[-1] if lic else _issue(cur, o, 'license_agreement', actor, months=12, amount=price, doc_date=ddate)
                 issued = []
                 for t in body.get('docs') or ACTIVATE_DOCS:
                     if t in DOC_TYPES and t != 'license_agreement':
-                        issued.append(_issue(cur, o, t, actor, months=months, amount=price * months, period_from=start, base_id=base['id'])['number'])
+                        issued.append(_issue(cur, o, t, actor, months=months, amount=price * months, period_from=start, base_id=base['id'], doc_date=ddate)['number'])
                 cur.execute(f"UPDATE {_t('biz_organizations')} SET status = 'active', license_until = %s, updated_at = now() WHERE id = %s", (until, oid))
 
                 if lic:

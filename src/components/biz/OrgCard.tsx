@@ -117,7 +117,7 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
                   <p className="mb-2 font-semibold">Выдать / продлить лицензию</p>
                   <label className="mb-2 block text-xs">Месяцев<input value={act.months} onChange={e => setAct(a => ({ ...a, months: e.target.value }))} className={inp} /></label>
-                  <label className="mb-3 block text-xs">С даты (пусто — сегодня/продолжение)<input type="date" value={act.start} onChange={e => setAct(a => ({ ...a, start: e.target.value }))} className={inp} /></label>
+                  <label className="mb-3 block text-xs">С даты (пусто — сегодня или продолжение текущей лицензии)<input type="date" value={act.start} onChange={e => setAct(a => ({ ...a, start: e.target.value }))} className={inp} /></label>
                   <p className="mb-2 text-xs text-muted-foreground">Будут выпущены: Акт о выдаче лицензии, 3 Свидетельства (БИЗ, АнодБИЗ, ПО АБИЗ), Акт. Лицензионный договор отметится подписанным. Для организации создаётся отдельное хранилище данных, доступ откроется.</p>
                   <button disabled={busy} onClick={() => run({ action: 'admin_activate', id: org.id, months: Number(act.months), start: act.start || undefined }, 'Лицензия выдана')} className="h-10 w-full rounded-lg bg-emerald-600 text-sm font-medium text-white hover:bg-emerald-700">Выдать лицензию</button>
                 </div>
