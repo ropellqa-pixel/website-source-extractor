@@ -37,7 +37,7 @@ const KINDS: Record<string, CertKind> = {
 export const CERT_TYPES = Object.keys(KINDS);
 
 export const CERT_CSS = `
-  .bizdoc .cert2 { position: relative; height: 281mm; display: flex; flex-direction: column; padding: 12pt 18pt 10pt; font-size: 11pt; line-height: 1.3; border: 2.5pt solid var(--c1); outline: 1pt solid var(--c1); outline-offset: -7pt; box-sizing: border-box; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bizdoc .cert2 { position: relative; height: 281mm; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; padding: 12pt 18pt 10pt; font-size: 10.5pt; line-height: 1.25; border: 2.5pt solid var(--c1); outline: 1pt solid var(--c1); outline-offset: -7pt; box-sizing: border-box; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .bizdoc .cert2 > * { position: relative; z-index: 1; }
   .bizdoc .cert2 .c-bg { position: absolute; inset: 0; z-index: 0; opacity: .3; background:
       radial-gradient(circle at 15% 12%, var(--c2) 0, transparent 45%),
@@ -46,10 +46,15 @@ export const CERT_CSS = `
       repeating-linear-gradient(-45deg, var(--c3) 0 1px, transparent 1px 9px),
       linear-gradient(160deg, var(--c4), #ffffff 55%, var(--c4)); }
   .bizdoc .cert2 .c-mark { position: absolute; z-index: 0; left: 50%; top: 55%; width: 13cm; height: 13cm; transform: translate(-50%, -50%); opacity: .08; background-size: contain; background-repeat: no-repeat; background-position: center; }
-  .bizdoc .cert2 .lh { border-bottom-color: var(--c1); margin-bottom: 6pt; }
-  .bizdoc .cert2 .lh-logo { width: 58pt; height: 58pt; }
+  .bizdoc .cert2 .lh { border-bottom-color: var(--c1); margin-bottom: 4pt; padding-bottom: 4pt; }
+  .bizdoc .cert2 .lh-logo { width: 50pt; height: 50pt; }
+  .bizdoc .cert2 .lh-name { font-size: 11pt; }
+  .bizdoc .cert2 .lh-req { font-size: 10pt; }
+  .bizdoc .cert2 .lh-contacts { font-size: 9pt; }
+  .bizdoc .cert2 .c-sub { margin-bottom: 2pt; }
+  .bizdoc .cert2 .c-scope li { margin: 0; }
   .bizdoc .cert2 .lh-req { border-color: var(--c1); }
-  .bizdoc .c-title { text-align: center; font-size: 28pt; font-weight: bold; letter-spacing: 6pt; color: var(--c1); margin: 4pt 0 0; font-family: 'Times New Roman', serif; }
+  .bizdoc .c-title { text-align: center; font-size: 26pt; font-weight: bold; letter-spacing: 6pt; color: var(--c1); margin: 0; font-family: 'Times New Roman', serif; }
   .bizdoc .c-sub { text-align: center; font-size: 12.5pt; font-weight: bold; margin: 2pt 0 4pt; text-transform: uppercase; letter-spacing: .5pt; }
   .bizdoc .c-num { text-align: center; font-size: 11.5pt; margin-bottom: 4pt; }
   .bizdoc .c-num b { color: var(--c1); }
@@ -58,14 +63,15 @@ export const CERT_CSS = `
   .bizdoc .c-holder-req { text-align: center; font-size: 10.5pt; margin-bottom: 6pt; }
   .bizdoc .c-product { text-align: center; font-size: 16pt; font-weight: bold; color: var(--c1); margin: 4pt 0 6pt; line-height: 1.2; }
   .bizdoc .c-small { font-size: 11pt; font-weight: normal; color: #222; }
-  .bizdoc .cert2 table.c-tab td { border: 1px solid var(--c1); background: rgba(255,255,255,.75); font-size: 10pt; padding: 2pt 6pt; }
+  .bizdoc .cert2 table.c-tab td { border: 1px solid var(--c1); background: rgba(255,255,255,.75); font-size: 9.5pt; padding: 1.5pt 6pt; line-height: 1.2; }
   .bizdoc .cert2 table.c-tab td:first-child { width: 38%; font-weight: bold; color: var(--c1); }
   .bizdoc .c-scope { margin: 2pt 0 4pt 14pt; padding: 0; font-size: 10.5pt; }
   .bizdoc .cert2 p { margin: 0 0 4pt; }
-  .bizdoc .c-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; padding-top: 8pt; gap: 10pt; font-size: 10.5pt; }
+  .bizdoc .c-foot { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; margin-top: auto; padding-top: 4pt; gap: 8pt; font-size: 10.5pt; }
+  .bizdoc .c-foot > div:not(.c-seal) { flex: 1; }
   .bizdoc .cert2 .lh { flex-shrink: 0; }
-  .bizdoc .c-seal { width: 3cm; height: 3cm; flex-shrink: 0; border: 1.5pt dashed var(--c1); border-radius: 50%; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 9pt; color: var(--c1); }
-  .bizdoc .c-verify { font-size: 8.5pt; color: #333; text-align: center; margin-top: 6pt; border-top: 1px solid var(--c1); padding-top: 4pt; }
+  .bizdoc .c-seal { width: 45mm; height: 45mm; min-width: 45mm; box-sizing: border-box; flex-shrink: 0; border: 1.5pt dashed var(--c1); border-radius: 50%; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 9pt; color: var(--c1); }
+  .bizdoc .c-verify { font-size: 8.5pt; color: #333; text-align: center; margin-top: 4pt; flex-shrink: 0; border-top: 1px solid var(--c1); padding-top: 4pt; }
   .bizdoc .cert2.navy { --c1: #1e3a6e; --c2: #6f8fc9; --c3: #9fb4dc; --c4: #dfe7f5; }
   .bizdoc .cert2.teal { --c1: #0f5e5a; --c2: #4fb3a9; --c3: #8fd1c8; --c4: #d9f1ee; }
   .bizdoc .cert2.burgundy { --c1: #6b1f2e; --c2: #c27a86; --c3: #ddb0b7; --c4: #f5e3e6; }
@@ -100,9 +106,9 @@ export function renderCertificate(d: BizDocument, v: Vendor, t: Tariff, o: BizOr
       <tr><td>Территория</td><td>весь мир</td></tr>
       <tr><td>Количество рабочих мест</td><td>${o.users_limit ? esc(String(o.users_limit)) : 'без ограничения'}</td></tr>
     </table>
-    <p style="margin-top:6pt"><b>Объём предоставленных прав:</b></p>
+    <p style="margin-top:3pt"><b>Объём предоставленных прав:</b></p>
     <ul class="c-scope">${k.scope.map(s => `<li>${s}</li>`).join('')}</ul>
-    <p style="font-size:10pt">Исключительное право на программы для ЭВМ принадлежит правообладателю. Свидетельство не является документом, подтверждающим переход исключительного права, и действует в течение срока права пользования.</p>
+    <p style="font-size:9.5pt">Исключительное право на программы для ЭВМ принадлежит правообладателю. Свидетельство не является документом, подтверждающим переход исключительного права, и действует в течение срока права пользования.</p>
     <div class="c-foot">
       <div>${esc(v.director_position || 'Генеральный директор')}<br/>${esc(v.short_name)}<br/><br/>_________________ / ${blank(initialsName(v.director_name || ''), 16)}</div>
       <div class="c-seal">М.П.</div>
