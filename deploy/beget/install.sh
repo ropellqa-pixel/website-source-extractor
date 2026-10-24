@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+export LC_COLLATE=C
 if ! "$HOME/api.bizwor.ru/venv/bin/python" -c "import encodings" >/dev/null 2>&1; then
   echo "Сначала войдите в окружение сервера командой:  ssh localhost -p222"
   echo "(в начале строки должно появиться (docker)), затем снова: bash ~/upd/install.sh"
