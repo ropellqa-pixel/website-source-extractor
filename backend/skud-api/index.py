@@ -176,6 +176,13 @@ def _save_event(cur, ctrl_id: str, e: Dict[str, Any], source: str = 'controller'
         cur.execute(f'SELECT name FROM {SCHEMA}.skud_controllers WHERE id = %s', (ctrl_id,))
         d = cur.fetchone()
         alerts.alarm(cur, SCHEMA, kind, d[0] if d else 'Склад', name or '', _parse_time(e.get('time')), card or '')
+    if saved and kind == 'entry' and profile_id and card:
+        cur.execute(f'SELECT name FROM {SCHEMA}.skud_controllers WHERE id = %s', (ctrl_id,))
+        d = cur.fetchone()
+        try:
+            alerts.pass_notice(cur, SCHEMA, d[0] if d else 'Склад', profile_id, card, _parse_time(e.get('time')))
+        except Exception:
+            pass
     return saved
 
 

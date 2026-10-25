@@ -41,7 +41,7 @@ def _days_left(now: datetime, until: datetime) -> int:
     return max(0, (until.astimezone(MSK).date() - now.astimezone(MSK).date()).days)
 
 
-def vk_send(cur, schema: str, profile_ids: List[str], text: str) -> int:
+def vk_send(cur, schema: str, profile_ids: List[str], text: str, keyboard: str = '') -> int:
     token = os.environ.get('VK_GROUP_TOKEN')
     if not token or not profile_ids:
         return 0
@@ -50,7 +50,8 @@ def vk_send(cur, schema: str, profile_ids: List[str], text: str) -> int:
     sent = 0
     for (vk_id,) in cur.fetchall():
         data = urllib.parse.urlencode({'access_token': token, 'v': '5.199', 'user_id': vk_id,
-                                       'random_id': secrets.randbelow(2 ** 31), 'message': text[:3500]}).encode()
+                                       'random_id': secrets.randbelow(2 ** 31), 'message': text[:3500],
+                                       **({'keyboard': keyboard} if keyboard else {})}).encode()
         try:
             with urllib.request.urlopen('https://api.vk.com/method/messages.send', data=data, timeout=5) as r:
                 if 'error' not in json.loads(r.read().decode()):
@@ -167,3 +168,24 @@ def daily_once(cur, schema: str) -> None:
     today = datetime.now(MSK).strftime('%Y-%m-%d')
     if _once(cur, schema, f'daily:{today}'):
         daily(cur, schema)
+
+
+def pass_notice(cur, schema: str, door: str, profile_id: str, card: str, when: datetime) -> None:
+    """Сотруднику в ВК: «вы вошли на склад» + кнопка «Это был не я — заблокировать карту».
+    Шлём только по свежим проходам (не старше 30 минут), чтобы не засыпать при выгрузке архива."""
+    if not profile_id or not card or datetime.now(timezone.utc) - when > timedelta(minutes=30):
+        return
+    token = secrets.token_hex(12)
+    cur.execute(f'INSERT INTO {schema}.skud_block_tokens (token, card_number, profile_id, door, event_time) VALUES (%s, %s, %s, %s, %s)',
+                (token, card, profile_id, door, when))
+    kb = json.dumps({'inline': True, 'buttons': [[{'action': {'type': 'callback', 'label': 'Это был не я — заблокировать карту',
+                                                          'payload': json.dumps({'block': token})}, 'color': 'negative'}]]}, ensure_ascii=False)
+    text = (f'🔑 Вход по вашей карте: «{door}»\n{when.astimezone(MSK).strftime("%d.%m.%Y %H:%M")}\n\n'
+            f'Если это были не вы — нажмите кнопку «Заблокировать карту» и немедленно сообщите руководству.')
+    cur.execute(f"SELECT written_at, card_type FROM {schema}.skud_cards WHERE card_number = %s", (card,))
+    c = cur.fetchone()
+    if c and c[0] and c[1] == 'employee':
+        exp = card_dates(c[0])['expires']
+        left = _days_left(datetime.now(timezone.utc), exp)
+        text += f'\n\nКарта действует до {exp.astimezone(MSK).strftime("%d.%m.%Y")}' + (f' — осталось {left} дн., попросите перезаписать карту.' if left <= WARN_DAYS else '.')
+    vk_send(cur, schema, [profile_id], text, kb)
