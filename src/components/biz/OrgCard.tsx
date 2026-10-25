@@ -137,6 +137,16 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
                 </div>
                 <div className="rounded-xl border border-border p-4">
                   <p className="mb-2 font-semibold">Выставить документ</p>
+                  <p className="mb-1 text-[11px] text-muted-foreground">Свидетельства СКУД и юридические:</p>
+                  <div className="mb-2 grid grid-cols-2 gap-1.5">
+                    {([['skud_commissioning', 'Ввод СКУД', 'DoorOpen'], ['skud_access', 'Доступ СКУД, карты', 'KeyRound'],
+                      ['legal_registration', 'Регистрация, л/с', 'Landmark'], ['legal_data', 'Защита данных', 'ShieldCheck']] as const).map(([k, l, i]) => (
+                      <button key={k} type="button" onClick={() => setIssue(x => ({ ...x, doc_type: k }))}
+                        className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left text-xs ${issue.doc_type === k ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:bg-secondary'}`}>
+                        <Icon name={i} size={14} className="shrink-0" />{l}
+                      </button>
+                    ))}
+                  </div>
                   <select value={issue.doc_type} onChange={e => setIssue(i => ({ ...i, doc_type: e.target.value }))} className={`${inp} mb-2`}>
                     {DOC_GROUPS.map(g => (
                       <optgroup key={g.title} label={g.title}>
