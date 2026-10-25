@@ -4,107 +4,20 @@ import { useAuth } from '../lib/auth';
 import { db } from '@/lib/sdk';
 import { getAllVkBindings } from '../lib/vkBinding';
 import { useNavigate } from 'react-router-dom';
-import {
-  ArrowLeft, Banknote,
-  Save, Lock, Send, Settings2, Unlock, UserCheck, Loader2, CheckCircle, CalendarDays
-} from 'lucide-react';
+import { Lock, Unlock, UserCheck } from 'lucide-react';
 import { apiUrl } from '@/lib/apiUrls';
 import { evalFormula, useAccess, type FieldDef } from '@/lib/access';
-import SalaryGrid, { cellValue, type GridRow } from '@/components/salary/SalaryGrid';
+import SalaryGrid, { type GridRow } from '@/components/salary/SalaryGrid';
+import {
+  type Profile, type SalaryRow, type ManagerRow, MONTHS, getDaysForMonth, DEFAULT_FX, DEFAULT_FIELDS,
+  rowEnv, fmt, loadGlobalSettings, loadGlobalManagerSettings,
+} from '@/components/salary/salaryUtils';
+import SalaryHeader from '@/components/salary/SalaryHeader';
+import SalaryRevenueBar from '@/components/salary/SalaryRevenueBar';
+import SalaryBottomBar from '@/components/salary/SalaryBottomBar';
+import ManagerUnlockDialog from '@/components/salary/ManagerUnlockDialog';
 
 const VK_API_URL = apiUrl('vk-api');
-
-interface Profile {
-  id: string;
-  full_name: string;
-  email: string;
-  role: string;
-  department: string;
-  status: string;
-  vk_id: string;
-}
-
-interface SalaryRow {
-  id?: string;
-  profile_id: string;
-  hours_worked: number;
-  revenue: number;
-  days_in_month: number;
-  vacation_pay: number;
-  non_cash: number;
-  overtime: number;
-  tax: number;
-  underpayment: number;
-  month_year: string;
-  extra?: Record<string, number | string> | null;
-  responsible_user_id?: string;
-  user_id?: string;
-}
-
-interface ManagerRow {
-  id?: string;
-  profile_id: string;
-  osn_hours: number;
-  dop_hours: number;
-  doplaty: number;
-  vacation_pay: number;
-  non_cash: number;
-  underpayment: number;
-  hourly_rate: number;
-  month_year: string;
-  extra?: Record<string, number | string> | null;
-  user_id?: string;
-}
-
-const MONTHS = [
-  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
-];
-const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
-function getDaysForMonth(month: number, year: number): number {
-  if (month === 2 && ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0)) return 29;
-  return DAYS_IN_MONTH[month - 1] || 30;
-}
-
-const DEFAULT_FX: Record<string, string> = {
-  rate: 'revenue / (days * 24) * percent / 100',
-  total: '(rate * hours + vacation) - non_cash - overtime - tax + underpayment',
-  week: 'total / 4',
-  manager_rate: 'rate * (1 + manager_percent / 100)',
-  manager_total: '((osn_hours * manager_rate) + vacation) - non_cash + doplaty + dop_hours * rate + underpayment',
-  manager_week: 'manager_total / 4',
-};
-const F = (key: string, v: string, label: string, kind: FieldDef['kind']): FieldDef => ({ key, var: v, label, visible: true, builtin: true, kind });
-const DEFAULT_FIELDS: Record<'salary' | 'manager' | 'collection', FieldDef[]> = {
-  salary: [F('hours_worked', 'hours', 'ЧАСЫ', 'accrual'), F('vacation_pay', 'vacation', 'ОТПУСК', 'accrual'), F('non_cash', 'non_cash', 'БЕЗНАЛ', 'deduction'),
-    F('overtime', 'overtime', 'ПЕРЕБОР', 'deduction'), F('tax', 'tax', 'НАЛОГ', 'deduction'), F('underpayment', 'underpayment', 'НЕДОПЛАТА', 'accrual')],
-  manager: [F('osn_hours', 'osn_hours', 'ОСН. ЧАСЫ', 'accrual'), F('dop_hours', 'dop_hours', 'ДОП. ЧАСЫ', 'accrual'), F('doplaty', 'doplaty', 'ДОПЛАТЫ', 'accrual'),
-    F('vacation_pay', 'vacation', 'ОТПУСК', 'accrual'), F('non_cash', 'non_cash', 'БЕЗНАЛ', 'deduction'), F('underpayment', 'underpayment', 'НЕДОПЛАТА', 'accrual')],
-  collection: [F('sbis_value', 'sbis', 'Сбис ₽', 'number'), F('fact_value', 'fact', 'Факт ₽', 'number')],
-};
-
-function rowEnv(row: Record<string, unknown>, fields: FieldDef[]) {
-  const env: Record<string, number> = {};
-  fields.forEach((f) => { const v = cellValue(row as GridRow, f); env[f.var] = typeof v === 'number' ? v : 0; });
-  return env;
-}
-
-function fmt(n: number) {
-  return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-async function loadGlobalSettings() {
-  const { data } = await db.from('salary_settings').select('*').is('month_year', null).limit(1);
-  if (data && data.length > 0) return data[0];
-  return null;
-}
-
-async function loadGlobalManagerSettings() {
-  const { data } = await db.from('manager_settings').select('*').is('month_year', null).limit(1);
-  if (data && data.length > 0) return data[0];
-  return null;
-}
 
 export default function Salary() {
   const { user } = useAuth();
@@ -615,102 +528,21 @@ export default function Salary() {
 
   return (
     <div className="min-h-full flex flex-col">
-      <header className="bg-card backdrop-blur-sm border-b border-border sticky top-0 z-50">
-        <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-wrap items-center justify-between gap-2 py-2 sm:h-14 sm:py-0">
-            <div className="flex items-center gap-3">
-              <button onClick={() => navigate('/dashboard')} className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-all">
-                <ArrowLeft className="w-5 h-5" />
-              </button>
-              <div className="flex items-center gap-2">
-                <Banknote className="w-6 h-6 text-emerald-600" />
-                <h1 className="page-title text-lg text-foreground">ЗАРПЛАТА</h1>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-foreground/80 font-medium">За</span>
-                <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                  className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                  {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-                </select>
-                <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}
-                  className="bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                  {years.map(y => <option key={y} value={y}>{y}</option>)}
-                </select>
-              </div>
-              <div className="hidden md:flex items-center gap-4 text-xs text-muted-foreground">
-                <span>₽/Час: <b className="text-emerald-600">{fmt(dRate)} ₽</b></span>
-                <span>Сотр: <b className="text-foreground">{calculatedRows.length}</b></span>
-                <span>Итого: <b className="text-emerald-700">{fmt(totals.i)} ₽</b></span>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {periodLocked && (
-                canLock ? (
-                  <button onClick={handleUnlockPeriod}
-                    className="flex items-center gap-1 text-xs text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1 rounded-lg transition-all"
-                    title="Разблокировать таблицу сотрудников для правок">
-                    <Unlock className="w-3 h-3" /> Разблокировать
-                  </button>
-                ) : (
-                  <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-500/10 px-2 py-1 rounded-lg">
-                    <Lock className="w-3 h-3" /> Заблокировано
-                  </span>
-                )
-              )}
-              {isDirector && (
-                <button onClick={() => setShowFullTable(!showFullTable)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${showFullTable ? 'bg-emerald-500 text-white' : 'bg-secondary text-foreground/80 hover:bg-border'}`}>
-                  {showFullTable ? 'Скрыть' : 'ПОЛНАЯ'}
-                </button>
-              )}
-              {canEditHours() && (
-                <button onClick={fillHoursFromSchedule} disabled={tabelBusy}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-secondary hover:bg-border text-foreground/80 text-xs font-medium rounded-lg transition-all disabled:opacity-50"
-                  title="Посчитать часы по сменам из раздела «Табель»">
-                  {tabelBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarDays className="w-3.5 h-3.5" />} Часы из табеля
-                </button>
-              )}
-              {isDeputy && (
-                <a href="/admin" className="flex items-center gap-1 px-3 py-1.5 bg-secondary hover:bg-border text-foreground/80 text-xs font-medium rounded-lg transition-all">
-                  <Settings2 className="w-3.5 h-3.5" /> Настройки ЗП
-                </a>
-              )}
-              <span className="text-xs text-muted-foreground hidden sm:inline">
-                {isDirector ? '👁 Директор' : isDeputy ? '✏️ Зам. директора' : isResponsiblePerson() ? '✏️ Ответственный' : '👤 Сотрудник'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </header>
+      <SalaryHeader
+        onBack={() => navigate('/dashboard')}
+        selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth}
+        selectedYear={selectedYear} setSelectedYear={setSelectedYear}
+        years={years} dRate={dRate} rowsCount={calculatedRows.length} totalI={totals.i}
+        periodLocked={periodLocked} canLock={canLock} onUnlockPeriod={handleUnlockPeriod}
+        isDirector={isDirector} isDeputy={isDeputy}
+        showFullTable={showFullTable} setShowFullTable={setShowFullTable}
+        canEditHours={canEditHours()} onFillHours={fillHoursFromSchedule} tabelBusy={tabelBusy}
+        isResponsible={isResponsiblePerson()}
+      />
 
       <main className="flex-1 max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 w-full">
-        <div className="bg-card rounded-xl border border-border p-4 mb-4">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-sky-700 uppercase tracking-wider">C3. ВЫРУЧКА</label>
-              {canEditRevenueDays() ? (
-                <input type="number" value={revenue || ''} onChange={(e) => updateRevenue(Number(e.target.value))}
-                  className="w-36 bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="0" />
-              ) : (
-                <span className="text-sm text-sky-700 font-bold ml-2">{fmt(revenue)}</span>
-              )}
-              <span className="text-xs text-muted-foreground">₽</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-sky-700 uppercase tracking-wider">C9. ДНИ</label>
-              {canEditRevenueDays() ? (
-                <input type="number" value={daysInMonth || ''} onChange={(e) => updateDays(Number(e.target.value))}
-                  className="w-20 bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="30" />
-              ) : (
-                <span className="text-sm text-sky-700 font-bold ml-2">{daysInMonth}</span>
-              )}
-              <span className="text-xs text-muted-foreground">дн.</span>
-            </div>
-            <div className="text-xs text-muted-foreground">K2 = {daysInMonth} × 24 = <b className="text-foreground/80">{k2}</b></div>
-          </div>
-        </div>
+        <SalaryRevenueBar canEdit={canEditRevenueDays()} revenue={revenue} daysInMonth={daysInMonth} k2={k2}
+          onRevenue={updateRevenue} onDays={updateDays} />
 
         {/* EMPLOYEE TABLE */}
         <SalaryGrid
@@ -770,60 +602,22 @@ export default function Salary() {
 
       {/* Bottom bar — рассылка доступна любому сотруднику с доступом в систему */}
       {calculatedRows.length > 0 && (
-        <div className="sticky bottom-0 bg-card backdrop-blur-sm border-t border-border px-4 py-3">
-          <div className="max-w-full mx-auto flex items-center justify-end gap-3">
-            {(!usePositions || can('salary.broadcast')) && <button onClick={handleDistributeSalary} disabled={broadcasting || calculatedRows.length === 0}
-              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-              {broadcasting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              {broadcasting ? 'Отправка...' : 'Рассылка'}
-            </button>}
-            {(canLock || isResponsiblePerson()) && (
-              <button onClick={saveAll} disabled={saving || (periodLocked && managerLocked)}
-                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50">
-                {periodLocked ? <Lock className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-                {saving ? 'Сохранение...' : (periodLocked && managerLocked) ? 'Заблокировано' : 'Сохранить'}
-              </button>
-            )}
-          </div>
-          {broadcastResult && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30 px-4">
-              <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-md w-full p-6 text-center">
-                <div className={broadcastResult.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}>
-                  <CheckCircle className="w-10 h-10 mx-auto mb-3" />
-                </div>
-                <p className="text-foreground text-base leading-relaxed whitespace-pre-line">{broadcastResult}</p>
-                <button
-                  onClick={() => setBroadcastResult('')}
-                  className="mt-5 w-full px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all">
-                  Понятно
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        <SalaryBottomBar
+          showBroadcast={!usePositions || can('salary.broadcast')} onBroadcast={handleDistributeSalary}
+          broadcasting={broadcasting} rowsCount={calculatedRows.length}
+          showSave={canLock || isResponsiblePerson()} onSave={saveAll} saving={saving}
+          periodLocked={periodLocked} managerLocked={managerLocked}
+          broadcastResult={broadcastResult} onCloseResult={() => setBroadcastResult('')}
+        />
       )}
 
       {showManagerLock && (
-        <div className="fixed inset-0 bg-foreground/30 flex items-center justify-center z-[100]" onClick={() => { setShowManagerLock(false); setUnlockCode(''); setUnlockError(''); }}>
-          <div className="bg-card rounded-2xl p-6 w-80 border border-border shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 mb-4">
-              <Unlock className="w-5 h-5 text-amber-600" />
-              <h3 className="text-foreground font-semibold">Разблокировка таблицы</h3>
-            </div>
-            <p className="text-muted-foreground text-sm mb-4">Введите код для разблокировки таблицы «Заведующий»:</p>
-            <input type="password" value={unlockCode} onChange={(e) => { setUnlockCode(e.target.value); setUnlockError(''); }}
-              onKeyDown={(e) => e.key === 'Enter' && handleUnlockManager()}
-              className="w-full bg-secondary border border-border rounded-lg px-4 py-3 text-foreground text-center text-lg tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-amber-500 mb-3"
-              placeholder="••••" autoFocus />
-            {unlockError && <p className="text-red-600 text-sm mb-3">{unlockError}</p>}
-            <div className="flex gap-2">
-              <button onClick={() => { setShowManagerLock(false); setUnlockCode(''); setUnlockError(''); }}
-                className="flex-1 bg-secondary hover:bg-border text-foreground py-2 rounded-lg transition-all text-sm">Отмена</button>
-              <button onClick={handleUnlockManager}
-                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-2 rounded-lg transition-all text-sm">Разблокировать</button>
-            </div>
-          </div>
-        </div>
+        <ManagerUnlockDialog
+          unlockCode={unlockCode} unlockError={unlockError}
+          onCodeChange={(v) => { setUnlockCode(v); setUnlockError(''); }}
+          onClose={() => { setShowManagerLock(false); setUnlockCode(''); setUnlockError(''); }}
+          onUnlock={handleUnlockManager}
+        />
       )}
     </div>
   );
