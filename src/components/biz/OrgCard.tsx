@@ -6,6 +6,7 @@ import { bizCall } from '@/lib/bizApi';
 import { BizDocument, BizOrg, DOC_GROUPS, DOC_STATUS, DOC_TITLES, ORG_STATUS } from '@/lib/bizDocs';
 import { downloadWord, downloadZip } from '@/lib/bizRender';
 import { dateShort, money } from '@/lib/bizText';
+import { EXTRA_FIELDS, PRINT_NO_RE } from '@/lib/bizSkudCerts';
 
 interface OrgUser { id: string; email: string; full_name?: string; role?: string; created_at: string; last_login?: string; is_biz_admin: boolean }
 interface Audit { id: number; at: string; actor: string; action: string; details: Record<string, unknown> }
@@ -34,7 +35,11 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
   const [act, setAct] = useState({ months: '1', start: '' });
   const [issue, setIssue] = useState({ doc_type: 'invoice', months: '1', amount: '', period_from: '', doc_date: '', person_name: '', person_email: '' });
   const [people, setPeople] = useState<{ full_name: string; email: string; role: string }[]>([]);
-  const isAccess = issue.doc_type.startsWith('access_');
+  const isAccess = issue.doc_type.startsWith('access_') || issue.doc_type === 'skud_access';
+  const extraFields = EXTRA_FIELDS[issue.doc_type];
+  const [extra, setExtra] = useState<Record<string, string>>({});
+  const [printNo, setPrintNo] = useState('');
+  const printOk = !printNo || PRINT_NO_RE.test(printNo.trim().toUpperCase());
 
   useEffect(() => {
     if (!orgId || !isAccess) return;
@@ -153,15 +158,33 @@ export default function OrgCard({ orgId, onClose, onChanged }: { orgId: string |
                       <p className="text-[11px] text-muted-foreground">Срок доступа по умолчанию — до окончания лицензии организации.</p>
                     </div>
                   )}
+                  {extraFields && (
+                    <div className="mb-2 grid grid-cols-2 gap-2 rounded-lg bg-secondary/50 p-2">
+                      <label className="col-span-2 text-xs">Номер отпечатка (1 буква и 6 цифр)
+                        <input value={printNo} onChange={e => setPrintNo(e.target.value.toUpperCase())} placeholder="А123456" maxLength={7} className={`${inp} font-mono ${printOk ? '' : 'border-red-500'}`} />
+                      </label>
+                      {extraFields.map(f => (
+                        <label key={f.key} className={`text-xs ${f.wide ? 'col-span-2' : ''}`}>{f.label}
+                          <input value={extra[f.key] ?? f.def ?? ''} onChange={e => setExtra(x => ({ ...x, [f.key]: e.target.value }))} placeholder={f.placeholder} className={inp} />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {!extraFields || issue.doc_type === 'skud_access' ? (
                   <div className="mb-2 grid grid-cols-2 gap-2">
                     <label className="text-xs">Месяцев<input value={issue.months} onChange={e => setIssue(i => ({ ...i, months: e.target.value }))} className={inp} /></label>
                     <label className="text-xs">Сумма (пусто — авто)<input value={issue.amount} onChange={e => setIssue(i => ({ ...i, amount: e.target.value }))} className={inp} /></label>
                     <label className="text-xs">Период с<input type="date" value={issue.period_from} onChange={e => setIssue(i => ({ ...i, period_from: e.target.value }))} className={inp} /></label>
                     <label className="text-xs">Дата документа<input type="date" value={issue.doc_date} onChange={e => setIssue(i => ({ ...i, doc_date: e.target.value }))} className={inp} /></label>
                   </div>
+                  ) : (
+                    <label className="mb-2 block text-xs">Дата документа<input type="date" value={issue.doc_date} onChange={e => setIssue(i => ({ ...i, doc_date: e.target.value }))} className={inp} /></label>
+                  )}
                   <button disabled={busy} onClick={() => {
                     const base = docs.find(d => d.doc_type === 'license_agreement' && d.status !== 'cancelled');
-                    run({ action: 'admin_issue', org_id: org.id, ...issue, months: Number(issue.months || 0), base_id: base?.id }, 'Документ выпущен');
+                    if (!printOk) { setMsg('Номер отпечатка: 1 буква и 6 цифр, например А123456'); return; }
+                    const ex = extraFields ? Object.fromEntries(extraFields.map(f => [f.key, extra[f.key] ?? f.def ?? ''])) : undefined;
+                    run({ action: 'admin_issue', org_id: org.id, ...issue, months: Number(issue.months || 0), base_id: base?.id, extra: ex, print_no: printNo.trim() }, 'Документ выпущен');
                   }} className="h-9 w-full rounded-lg border border-border text-sm hover:bg-secondary">Выпустить с номером</button>
                 </div>
               </div>

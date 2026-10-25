@@ -28,6 +28,7 @@ import Employees from "./pages/Employees";
 import Settings from "./pages/Settings";
 import Salary from "./pages/Salary";
 import Schedule from "./pages/Schedule";
+import Inventory from './pages/Inventory';
 import Collection from "./pages/Collection";
 import Accounting from "./pages/Accounting";
 import Legal from "./pages/Legal";
@@ -121,6 +122,7 @@ const App = () => (
             <Route path="/schedule" element={<ProtectedRoute path="/schedule"><Schedule /></ProtectedRoute>} />
             <Route path="/sber" element={<ProtectedRoute path="/sber"><Sber /></ProtectedRoute>} />
             <Route path="/accounting" element={<ProtectedRoute path="/accounting"><Accounting /></ProtectedRoute>} />
+            <Route path="/inventory" element={<ProtectedRoute path="/inventory"><Inventory /></ProtectedRoute>} />
             <Route path="/collection" element={<ProtectedRoute path="/collection"><Collection /></ProtectedRoute>} />
             <Route path="/employees" element={<ProtectedRoute directorOnly path="/employees"><Employees /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute deputyOnly><Admin /></ProtectedRoute>} />

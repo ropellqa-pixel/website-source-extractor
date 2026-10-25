@@ -44,6 +44,7 @@ FUNCTIONS = {
     'ac301249-d3c3-47ba-bf45-516a862afcb6': 'vk-webhook',
     '8052b0a3-f890-4e4c-a096-d88bf48724e0': 'vk-api',
     'ac29b336-1607-4440-b864-0aaee5c432b1': 'biz-api',
+    '1fddb7e0-0c79-4ae9-ba87-1168af37b2b9': 'inventory-api',
 }
 
 

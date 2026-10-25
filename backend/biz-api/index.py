@@ -19,6 +19,14 @@ CORS = {
     'Access-Control-Max-Age': '86400',
 }
 
+EXTRA_KEYS = {
+    'skud_commissioning': ['object_name', 'object_address', 'controller_model', 'controller_serial', 'reader_model', 'reader_serial',
+                           'button_model', 'button_count', 'lock_type', 'doors', 'installer', 'commission_date'],
+    'skud_access': ['person_position', 'card_1', 'card_2', 'card_3', 'card_4', 'card_type', 'zones', 'schedule'],
+    'legal_registration': [],
+    'legal_data': ['data_location'],
+}
+
 DOC_TYPES = {
     'license_agreement': {'prefix': 'ЛД', 'title': 'Лицензионный договор'},
     'contract': {'prefix': 'Д', 'title': 'Договор'},
@@ -30,6 +38,10 @@ DOC_TYPES = {
     'access_director': {'prefix': 'СД-Д', 'title': 'Свидетельство о предоставлении доступа директора'},
     'access_deputy': {'prefix': 'СД-З', 'title': 'Свидетельство о предоставлении доступа заместителя директора'},
     'access_senior': {'prefix': 'СД-С', 'title': 'Свидетельство о предоставлении доступа старшего сотрудника'},
+    'skud_commissioning': {'prefix': 'СВ-С', 'title': 'Свидетельство о вводе СКУД в эксплуатацию'},
+    'skud_access': {'prefix': 'СД-К', 'title': 'Свидетельство о предоставлении доступа к СКУД'},
+    'legal_registration': {'prefix': 'СР-Л', 'title': 'Свидетельство о регистрации и присвоении лицевого счёта'},
+    'legal_data': {'prefix': 'СХ-Д', 'title': 'Свидетельство о раздельном хранении и защите данных'},
     'invoice': {'prefix': 'СЧ', 'title': 'Счёт на оплату'},
     'act': {'prefix': 'АКТ', 'title': 'Акт предоставления прав'},
     'pd_assignment': {'prefix': 'ПОР', 'title': 'Поручение на обработку персональных данных'},
@@ -514,7 +526,23 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 pf = date.fromisoformat(body['period_from']) if body.get('period_from') else None
                 dd = date.fromisoformat(body['doc_date']) if body.get('doc_date') else None
                 extra = {}
-                if t.startswith('access_'):
+                if t in EXTRA_KEYS:
+                    pn = str(body.get('print_no') or '').strip().upper().translate(str.maketrans('ABEKMHOPCTXY', 'АВЕКМНОРСТХУ'))
+                    if pn and not re.match(r'^[А-ЯЁA-Z]\d{6}$', pn):
+                        return _resp(400, {'error': 'Номер отпечатка: 1 буква и 6 цифр, например А123456'})
+                    ex = body.get('extra') if isinstance(body.get('extra'), dict) else {}
+                    extra = {k: str(ex.get(k) or '').strip()[:300] for k in EXTRA_KEYS[t]}
+                    extra['print_no'] = pn
+                    if t == 'skud_access':
+                        extra['person_name'] = str(body.get('person_name') or '').strip()[:200]
+                    if t != 'skud_access':
+                        months, pf = 0, None
+                    elif not pf and o.get('license_until'):
+                        lu = o['license_until']
+                        pf = date.today()
+                        months = max(1, (lu.year - pf.year) * 12 + lu.month - pf.month + (1 if lu.day >= pf.day else 0))
+                    amount = 0.0
+                elif t.startswith('access_'):
                     extra = {'person_name': str(body.get('person_name') or '')[:200], 'person_email': str(body.get('person_email') or '')[:200]}
                     if not pf and o.get('license_until'):
                         lu = o['license_until']

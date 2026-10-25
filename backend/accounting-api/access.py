@@ -16,6 +16,7 @@ SECTIONS: List[Dict[str, str]] = [
     {'path': '/salary', 'label': 'Зарплата'},
     {'path': '/collection', 'label': 'Инкассация'},
     {'path': '/accounting', 'label': 'Бухгалтерия'},
+    {'path': '/inventory', 'label': 'Инвентаризация'},
     {'path': '/sber', 'label': 'СБЕР (оплаты)'},
     {'path': '/employees', 'label': 'Сотрудники'},
     {'path': '/settings', 'label': 'Настройки'},
@@ -43,6 +44,8 @@ ACTIONS: List[Dict[str, str]] = [
     {'key': 'salary.manage_rows', 'group': 'Зарплата', 'label': 'Добавлять и удалять сотрудников'},
     {'key': 'salary.lock', 'group': 'Зарплата', 'label': 'Сохранять, блокировать, разблокировать'},
     {'key': 'salary.broadcast', 'group': 'Зарплата', 'label': 'Рассылать расчёт в ВК'},
+    {'key': 'inventory.edit', 'group': 'Инвентаризация', 'label': 'Приход и пересчёт, карточки предметов'},
+    {'key': 'inventory.writeoff', 'group': 'Инвентаризация', 'label': 'Списывать оборудование и посуду'},
     {'key': 'collection.edit', 'group': 'Инкассация', 'label': 'Вносить факт и статусы'},
     {'key': 'collection.import', 'group': 'Инкассация', 'label': 'Загружать файл СБИС'},
     {'key': 'collection.unlock', 'group': 'Инкассация', 'label': 'Разблокировать закрытый месяц'},
@@ -53,13 +56,13 @@ VIEW_ACTIONS: Set[str] = {a['key'] for a in ACTIONS if '.view' in a['key']}
 ROLE_SECTIONS = {
     'director': [s['path'] for s in SECTIONS],
     'senior_employee': ['/dashboard', '/documents', '/base', '/dto', '/chat', '/cameras', '/schedule', '/salary',
-                        '/collection', '/settings', '/sber', '/skud'],
+                        '/collection', '/settings', '/sber', '/skud', '/inventory'],
     'employee': ['/dashboard', '/documents', '/base', '/dto', '/chat', '/cameras', '/schedule', '/salary',
                  '/collection', '/settings'],
 }
 ROLE_ACTIONS = {
-    'director': VIEW_ACTIONS | {'collection.edit', 'collection.import', 'collection.unlock', 'sber.pay', 'sber.sync'},
-    'senior_employee': {'sber.view', 'sber.request'},
+    'director': VIEW_ACTIONS | {'inventory.edit', 'inventory.writeoff', 'collection.edit', 'collection.import', 'collection.unlock', 'sber.pay', 'sber.sync'},
+    'senior_employee': {'sber.view', 'sber.request', 'inventory.writeoff'},
     'employee': set(),
 }
 

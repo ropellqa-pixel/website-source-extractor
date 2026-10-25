@@ -6,8 +6,9 @@ import { LETTERHEAD_CSS, letterhead } from '@/lib/bizLetterhead';
 import { PAGE_CSS, pagesHtml, paginate } from '@/lib/bizPaginate';
 import { licenseAgreementFull } from '@/lib/bizLicenseFull';
 import { ACCESS_CERT_CSS, ACCESS_CERT_TYPES, renderAccessCertificate } from '@/lib/bizAccessCert';
+import { renderSkudCertificate, SKUD_CERT_CSS, SKUD_CERT_TYPES } from '@/lib/bizSkudCerts';
 
-export const FULL_DOC_CSS = DOC_CSS + LETTERHEAD_CSS + CERT_CSS + ACCESS_CERT_CSS;
+export const FULL_DOC_CSS = DOC_CSS + LETTERHEAD_CSS + CERT_CSS + ACCESS_CERT_CSS + SKUD_CERT_CSS;
 
 export function renderGenerated(d: BizDocument, fallbackOrg?: BizOrg): string {
   const v = { ...DEFAULT_VENDOR, ...(d.snapshot?.vendor || {}) };
@@ -16,6 +17,7 @@ export function renderGenerated(d: BizDocument, fallbackOrg?: BizOrg): string {
   const dd = { ...d, amount: Number(d.amount || 0), months: Number(d.months || 0) };
   if (CERT_TYPES.includes(d.doc_type)) return renderCertificate(dd, v, t, o);
   if (ACCESS_CERT_TYPES.includes(d.doc_type)) return renderAccessCertificate(dd, v, t, o);
+  if (SKUD_CERT_TYPES.includes(d.doc_type)) return renderSkudCertificate(dd, v, t, o);
   if (d.doc_type === 'license_agreement') return letterhead(v) + licenseAgreementFull(dd, v, t, o);
   const r = BASE_RENDERERS[d.doc_type] || EXTRA_RENDERERS[d.doc_type];
   if (!r) return '<p>Неизвестный тип документа</p>';

@@ -1,0 +1,5 @@
+{"tests": [
+  {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+  {"name": "GET not allowed", "method": "GET", "path": "/", "expectedStatus": 405},
+  {"name": "No login rejected", "method": "POST", "path": "/", "body": {"action": "overview"}, "expectedStatus": 401}
+]}
