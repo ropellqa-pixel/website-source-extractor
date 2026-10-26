@@ -11,6 +11,7 @@ from access import current_user
 from bank import guess_category, parse_file, period_from_text
 from formulas import compute_period, global_params, load_config
 import salary_weekly
+import sbis_api
 
 SCHEMA = os.environ.get('MAIN_DB_SCHEMA', 'public')
 CORS = {
@@ -203,6 +204,9 @@ def sync_period(cur, period: str, cfg=None, params=None, force: bool = False) ->
     col_rows = cur.fetchall()
     cur.execute(f"SELECT count(*) FROM {SCHEMA}.acc_entries WHERE kind = 'income' AND category_id = %s AND period = %s "
                 f"AND NOT void AND source = 'bank'", (col_cat, period))
+    if cur.fetchone()[0] > 0:
+        col_rows = []
+    cur.execute(f"SELECT count(*) FROM {SCHEMA}.acc_entries WHERE source = 'sbis' AND period = %s AND NOT void", (period,))
     if cur.fetchone()[0] > 0:
         col_rows = []
     for sd, total, n in col_rows:
@@ -830,10 +834,16 @@ def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Права — по должностям из админ-панели заместителя директора.'''
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
+    if event.get('httpMethod') == 'GET' and (event.get('queryStringParameters') or {}).get('cron') is not None:
+        sbis_api.SCHEMA = SCHEMA
+        return sbis_api.handle(event, context)
     if event.get('httpMethod') != 'POST':
         return _err('Метод не поддерживается', 405)
     body = json.loads(event.get('body') or '{}')
     action = body.get('action') or ''
+    if action.startswith('sbis_'):
+        sbis_api.SCHEMA = SCHEMA
+        return sbis_api.handle(event, context)
 
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     conn.autocommit = True
@@ -935,7 +945,7 @@ import tenant as _tenant  # noqa: E402
 
 
 def _finders(body, event, qs):
-    return []
+    return sbis_api.finders(qs)
 
 
 _wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())

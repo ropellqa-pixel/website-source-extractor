@@ -25,7 +25,7 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
   const [kind, setKind] = useState<'all' | Kind>('all');
   const [cat, setCat] = useState('');
   const [search, setSearch] = useState('');
-  const [source, setSource] = useState<'all' | 'own' | 'collection' | 'salary' | 'bank'>('all');
+  const [source, setSource] = useState<'all' | 'own' | 'collection' | 'salary' | 'bank' | 'sbis'>('all');
   const [form, setForm] = useState<typeof EMPTY | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -120,6 +120,7 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
           <option value="collection">Инкассация (факт)</option>
           <option value="salary">Зарплата по месяцам</option>
           <option value="bank">Выписка банка</option>
+          <option value="sbis">СБИС Престо</option>
         </select>
         {canEdit && (
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -156,7 +157,7 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
                     <div className="min-w-0">
                       <div className="font-medium leading-snug">{e.category}</div>
                       <div className="text-xs text-muted-foreground">
-                        {fmtDay(e.date)}{e.linked === 'bank' ? ' · банк' : e.linked === 'collection' ? ' · из Инкассации' : e.linked ? ' · из Зарплаты' : ''}
+                        {fmtDay(e.date)}{e.linked === 'bank' ? ' · банк' : e.linked === 'sbis' ? ' · СБИС Престо' : e.linked === 'collection' ? ' · из Инкассации' : e.linked ? ' · из Зарплаты' : ''}
                         {e.period && e.period !== String(e.date).slice(0, 7) && ` · за ${monthLabel(e.period).toLowerCase()}`}
                       </div>
                     </div>
@@ -198,7 +199,7 @@ export default function EntriesTab({ from, to, canEdit, canDelete, categories, c
                     )}
                     {e.linked && e.linked !== 'bank' && (
                       <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">
-                        <Icon name="Link" size={11} />{e.linked === 'collection' ? 'из Инкассации' : 'из Зарплаты'}
+                        <Icon name="Link" size={11} />{e.linked === 'collection' ? 'из Инкассации' : e.linked === 'sbis' ? 'СБИС Престо' : 'из Зарплаты'}
                       </span>
                     )}
                   </td>

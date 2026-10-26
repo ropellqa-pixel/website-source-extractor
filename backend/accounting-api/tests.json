@@ -1,6 +1,51 @@
-{"tests": [
-  {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
-  {"name": "GET not allowed", "method": "GET", "path": "/", "expectedStatus": 405},
-  {"name": "No login rejected", "method": "POST", "path": "/", "body": {"action": "me"}, "expectedStatus": 401},
-  {"name": "Edit without login rejected", "method": "POST", "path": "/", "body": {"action": "entry_save", "kind": "income", "amount": 100}, "expectedStatus": 401}
-]}
+{
+ "tests": [
+  {
+   "name": "OPTIONS preflight",
+   "method": "OPTIONS",
+   "path": "/",
+   "expectedStatus": 200
+  },
+  {
+   "name": "GET not allowed",
+   "method": "GET",
+   "path": "/",
+   "expectedStatus": 405
+  },
+  {
+   "name": "No login rejected",
+   "method": "POST",
+   "path": "/",
+   "body": {
+    "action": "me"
+   },
+   "expectedStatus": 401
+  },
+  {
+   "name": "Edit without login rejected",
+   "method": "POST",
+   "path": "/",
+   "body": {
+    "action": "entry_save",
+    "kind": "income",
+    "amount": 100
+   },
+   "expectedStatus": 401
+  },
+  {
+   "name": "SBIS cron wrong key",
+   "method": "GET",
+   "path": "/?cron=bad",
+   "expectedStatus": 403
+  },
+  {
+   "name": "SBIS no login",
+   "method": "POST",
+   "path": "/",
+   "body": {
+    "action": "sbis_status"
+   },
+   "expectedStatus": 401
+  }
+ ]
+}

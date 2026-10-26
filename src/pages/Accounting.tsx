@@ -8,11 +8,13 @@ import BudgetTab from '@/components/accounting/BudgetTab';
 import CounterpartiesTab from '@/components/accounting/CounterpartiesTab';
 import SalaryTab from '@/components/accounting/SalaryTab';
 import PeriodsBar from '@/components/accounting/PeriodsBar';
+import RevenueTab from '@/components/accounting/RevenueTab';
 import { accCall, monthLabel, monthRange, shiftMonth, thisMonth, type Category, type Me } from '@/lib/accountingApi';
 
-type Tab = 'entries' | 'profit' | 'dds' | 'budget' | 'counterparties' | 'salary';
+type Tab = 'entries' | 'revenue' | 'profit' | 'dds' | 'budget' | 'counterparties' | 'salary';
 const TABS: [Tab, string, string, string][] = [
   ['entries', 'Доходы и расходы', 'ArrowLeftRight', 'accounting.view_entries'],
+  ['revenue', 'Выручка СБИС + Сбер', 'Store', 'accounting.view_reports'],
   ['profit', 'Прибыль', 'TrendingUp', 'accounting.view_reports'],
   ['dds', 'ДДС', 'Table2', 'accounting.view_reports'],
   ['budget', 'План-факт', 'Target', 'accounting.view_budget'],
@@ -58,7 +60,7 @@ export default function Accounting() {
     );
   }
 
-  const withPeriod = tab === 'entries' || tab === 'profit' || tab === 'dds';
+  const withPeriod = tab === 'entries' || tab === 'revenue' || tab === 'profit' || tab === 'dds';
   const readOnly = !['accounting.edit_entries', 'accounting.edit_salary', 'accounting.edit_budget', 'accounting.edit_counterparties'].some(can);
 
   return (
@@ -106,6 +108,7 @@ export default function Accounting() {
         <EntriesTab from={range[0]} to={range[1]} canEdit={can('accounting.edit_entries')} canDelete={can('accounting.delete_entries')}
           categories={categories} counterparties={me.counterparties} reloadKey={reloadKey} onCategories={setCategories} />
       )}
+      {tab === 'revenue' && <RevenueTab from={range[0]} to={range[1]} canLoad={can('accounting.edit_entries')} onLoaded={bump} />}
       {tab === 'profit' && <ProfitTab key={reloadKey} from={range[0]} to={range[1]} />}
       {tab === 'dds' && <DdsTab from={range[0]} to={range[1]} reloadKey={reloadKey} />}
       {tab === 'budget' && <BudgetTab canEdit={can('accounting.edit_budget')} reloadKey={reloadKey} />}

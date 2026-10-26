@@ -6,10 +6,11 @@ import FieldsTab from '@/components/admin/FieldsTab';
 import DirectoriesTab from '@/components/admin/DirectoriesTab';
 import GeneralTab from '@/components/admin/GeneralTab';
 import SberSection from '@/components/admin/SberSection';
+import SbisSection from '@/components/admin/SbisSection';
 import type { AdminData } from '@/components/admin/types';
 import { adminCall, useAccess } from '@/lib/access';
 
-type Tab = 'positions' | 'formulas' | 'fields' | 'dirs' | 'general' | 'sber';
+type Tab = 'positions' | 'formulas' | 'fields' | 'dirs' | 'general' | 'sber' | 'sbis';
 const TABS: [Tab, string, string][] = [
   ['positions', 'Должности и доступ', 'ShieldCheck'],
   ['formulas', 'Формулы зарплаты', 'Calculator'],
@@ -17,6 +18,7 @@ const TABS: [Tab, string, string][] = [
   ['dirs', 'Справочники', 'BookOpen'],
   ['general', 'Общие', 'Settings'],
   ['sber', 'СберБизнес', 'Landmark'],
+  ['sbis', 'СБИС Престо', 'Store'],
 ];
 
 export default function Admin() {
@@ -58,6 +60,7 @@ export default function Admin() {
           {tab === 'fields' && <FieldsTab data={data} onChanged={changed} />}
           {tab === 'dirs' && <DirectoriesTab data={data} onChanged={changed} />}
           {tab === 'sber' && <SberSection />}
+          {tab === 'sbis' && <SbisSection />}
           {tab === 'general' && <GeneralTab key={JSON.stringify(data.general)} data={data} onChanged={changed} />}
         </>
       )}
