@@ -22,7 +22,7 @@ BACKEND_DIR = os.environ.get('ANOD_BACKEND_DIR') or os.path.join(ROOT, 'backend'
 PUBLIC_DIR = os.environ.get('ANOD_PUBLIC_DIR') or os.path.join(ROOT, 'public_html')
 REQUEST_TIMEOUT_MS = int(os.environ.get('ANOD_TIMEOUT_MS') or 30000)
 MAX_BODY = 60 * 1024 * 1024
-VERSION = '36.20'
+VERSION = '36.22'
 
 STATUS_TEXT = {
     200: 'OK', 201: 'Created', 204: 'No Content', 301: 'Moved Permanently', 302: 'Found',

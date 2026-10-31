@@ -11,7 +11,7 @@ using Microsoft.Extensions.Hosting;
 namespace AbizRecorder
 {
     /// <summary>
-    /// Фоновая служба Windows: видеорегистратор склада.
+    /// Фоновая служба Windows: видеорегистратор склада и мост к контроллеру СКУД Gate (дверь склада).
     /// Запускается вместе с Windows (до входа сотрудника), скрыта, пароль не нужен.
     /// Доступ у неё только к записи камер склада — отдельный ключ, выданный программой АБИЗ
     /// (C:\ProgramData\AnodBiz\recorder\key). Управлять ПК или сайтом этим ключом нельзя.
@@ -45,11 +45,13 @@ namespace AbizRecorder
                 {
                     current = key;
                     SkudRecorder.EnsureStarted(key);
+                    GateBridge.EnsureStarted(key);
                 }
                 try { await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken); }
                 catch (OperationCanceledException) { break; }
             }
             SkudRecorder.StopAll();
+            GateBridge.StopAll();
         }
 
         private static string? ReadKey()

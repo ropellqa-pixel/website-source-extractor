@@ -43,9 +43,11 @@ namespace AbizShell
             if (!IsInstalled)
             {
                 SkudRecorder.EnsureStarted(apiToken);
+                GateBridge.EnsureStarted(apiToken);
                 return;
             }
             SkudRecorder.StopAll();
+            GateBridge.StopAll();
             if (_handedToken == apiToken) return;
             _handedToken = apiToken;
             _ = Task.Run(() => HandKeyAsync(apiToken));
