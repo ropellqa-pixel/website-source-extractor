@@ -13,7 +13,7 @@
 		<ApplicationIcon>abiz.ico</ApplicationIcon>
 		<EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
 		<Company>Rassvet</Company>
-		<Version>1.9.0</Version>
+		<Version>1.10.0</Version>
 		<Configurations>Debug;Release;DebugAdmin;ReleaseAdmin</Configurations>
 		<Platforms>x64</Platforms>
 	</PropertyGroup>

@@ -60,7 +60,7 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
       if (stop) return;
       if (r.card) { setForm((f) => ({ ...f, card: r.card! })); setHint(`Карта ${r.card} считана на двери`); setDoorWait(false); setTimeout(() => confirmRef.current?.focus(), 50); }
       else if (!r.waiting) setDoorWait(false);
-    }, 1500);
+    }, 1000);
     return () => { stop = true; clearInterval(t); };
   }, [doorWait]);
 
@@ -108,7 +108,7 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
                   {doorWait ? 'Отменить ожидание' : 'Считать на двери ещё раз'}
                 </button>
               </div>
-              {doorWait && <p className="mt-2 flex items-center gap-2 text-sm text-primary"><Icon name="Loader2" size={14} className="animate-spin" />{form.rewrite ? 'Поднесите карту сотрудника (ту же или новую) к считывателю на двери склада' : 'Поднесите новую карту к считывателю на двери склада'} — жду 3 минуты…</p>}
+              {doorWait && <p className="mt-2 flex items-center gap-2 text-sm text-primary"><Icon name="Loader2" size={14} className="animate-spin" />{form.rewrite ? 'Поднесите карту сотрудника (ту же или новую) к считывателю на двери склада' : 'Поднесите новую карту к считывателю на двери склада'}…</p>}
               {hint && <p className="mt-2 text-sm text-emerald-600">{hint}</p>}
             </div>
             {!form.rewrite && (

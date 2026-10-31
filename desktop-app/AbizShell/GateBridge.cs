@@ -87,105 +87,33 @@ namespace AbizShell
 
         // ---------------- основной цикл ----------------
 
+        private int _ctrlPollMs = 500, _serverSyncSec = 2, _reconnectSec = 10, _clockHours = 6, _emergencyMin = 5;
+        private Dictionary<string, object>? _params;
+        private DateTime _slowAt = DateTime.MinValue;
+        private bool _wantCards = true;
+
+        /// <summary>
+        /// Два темпа: контроллер опрашивается часто (по умолчанию каждые 0,5 с) — новые события сразу уходят на сайт;
+        /// сайт опрашивается раз в 1-2 с — команды (открыть дверь, карты, настройки) выполняются почти мгновенно.
+        /// </summary>
         private async Task LoopAsync()
         {
             var ct = _cts.Token;
-            bool wantCards = true;
+            var nextServer = DateTime.MinValue;
             while (!ct.IsCancellationRequested)
             {
-                TimeSpan wait = TimeSpan.FromSeconds(6);
+                TimeSpan wait = TimeSpan.FromMilliseconds(_ctrlPollMs);
                 try
                 {
-                    bool connected = _client is { Connected: true };
-                    var body = new Dictionary<string, object?>
+                    if (DateTime.Now >= nextServer)
                     {
-                        ["action"] = "rec_gate_poll",
-                        ["status"] = SkudRecorder.StatusPrefix + _status,
-                        ["connected"] = connected,
-                        ["want_cards"] = connected && (wantCards || DateTime.Now - _fullCardsAt > TimeSpan.FromHours(6)),
-                        ["found_host"] = _foundHost,
-                        ["found_port"] = _foundPort,
-                    };
-                    if (connected)
-                    {
-                        body["model"] = _client!.Model;
-                        body["fw"] = _client.Firmware;
+                        var w = await ServerStepAsync(ct);
+                        nextServer = DateTime.Now + (w ?? TimeSpan.FromSeconds(_serverSyncSec));
+                        if (w != null) wait = w.Value;
                     }
-                    var poll = await PostAsync(body, ct);
-                    if (!poll.TryGetProperty("gate", out var gate) || gate.ValueKind != JsonValueKind.Object)
+                    if (_client is { Connected: true } c && wait.TotalMilliseconds <= _ctrlPollMs)
                     {
-                        // Этот ПК не выбран для СКУД — контроллер не трогаем.
-                        _client?.Dispose();
-                        _client = null;
-                        _status = "этот ПК не выбран для контроллера";
-                        wait = TimeSpan.FromSeconds(60);
-                    }
-                    else
-                    {
-                        ApplyConfig(gate);
-                        if (_client is not { Connected: true })
-                        {
-                            await ConnectAsync(ct);
-                            wait = TimeSpan.FromSeconds(_client is { Connected: true } ? 1 : 30);
-                        }
-                        else
-                        {
-                            var c = _client!;
-                            var done = new List<object>();
-                            bool cardsSynced = false;
-                            if (poll.TryGetProperty("commands", out var cmds) && cmds.ValueKind == JsonValueKind.Array)
-                                foreach (var cmd in cmds.EnumerateArray())
-                                    done.Add(new { id = cmd.GetProperty("id").GetInt64(), result = RunCommand(c, cmd) });
-                            bool apb = gate.TryGetProperty("antipassback", out var ap) && ap.ValueKind == JsonValueKind.True;
-                            if (_apbApplied != apb)
-                            {
-                                c.Write(0x00, 0xD0, 0x0016, new[] { apb ? (byte)0x16 : (byte)0x00 });
-                                if (apb)
-                                {
-                                    var pass = c.Read(0x00, 0xA0, 0x0001, 1);
-                                    if (pass[0] == 0) { c.Write(0x00, 0xA0, 0x0001, new byte[] { 50 }); c.Write(0x01, 0xA0, 0x0001, new byte[] { 50 }); }
-                                }
-                                _apbApplied = apb;
-                                _apb = apb;
-                                wantCards = true;
-                            }
-                            if (poll.TryGetProperty("zones", out var zones) && zones.ValueKind == JsonValueKind.Array)
-                                WriteZones(c, zones);
-                            if (poll.TryGetProperty("cards", out var cards) && cards.ValueKind == JsonValueKind.Array)
-                            {
-                                string r = WriteCards(c, cards);
-                                cardsSynced = r.StartsWith("ok");
-                                if (cardsSynced) { wantCards = false; _fullCardsAt = DateTime.Now; }
-                                _status = r.StartsWith("ok") ? "на связи" : r;
-                            }
-                            bool emergency = gate.TryGetProperty("emergency", out var em) && em.ValueKind == JsonValueKind.True;
-                            if (_emergencyApplied != emergency || (emergency && DateTime.Now - _emergencyAt > TimeSpan.FromMinutes(5)))
-                            {
-                                c.Write(0x00, 0xD0, 0x0015, new[] { emergency ? (byte)0x73 : (byte)0x00 });
-                                _emergencyApplied = emergency;
-                                _emergencyAt = DateTime.Now;
-                            }
-                            if (DateTime.Now - _clockAt > TimeSpan.FromHours(6)) SetClock(c);
-                            if (DateTime.Now.Hour == 4 && DateTime.Now - _flashAt > TimeSpan.FromHours(20))
-                            {
-                                _flashAt = DateTime.Now;
-                                c.Simple(0x0C);
-                            }
-                            if (done.Count > 0 || cardsSynced)
-                                await PostAsync(new { action = "rec_gate_ack", connected = true, done, cards_synced = cardsSynced }, ct);
-
-                            var events = ReadEvents(c, out ushort newLower);
-                            if (events.Count > 0)
-                            {
-                                var res = await PostAsync(new { action = "rec_gate_push", connected = true, events }, ct);
-                                if (res.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True)
-                                {
-                                    c.Write(0x00, 0xD0, 0x000A, new[] { (byte)(newLower >> 8), (byte)(newLower & 0xFF) });
-                                    wait = TimeSpan.FromSeconds(1);
-                                }
-                            }
-                            if (!_status.StartsWith("карты")) _status = "на связи";
-                        }
+                        if (await PushEventsAsync(c, ct)) nextServer = DateTime.MinValue;
                     }
                 }
                 catch (OperationCanceledException) { return; }
@@ -194,15 +122,145 @@ namespace AbizShell
                     _status = "контроллер: " + ex.Message;
                     _client?.Dispose();
                     _client = null;
-                    wait = TimeSpan.FromSeconds(10);
+                    wait = TimeSpan.FromSeconds(_reconnectSec);
+                    nextServer = DateTime.MinValue;
                 }
                 catch (Exception ex)
                 {
                     _status = "ошибка: " + ex.Message;
-                    wait = TimeSpan.FromSeconds(15);
+                    wait = TimeSpan.FromSeconds(Math.Max(3, _serverSyncSec * 2));
+                    nextServer = DateTime.MinValue;
                 }
                 try { await Task.Delay(wait, ct); } catch { return; }
             }
+        }
+
+        private async Task<bool> PushEventsAsync(GateClient c, CancellationToken ct)
+        {
+            var events = ReadEvents(c, out ushort newLower);
+            if (events.Count == 0) return false;
+            var res = await PostAsync(new { action = "rec_gate_push", connected = true, fast = true, events }, ct);
+            if (res.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True)
+                c.Write(0x00, 0xD0, 0x000A, new[] { (byte)(newLower >> 8), (byte)(newLower & 0xFF) });
+            return true;
+        }
+
+        private void ApplyTiming(JsonElement gate)
+        {
+            if (!gate.TryGetProperty("timing", out var t) || t.ValueKind != JsonValueKind.Object) return;
+            int Get(string k, int def, int lo, int hi) =>
+                t.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number ? Math.Clamp(v.GetInt32(), lo, hi) : def;
+            _ctrlPollMs = Get("ctrl_poll_ms", 500, 200, 5000);
+            _serverSyncSec = Get("server_sync_sec", 2, 1, 30);
+            _reconnectSec = Get("reconnect_sec", 10, 3, 120);
+            _clockHours = Get("clock_sync_hours", 6, 1, 24);
+            _emergencyMin = Get("emergency_repeat_min", 5, 1, 60);
+        }
+
+        /// <summary>Обмен с сайтом. Возвращает особую паузу (нет связи / ПК не выбран) или null — обычный темп.</summary>
+        private async Task<TimeSpan?> ServerStepAsync(CancellationToken ct)
+        {
+            bool connected = _client is { Connected: true };
+            bool slow = DateTime.Now - _slowAt > TimeSpan.FromMinutes(1);
+            if (slow) _slowAt = DateTime.Now;
+            var body = new Dictionary<string, object?>
+            {
+                ["action"] = "rec_gate_poll",
+                ["status"] = SkudRecorder.StatusPrefix + _status,
+                ["connected"] = connected,
+                ["fast"] = !slow,
+                ["want_cards"] = connected && (_wantCards || DateTime.Now - _fullCardsAt > TimeSpan.FromHours(6)),
+                ["found_host"] = _foundHost,
+                ["found_port"] = _foundPort,
+            };
+            if (connected)
+            {
+                body["model"] = _client!.Model;
+                body["fw"] = _client.Firmware;
+            }
+            if (_params != null) { body["params"] = _params; _params = null; }
+            var poll = await PostAsync(body, ct);
+            if (!poll.TryGetProperty("gate", out var gate) || gate.ValueKind != JsonValueKind.Object)
+            {
+                _client?.Dispose();
+                _client = null;
+                _status = "этот ПК не выбран для контроллера";
+                return TimeSpan.FromSeconds(60);
+            }
+            ApplyConfig(gate);
+            ApplyTiming(gate);
+            if (_client is not { Connected: true })
+            {
+                await ConnectAsync(ct);
+                if (_client is { Connected: true }) { ReadParams(_client); return TimeSpan.FromMilliseconds(200); }
+                return TimeSpan.FromSeconds(Math.Max(_reconnectSec, 10));
+            }
+            var c = _client!;
+            var done = new List<object>();
+            bool cardsSynced = false;
+            if (poll.TryGetProperty("commands", out var cmds) && cmds.ValueKind == JsonValueKind.Array)
+                foreach (var cmd in cmds.EnumerateArray())
+                    done.Add(new { id = cmd.GetProperty("id").GetInt64(), result = RunCommand(c, cmd) });
+            if (done.Count > 0)
+            {
+                await PostAsync(new { action = "rec_gate_ack", connected = true, fast = true, done, cards_synced = false, @params = _params }, ct);
+                _params = null;
+                done.Clear();
+            }
+            bool apb = gate.TryGetProperty("antipassback", out var ap) && ap.ValueKind == JsonValueKind.True;
+            if (_apbApplied != apb)
+            {
+                c.Write(0x00, 0xD0, 0x0016, new[] { apb ? (byte)0x16 : (byte)0x00 });
+                if (apb)
+                {
+                    var pass = c.Read(0x00, 0xA0, 0x0001, 1);
+                    if (pass[0] == 0) { c.Write(0x00, 0xA0, 0x0001, new byte[] { 50 }); c.Write(0x01, 0xA0, 0x0001, new byte[] { 50 }); }
+                }
+                _apbApplied = apb;
+                _apb = apb;
+                _wantCards = true;
+            }
+            if (poll.TryGetProperty("zones", out var zones) && zones.ValueKind == JsonValueKind.Array)
+                WriteZones(c, zones);
+            if (poll.TryGetProperty("cards", out var cards) && cards.ValueKind == JsonValueKind.Array)
+            {
+                string r = WriteCards(c, cards);
+                cardsSynced = r.StartsWith("ok");
+                if (cardsSynced) { _wantCards = false; _fullCardsAt = DateTime.Now; }
+                _status = cardsSynced ? "на связи" : r;
+            }
+            bool emergency = gate.TryGetProperty("emergency", out var em) && em.ValueKind == JsonValueKind.True;
+            if (_emergencyApplied != emergency || (emergency && DateTime.Now - _emergencyAt > TimeSpan.FromMinutes(_emergencyMin)))
+            {
+                c.Write(0x00, 0xD0, 0x0015, new[] { emergency ? (byte)0x73 : (byte)0x00 });
+                _emergencyApplied = emergency;
+                _emergencyAt = DateTime.Now;
+            }
+            if (DateTime.Now - _clockAt > TimeSpan.FromHours(_clockHours)) SetClock(c);
+            if (DateTime.Now.Hour == 4 && DateTime.Now - _flashAt > TimeSpan.FromHours(20))
+            {
+                _flashAt = DateTime.Now;
+                c.Simple(0x0C);
+            }
+            if (cardsSynced)
+                await PostAsync(new { action = "rec_gate_ack", connected = true, fast = true, done, cards_synced = true }, ct);
+            if (!_status.StartsWith("карты")) _status = "на связи";
+            return null;
+        }
+
+        /// <summary>Параметры двери из банка 0: реле и проход — десятые доли секунды, «дверь не закрыта» и подтверждение — секунды.</summary>
+        private void ReadParams(GateClient c)
+        {
+            try
+            {
+                var p = c.Read(0x00, 0xA0, 0x0000, 4);
+                _params = new Dictionary<string, object>
+                {
+                    ["relay_tenths"] = (int)p[0], ["pass_tenths"] = (int)p[1], ["hold_sec"] = (int)p[2], ["confirm_sec"] = (int)p[3],
+                    ["at"] = DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:sszzz", CultureInfo.InvariantCulture),
+                };
+            }
+            catch (GateException) { }
         }
 
         private void ApplyConfig(JsonElement gate)
@@ -321,6 +379,23 @@ namespace AbizShell
                         byte ctl = (byte)((mode == "off" ? 0 : 0x10) | 0x08 | (addr & 0x07));
                         c.Request2(0x0E, ctl, mode == "pulse" ? (byte)Math.Clamp(sec, 1, 255) : (byte)0);
                         return "ok";
+                    case "set_params":
+                        if (cmd.TryGetProperty("payload", out var pp) && pp.ValueKind == JsonValueKind.Object)
+                        {
+                            var map = new (string key, ushort addr)[] { ("relay_tenths", 0), ("pass_tenths", 1), ("hold_sec", 2), ("confirm_sec", 3) };
+                            foreach (var (key, a) in map)
+                                if (pp.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number)
+                                {
+                                    byte b = (byte)Math.Clamp(v.GetInt32(), key == "relay_tenths" ? 1 : 0, 255);
+                                    c.Write(0x00, 0xA0, a, new[] { b });
+                                    c.Write(0x01, 0xA0, a, new[] { b });
+                                }
+                        }
+                        ReadParams(c);
+                        return "ok";
+                    case "read_params":
+                        ReadParams(c);
+                        return _params == null ? "ошибка чтения" : "ok";
                     case "sync_clock":
                         SetClock(c);
                         return "ok";

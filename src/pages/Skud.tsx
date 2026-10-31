@@ -69,11 +69,11 @@ export default function Skud() {
   useEffect(() => { loadOverview(); }, [loadOverview]);
   useEffect(() => { loadEvents(); }, [loadEvents]);
   useEffect(() => { loadVisits(); }, [loadVisits]);
-  // Новые проходы и видео появляются сами — обновление каждые 10 секунд.
+  
   useEffect(() => {
-    const t = setInterval(() => { if (!document.hidden) { loadEvents(); loadOverview(); loadVisits(); } }, 10000);
+    const t = setInterval(() => { if (!document.hidden) { loadEvents(); loadOverview(); loadVisits(); } }, (ctrl?.timing?.site_refresh_sec || 5) * 1000);
     return () => clearInterval(t);
-  }, [loadEvents, loadOverview, loadVisits]);
+  }, [loadEvents, loadOverview, loadVisits, ctrl?.timing?.site_refresh_sec]);
 
   const stats = useMemo(() => {
     const todayEv = events.filter((e) => mskDay(new Date(e.time)) === today);

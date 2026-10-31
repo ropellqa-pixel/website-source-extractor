@@ -1,3 +1,5 @@
+ABIZ project version 26 (program 4.3, build 1.10.0)
+New: fast controller polling (0.5 s) and site sync (1-2 s); all door timings (relay, pass, door-held alarm, code wait) and bridge speeds configurable on the site.
 ABIZ project version 25 (program 4.2, build 1.9.0)
 New: SKUD cards (Mifare Classic) are enrolled at the door reader; confirmation by the manager's 125 kHz login card on the PC USB reader (does not log out). Long Mifare numbers supported.
 ABIZ project version 24 (program 4.1, build 1.8.0)

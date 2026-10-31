@@ -32,12 +32,42 @@ KINDS = {
 CARD_STATUSES = {'active', 'blocked'}
 ROLE_RANK = {'employee': 1, 'senior_employee': 2, 'deputy_director': 3, 'director': 4}
 MASTER_ROLES = {'director', 'deputy_director'}
+TIMING_DEFAULT = {'ctrl_poll_ms': 500, 'server_sync_sec': 2, 'reconnect_sec': 10, 'clock_sync_hours': 6,
+                  'enroll_sec': 180, 'site_refresh_sec': 5, 'open_cmd_ttl_sec': 60, 'emergency_repeat_min': 5,
+                  'relay_tenths': 30, 'pass_tenths': 0, 'hold_sec': 0, 'confirm_sec': 0}
+TIMING_LIMITS = {'ctrl_poll_ms': (200, 5000), 'server_sync_sec': (1, 30), 'reconnect_sec': (3, 120), 'clock_sync_hours': (1, 24),
+                 'enroll_sec': (30, 600), 'site_refresh_sec': (2, 60), 'open_cmd_ttl_sec': (10, 300), 'emergency_repeat_min': (1, 60),
+                 'relay_tenths': (1, 255), 'pass_tenths': (0, 255), 'hold_sec': (0, 255), 'confirm_sec': (0, 255)}
+
+
+def _timing(raw: Optional[str], open_seconds: Optional[int] = None) -> Dict[str, int]:
+    """Все настройки времени двери и программы-моста (секунды, десятые доли, миллисекунды)."""
+    t = dict(TIMING_DEFAULT)
+    if open_seconds:
+        t['relay_tenths'] = open_seconds * 10
+    try:
+        src = json.loads(raw) if raw else {}
+    except ValueError:
+        src = {}
+    for k, (lo, hi) in TIMING_LIMITS.items():
+        v = src.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            t[k] = max(lo, min(int(v), hi))
+    return t
+
+
 CARD_RE = re.compile(r'\d{3},\d{5}|M[0-9A-F]{8,12}')
 
 
 def _expires(ctype: str, role: Optional[str]) -> bool:
     """Ежемесячно продлевать нужно только карты простых сотрудников (и карты без владельца)."""
     return ctype == 'employee' and ROLE_RANK.get(role or 'employee', 1) <= 1
+
+
+def _enroll_secs(cur) -> int:
+    cur.execute(f'SELECT timing FROM {SCHEMA}.skud_controllers WHERE active ORDER BY created_at LIMIT 1')
+    r = cur.fetchone()
+    return _timing(r[0] if r else None)['enroll_sec']
 
 
 def _check_login_card(cur, user: Dict[str, Any], c: str, target_profile: Optional[str]) -> Optional[str]:
@@ -244,8 +274,10 @@ def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event:
         return _resp(200, {'ok': True, 'saved': saved})
     if action == 'bridge_poll':
         cur.execute(f"UPDATE {SCHEMA}.skud_commands SET sent_at = now(), done_at = now(), result = 'не выполнена: контроллер был не на связи' "
-                    f"WHERE controller_id = %s AND sent_at IS NULL AND operation = 'open_door' AND created_at < now() - interval '60 seconds'",
-                    (ctrl['id'],))
+                    f"WHERE controller_id = %s AND sent_at IS NULL AND operation = 'open_door' "
+                    f"AND created_at < now() - make_interval(secs => COALESCE((SELECT (timing::json->>'open_cmd_ttl_sec')::int "
+                    f"FROM {SCHEMA}.skud_controllers WHERE id = %s), 60))",
+                    (ctrl['id'], ctrl['id']))
         cur.execute(f'SELECT id, operation, payload FROM {SCHEMA}.skud_commands WHERE controller_id = %s AND sent_at IS NULL '
                     f'ORDER BY id LIMIT 20', (ctrl['id'],))
         cmds = [{'id': r[0], 'operation': r[1], 'payload': json.loads(r[2]) if r[2] else None} for r in cur.fetchall()]
@@ -268,7 +300,7 @@ def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event:
     return _resp(400, {'error': 'Неизвестное действие'})
 
 
-GATE_FIELDS = 'id, name, gate_host, gate_port, gate_address, open_seconds, emergency_open, antipassback'
+GATE_FIELDS = 'id, name, gate_host, gate_port, gate_address, open_seconds, emergency_open, antipassback, timing'
 
 
 def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
@@ -284,6 +316,11 @@ def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Di
     if found and not r[2] and re.fullmatch(r'[0-9.]{7,15}', found):
         cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET gate_host = %s, gate_port = %s WHERE id = %s',
                     (found, int(body.get('found_port') or r[3] or 5000), r[0]))
+    params = body.get('params')
+    if isinstance(params, dict):
+        cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET gate_params = %s WHERE id = %s',
+                    (json.dumps({k: params[k] for k in ('relay_tenths', 'pass_tenths', 'hold_sec', 'confirm_sec', 'at')
+                                 if k in params}), r[0]))
     cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET gate_status = %s, gate_seen_at = now() WHERE id = %s', (status, r[0]))
     if not body.get('connected'):
         out: Dict[str, Any] = {'ok': True}
@@ -291,8 +328,9 @@ def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Di
         out = json.loads(_bridge(cur, ctrl, 'bridge_' + action[len('rec_gate_'):], body, event)['body'])
     out['gate'] = {'controller_id': r[0], 'name': r[1], 'host': found if (found and not r[2]) else (r[2] or ''),
                    'port': r[3] or 5000, 'address': r[4] or 1, 'open_tenths': (r[5] or 3) * 10, 'emergency': bool(r[6]),
-                   'antipassback': bool(r[7])}
-    alerts.daily_once(cur, SCHEMA)
+                   'antipassback': bool(r[7]), 'timing': _timing(r[8], r[5])}
+    if not body.get('fast'):
+        alerts.daily_once(cur, SCHEMA)
     return _resp(200, out)
 
 
@@ -301,7 +339,7 @@ def _controllers(cur) -> List[Dict[str, Any]]:
                 f'c.last_ip, c.fw_version, c.door_open, c.secret, c.inside_camera_id, c.pre_seconds, c.post_seconds, '
                 f'c.recorder_device, c.recorder_quality, c.recorder_seen_at, c.recorder_status, d.hostname, '
                 f'c.gate_host, c.gate_port, c.gate_address, c.gate_status, c.gate_seen_at, c.emergency_open, '
-                f'c.antipassback, c.outputs '
+                f'c.antipassback, c.outputs, c.timing, c.gate_params '
                 f'FROM {SCHEMA}.skud_controllers c LEFT JOIN {SCHEMA}.devices d ON d.device_code = c.recorder_device '
                 f'LEFT JOIN {SCHEMA}.cameras cam ON cam.id = c.camera_id WHERE c.active ORDER BY c.created_at')
     now = datetime.now(timezone.utc)
@@ -315,7 +353,8 @@ def _controllers(cur) -> List[Dict[str, Any]]:
                     'recorder_host': r[19], 'gate_host': r[20], 'gate_port': r[21], 'gate_address': r[22],
                     'gate_status': r[23], 'gate_online': bool(r[24] and now - r[24] < timedelta(seconds=60)),
                     'emergency_open': r[25], 'antipassback': r[26],
-                    'outputs': json.loads(r[27]) if r[27] else OUTPUTS_DEFAULT})
+                    'outputs': json.loads(r[27]) if r[27] else OUTPUTS_DEFAULT,
+                    'timing': _timing(r[28], r[6]), 'gate_params': json.loads(r[29]) if r[29] else None})
     return out
 
 
@@ -569,7 +608,8 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
                            'owner': owner[2] if owner else None, 'status': owner[1] if owner else None})
 
     if action == 'enroll_start':
-        cur.execute(f"UPDATE {SCHEMA}.skud_enroll SET until_at = now() + interval '3 minutes', card_number = NULL WHERE id = 1")
+        cur.execute(f"UPDATE {SCHEMA}.skud_enroll SET until_at = now() + make_interval(secs => %s), card_number = NULL WHERE id = 1",
+                    (_enroll_secs(cur),))
         return _resp(200, {'ok': True})
     if action == 'enroll_poll':
         cur.execute(f'SELECT card_number, until_at > now() FROM {SCHEMA}.skud_enroll WHERE id = 1')
@@ -590,17 +630,41 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         if body.get('id'):
             cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET gate_host=%s, gate_port=%s, gate_address=%s WHERE id=%s',
                         (g_host, g_port, g_addr, body['id']))
+            cur.execute(f'SELECT timing, open_seconds FROM {SCHEMA}.skud_controllers WHERE id=%s', (body['id'],))
+            tr = cur.fetchone()
             cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET name=%s, camera_id=%s, open_seconds=%s, inside_camera_id=%s, '
                         f'pre_seconds=%s, post_seconds=%s, recorder_device=%s, recorder_quality=%s WHERE id=%s',
                         (name, body.get('camera_id') or None, secs, body.get('inside_camera_id') or None, pre, post,
                          body.get('recorder_device') or None, quality, body['id']))
-            cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, payload, created_by) VALUES (%s,%s,%s,%s)',
-                        (body['id'], 'set_open_time', json.dumps({'seconds': secs}), user['name']))
+            tm = _timing(tr[0] if tr else None, secs)
+            if tr and tr[1] != secs:
+                tm['relay_tenths'] = secs * 10
+                cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET timing=%s WHERE id=%s', (json.dumps(tm), body['id']))
+                cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, payload, created_by) VALUES (%s,%s,%s,%s)',
+                            (body['id'], 'set_params', json.dumps({'relay_tenths': tm['relay_tenths']}), user['name']))
         else:
             cur.execute(f'INSERT INTO {SCHEMA}.skud_controllers (name, camera_id, open_seconds, model, inside_camera_id, '
                         f'pre_seconds, post_seconds, recorder_device, recorder_quality) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)',
                         (name, body.get('camera_id') or None, secs, 'Gate-4000-Ethernet', body.get('inside_camera_id') or None,
                          pre, post, body.get('recorder_device') or None, quality))
+        return _resp(200, {'ok': True, 'controllers': _controllers(cur)})
+    if action == 'timing_save':
+        cur.execute(f'SELECT timing, open_seconds FROM {SCHEMA}.skud_controllers WHERE id=%s', (body.get('id'),))
+        r = cur.fetchone()
+        if not r:
+            return _resp(404, {'error': 'Контроллер не найден'})
+        old = _timing(r[0], r[1])
+        new = _timing(json.dumps(body.get('timing') or {}), r[1])
+        cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET timing=%s, open_seconds=%s WHERE id=%s',
+                    (json.dumps(new), max(1, round(new['relay_tenths'] / 10)), body['id']))
+        door = {k: new[k] for k in ('relay_tenths', 'pass_tenths', 'hold_sec', 'confirm_sec') if new[k] != old[k] or body.get('force')}
+        if door:
+            cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, payload, created_by) VALUES (%s,%s,%s,%s)',
+                        (body['id'], 'set_params', json.dumps(door), user['name']))
+        return _resp(200, {'ok': True, 'controllers': _controllers(cur)})
+    if action == 'read_params':
+        cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, created_by) VALUES (%s,%s,%s)',
+                    (body.get('id'), 'read_params', user['name']))
         return _resp(200, {'ok': True, 'controllers': _controllers(cur)})
     if action == 'open_door':
         cur.execute(f'SELECT last_seen_at FROM {SCHEMA}.skud_controllers WHERE id=%s', (body.get('id'),))

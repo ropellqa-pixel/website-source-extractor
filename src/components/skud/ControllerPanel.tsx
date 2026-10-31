@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { skudCall, type PcDevice, type SkudController } from '@/lib/skudApi';
 import GateCheck from './GateCheck';
+import TimingPanel from './TimingPanel';
 
 interface Props {
   open: boolean;
@@ -49,7 +50,7 @@ export default function ControllerPanel({ open, onOpenChange, controller, camera
   const save = async () => {
     setBusy(true);
     const r = await skudCall<{ controllers: SkudController[] }>({
-      action: 'controller_save', id: controller?.id, name, camera_id: cameraId, open_seconds: Number(secs) || 3,
+      action: 'controller_save', id: controller?.id, name, camera_id: cameraId, open_seconds: controller ? Math.max(1, Math.round((controller.timing?.relay_tenths || controller.open_seconds * 10) / 10)) : Number(secs) || 3,
       inside_camera_id: insideId, pre_seconds: Number(pre), post_seconds: Number(post), recorder_device: pc, recorder_quality: quality,
       gate_host: gateHost.trim(), gate_port: Number(gatePort) || 5000, gate_address: Number(gateAddr) || 1,
     });
@@ -60,7 +61,7 @@ export default function ControllerPanel({ open, onOpenChange, controller, camera
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader><DialogTitle>Контроллер двери</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div>
@@ -82,11 +83,13 @@ export default function ControllerPanel({ open, onOpenChange, controller, camera
             </select>
             <p className="mt-1 text-xs text-muted-foreground">Пишет всё посещение без перерывов — пока все не выйдут.</p>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium">Замок открыт, сек</label>
-              <Input type="number" min={1} max={30} value={secs} onChange={(e) => setSecs(e.target.value)} />
-            </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {!controller && (
+              <div className="sm:col-span-2">
+                <label className="mb-1.5 block text-xs font-medium">Замок открыт, сек</label>
+                <Input type="number" min={1} max={25} value={secs} onChange={(e) => setSecs(e.target.value)} />
+              </div>
+            )}
             <div>
               <label className="mb-1.5 block text-xs font-medium">Видео до открытия, сек</label>
               <Input type="number" min={0} max={120} value={pre} onChange={(e) => setPre(e.target.value)} />
@@ -159,6 +162,7 @@ export default function ControllerPanel({ open, onOpenChange, controller, camera
               </div>
             )}
           </div>
+          {controller && <TimingPanel controller={controller} onChanged={onChanged} />}
           <div className="flex items-center gap-3 text-sm">
             <span className="text-muted-foreground">Качество видео</span>
             {(['sd', 'hd'] as const).map((q) => (

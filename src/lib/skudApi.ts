@@ -81,6 +81,23 @@ export interface SkudController {
   emergency_open: boolean;
   antipassback: boolean;
   outputs: SkudOutput[];
+  timing: SkudTiming;
+  gate_params: { relay_tenths?: number; pass_tenths?: number; hold_sec?: number; confirm_sec?: number; at?: string } | null;
+}
+
+export interface SkudTiming {
+  ctrl_poll_ms: number;
+  server_sync_sec: number;
+  reconnect_sec: number;
+  clock_sync_hours: number;
+  enroll_sec: number;
+  site_refresh_sec: number;
+  open_cmd_ttl_sec: number;
+  emergency_repeat_min: number;
+  relay_tenths: number;
+  pass_tenths: number;
+  hold_sec: number;
+  confirm_sec: number;
 }
 
 export interface SkudClip {
