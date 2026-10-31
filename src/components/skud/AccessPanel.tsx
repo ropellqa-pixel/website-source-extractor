@@ -4,16 +4,17 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { daysLabel, skudCall, WEEKDAYS, type SkudCard, type SkudController, type SkudOutput, type SkudSchedule } from '@/lib/skudApi';
+import { ALARM_KINDS } from '@/lib/skudApi';
 
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   controller: SkudController | null;
   schedules: SkudSchedule[];
-  notify: { alarms_to_employees: boolean };
+  notify: { alarms_to_employees: boolean; kinds?: string[] };
   onSchedules: (s: SkudSchedule[], cards: SkudCard[]) => void;
   onControllers: (c: SkudController[]) => void;
-  onNotify: (n: { alarms_to_employees: boolean }) => void;
+  onNotify: (n: { alarms_to_employees: boolean; kinds?: string[] }) => void;
 }
 
 const EMPTY_S = { id: 0, name: '', days: 31, from: '08:00', to: '20:00' };
@@ -25,7 +26,7 @@ export default function AccessPanel({ open, onOpenChange, controller, schedules,
 
   const call = async (action: string, extra: Record<string, unknown>) => {
     setBusy(action);
-    const r = await skudCall<{ schedules?: SkudSchedule[]; cards?: SkudCard[]; controllers?: SkudController[]; notify?: { alarms_to_employees: boolean } }>({ action, ...extra });
+    const r = await skudCall<{ schedules?: SkudSchedule[]; cards?: SkudCard[]; controllers?: SkudController[]; notify?: { alarms_to_employees: boolean; kinds?: string[] } }>({ action, ...extra });
     setBusy(null);
     if (r.error) { alert(r.error); return null; }
     if (r.schedules && r.cards) onSchedules(r.schedules, r.cards);
@@ -131,7 +132,19 @@ export default function AccessPanel({ open, onOpenChange, controller, schedules,
 
           <section className="space-y-2 rounded-xl border p-3">
             <h3 className="text-sm font-semibold">Уведомления в ВК о тревогах</h3>
-            <p className="text-xs text-muted-foreground">Взлом двери, дверь оставлена открытой, попытка пройти по заблокированной карте — сразу директору, заместителю и старшему сотруднику.</p>
+            <p className="text-xs text-muted-foreground">Сразу всему отделу «Руководство» (а также директору, заместителю и старшим сотрудникам). Отметьте, о чём сообщать:</p>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {Object.entries(ALARM_KINDS).map(([k, l]) => {
+                const on = (notify.kinds || []).includes(k);
+                return (
+                  <label key={k} className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={on} disabled={!!busy}
+                      onChange={() => call('notify_save', { kinds: on ? (notify.kinds || []).filter((x) => x !== k) : [...(notify.kinds || []), k] })} />
+                    {l}
+                  </label>
+                );
+              })}
+            </div>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={notify.alarms_to_employees} disabled={!!busy}
                 onChange={(e) => call('notify_save', { alarms_to_employees: e.target.checked })} />

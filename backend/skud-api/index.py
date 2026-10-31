@@ -27,7 +27,8 @@ KINDS = {
     'entry': 'Вход по карте', 'exit': 'Выход по карте', 'exit_button': 'Выход по кнопке',
     'denied': 'Отказ в доступе', 'denied_blocked': 'Заблокированная карта', 'remote_open': 'Открыта с сайта',
     'forced': 'Дверь взломана', 'held_open': 'Дверь не закрыта', 'door_closed': 'Дверь закрыта',
-    'power': 'Питание / перезапуск', 'other': 'Событие контроллера',
+    'power': 'Питание / перезапуск', 'reader_fault': 'Неисправность считывателя', 'button_stuck': 'Залипла кнопка выхода',
+    'other': 'Событие контроллера',
 }
 CARD_STATUSES = {'active', 'blocked'}
 ROLE_RANK = {'employee': 1, 'senior_employee': 2, 'deputy_director': 3, 'director': 4}
@@ -374,7 +375,9 @@ def _events(cur, body: Dict[str, Any]) -> Dict[str, Any]:
     if body.get('kind') == 'pass':
         where.append("e.event_kind IN ('entry','exit','exit_button','remote_open')")
     elif body.get('kind') == 'alarm':
-        where.append("e.event_kind IN ('denied','denied_blocked','forced','held_open')")
+        kinds = [k for k in (body.get('kinds') or []) if k in alerts.ALERT_KINDS] or list(alerts.ALERT_KINDS)
+        where.append('e.event_kind = ANY(%s)')
+        args.append(kinds)
     limit = min(int(body.get('limit') or 500), 3000)
     cur.execute(
         f"SELECT e.id, e.event_time, e.event_kind, e.direction, e.granted, e.card_number, e.profile_id, "
@@ -474,7 +477,7 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         if user['role'] not in MANAGER_ROLES:
             ctrls = [{k: v for k, v in c.items() if k not in ('key', 'last_ip', 'gate_host')} for c in ctrls]
         return _resp(200, {'controllers': ctrls, 'cards': _cards(cur), 'employees': emps, 'cameras': cams,
-                           'schedules': _schedules(cur), 'notify': alerts.settings(cur, SCHEMA),
+                           'schedules': _schedules(cur), 'notify': alerts.settings(cur, SCHEMA), 'alarm_kinds': alerts.ALERT_KINDS,
                            'is_manager': user['role'] in MANAGER_ROLES})
     if action == 'events':
         return _resp(200, _events(cur, body))
@@ -697,7 +700,9 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
         return _resp(200, {'ok': True, 'schedules': _schedules(cur), 'cards': _cards(cur)})
     if action == 'notify_save':
-        v = {'alarms_to_employees': bool(body.get('alarms_to_employees'))}
+        cur_v = alerts.settings(cur, SCHEMA)
+        v = {'alarms_to_employees': bool(body.get('alarms_to_employees', cur_v['alarms_to_employees'])),
+             'kinds': [k for k in body['kinds'] if k in alerts.ALERT_KINDS] if isinstance(body.get('kinds'), list) else cur_v['kinds']}
         cur.execute(f"INSERT INTO {SCHEMA}.app_settings (key, value, updated_by) VALUES ('skud_notify', %s, %s) "
                     f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()",
                     (json.dumps(v), user['name']))

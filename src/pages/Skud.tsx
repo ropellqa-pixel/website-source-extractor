@@ -7,7 +7,8 @@ import EventsTable from '@/components/skud/EventsTable';
 import CardsPanel from '@/components/skud/CardsPanel';
 import ControllerPanel from '@/components/skud/ControllerPanel';
 import VisitCard from '@/components/skud/VisitCard';
-import { fmtDate, fmtTime, mskDay, skudCall, type Employee, type SkudCard, type SkudController, type SkudEvent, type SkudSchedule, type SkudVisit } from '@/lib/skudApi';
+import AlarmsExport from '@/components/skud/AlarmsExport';
+import { ALARM_KINDS, fmtDate, fmtTime, mskDay, skudCall, type Employee, type SkudCard, type SkudController, type SkudEvent, type SkudSchedule, type SkudVisit } from '@/lib/skudApi';
 
 type Kind = 'all' | 'pass' | 'alarm';
 
@@ -38,18 +39,19 @@ export default function Skud() {
   const [cardsOpen, setCardsOpen] = useState(params.get('cards') === '1');
   const [accessOpen, setAccessOpen] = useState(false);
   const [schedules, setSchedules] = useState<SkudSchedule[]>([]);
-  const [notify, setNotify] = useState({ alarms_to_employees: false });
+  const [notify, setNotify] = useState<{ alarms_to_employees: boolean; kinds?: string[] }>({ alarms_to_employees: false });
   const [isManager, setIsManager] = useState(false);
   const [ctrlOpen, setCtrlOpen] = useState(false);
   const [opening, setOpening] = useState(false);
   const [tab, setTab] = useState<'visits' | 'journal'>('visits');
   const [visits, setVisits] = useState<SkudVisit[]>([]);
+  const [alarmsOpen, setAlarmsOpen] = useState(false);
 
   const ctrl = controllers[0] || null;
   const warehouseCam = ctrl?.camera_id || cameras.find((c) => /склад/i.test(c.name))?.id || null;
 
   const loadOverview = useCallback(async () => {
-    const r = await skudCall<{ controllers: SkudController[]; cards: SkudCard[]; employees: Employee[]; cameras: { id: string; name: string }[]; schedules: SkudSchedule[]; notify: { alarms_to_employees: boolean }; is_manager: boolean }>({ action: 'overview' });
+    const r = await skudCall<{ controllers: SkudController[]; cards: SkudCard[]; employees: Employee[]; cameras: { id: string; name: string }[]; schedules: SkudSchedule[]; notify: { alarms_to_employees: boolean; kinds?: string[] }; is_manager: boolean }>({ action: 'overview' });
     if (r.error) { setError(r.error); setLoading(false); return; }
     setControllers(r.controllers); setCards(r.cards); setEmployees(r.employees); setCameras(r.cameras);
     setSchedules(r.schedules || []); if (r.notify) setNotify(r.notify); setIsManager(!!r.is_manager);
@@ -85,7 +87,7 @@ export default function Skud() {
     });
     return {
       passes: todayEv.filter((e) => e.kind === 'entry').length,
-      alarms: todayEv.filter((e) => ['denied', 'denied_blocked', 'forced', 'held_open'].includes(e.kind)).length,
+      alarms: todayEv.filter((e) => e.kind in ALARM_KINDS).length,
       active: cards.filter((c) => c.status === 'active').length,
     };
   }, [events, cards, today]);
@@ -172,10 +174,15 @@ export default function Skud() {
               className={`rounded-md px-3 py-1 text-sm ${kind === k ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'}`}>{l}</button>
           ))}
         </div>
+        <button onClick={() => setAlarmsOpen(true)}
+          className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-red-600 hover:bg-red-500/10">
+          <Icon name="TriangleAlert" size={15} />Выгрузка тревог
+        </button>
         <button onClick={() => exportCsv(events)} disabled={!events.length}
-          className="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-40">
+          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-40">
           <Icon name="Download" size={15} />В Excel
         </button>
+        {alarmsOpen && <AlarmsExport open={alarmsOpen} onOpenChange={setAlarmsOpen} from={from} to={to} />}
       </div>
 
       {tab === 'visits' ? (

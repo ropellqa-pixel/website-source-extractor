@@ -1,3 +1,5 @@
+ABIZ project version 27 (program 4.4, build 1.11.0)
+New: kiosk lock (Task Manager, Run, Win keys, cmd, regedit disabled for staff; released only by admin); alarm kinds: reader fault, stuck button.
 ABIZ project version 26 (program 4.3, build 1.10.0)
 New: fast controller polling (0.5 s) and site sync (1-2 s); all door timings (relay, pass, door-held alarm, code wait) and bridge speeds configurable on the site.
 ABIZ project version 25 (program 4.2, build 1.9.0)

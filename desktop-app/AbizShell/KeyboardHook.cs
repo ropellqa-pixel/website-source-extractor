@@ -40,6 +40,12 @@ namespace AbizShell
         [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr GetModuleHandle(string? lpModuleName);
 
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int vKey);
+
+        /// <summary>Вошёл администратор — системные сочетания разрешены.</summary>
+        public static bool KioskAdmin { get; set; }
+
         private IntPtr _hookID = IntPtr.Zero;
         private readonly LowLevelKeyboardProc _proc;
 
@@ -74,8 +80,10 @@ namespace AbizShell
                     // Alt+Tab НЕ блокируем: он нужен для переключения на Word/Excel и на
                     // Диспетчер задач — без него из программы нельзя было выйти, если
                     // что-то пошло не так.
-                    if (vkCode == VK_LWIN || vkCode == VK_RWIN) return (IntPtr)1;
+                    if ((vkCode == VK_LWIN || vkCode == VK_RWIN) && !KioskAdmin) return (IntPtr)1;
                     if (vkCode == VK_F4 && isSysKey) return (IntPtr)1;
+                    // Ctrl+Shift+Esc (Диспетчер задач) и Ctrl+Esc (меню «Пуск»).
+                    if (vkCode == VK_ESCAPE && (GetAsyncKeyState(0x11) & 0x8000) != 0 && !KioskAdmin) return (IntPtr)1;
                 }
 
                 if (isKeyDown && KeyHandler != null && KeyHandler(vkCode, isSysKey))

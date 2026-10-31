@@ -2,6 +2,16 @@ import { apiUrl } from '@/lib/apiUrls';
 
 const URL = apiUrl('skud-api');
 
+export const ALARM_KINDS: Record<string, string> = {
+  forced: 'Дверь взломана',
+  held_open: 'Дверь не закрыта',
+  denied_blocked: 'Заблокированная карта',
+  denied: 'Отказ в доступе (чужая карта)',
+  reader_fault: 'Неисправность считывателя',
+  button_stuck: 'Залипла кнопка выхода',
+  power: 'Перезапуск / питание контроллера',
+};
+
 export interface SkudEvent {
   id: number;
   time: string;

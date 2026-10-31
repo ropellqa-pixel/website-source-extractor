@@ -743,8 +743,10 @@ namespace AbizShell
             string q = Edition.Kiosk ? "Закрыть АБИЗ и выйти в обычный Windows?" : "Закрыть АБИЗ-Админ?";
             if (MessageBox.Show(q, Edition.Name, MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 return;
+            if (!IsAdmin) return;
             _allowClose = true;
             StopEverything();
+            KioskLock.Release();
             TaskbarManager.Restore();
             Application.Current.Shutdown();
         }

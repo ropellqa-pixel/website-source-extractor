@@ -17,7 +17,11 @@ GRACE_DAYS = 5
 WARN_DAYS = 5
 MSK = timezone(timedelta(hours=3))
 ALERT_KINDS = {'forced': 'Дверь склада взломана!', 'held_open': 'Дверь склада оставлена открытой',
-               'denied_blocked': 'Попытка пройти по заблокированной карте'}
+               'denied_blocked': 'Попытка пройти по заблокированной карте', 'denied': 'Отказ в доступе (чужая или неизвестная карта)',
+               'reader_fault': 'Неисправность считывателя', 'button_stuck': 'Залипла кнопка выхода',
+               'power': 'Перезапуск / пропадание питания контроллера'}
+ALERT_DEFAULT = ['forced', 'held_open', 'denied_blocked', 'reader_fault', 'button_stuck', 'power']
+MGMT_DEPARTMENT = 'Руководство'
 NOTIFY_ROLES = ('director', 'deputy_director', 'senior_employee')
 EXPIRY_ROLES = ('deputy_director', 'senior_employee')
 
@@ -70,7 +74,16 @@ def settings(cur, schema: str) -> Dict[str, Any]:
     cur.execute(f"SELECT value FROM {schema}.app_settings WHERE key = 'skud_notify'")
     r = cur.fetchone()
     v = (r[0] if r and isinstance(r[0], dict) else json.loads(r[0]) if r and r[0] else {}) or {}
-    return {'alarms_to_employees': bool(v.get('alarms_to_employees', False))}
+    kinds = v.get('kinds')
+    kinds = [k for k in kinds if k in ALERT_KINDS] if isinstance(kinds, list) else list(ALERT_DEFAULT)
+    return {'alarms_to_employees': bool(v.get('alarms_to_employees', False)), 'kinds': kinds}
+
+
+def _management(cur, schema: str) -> List[str]:
+    """Весь отдел «Руководство» + директор, заместитель и старшие сотрудники из любых отделов."""
+    cur.execute(f"SELECT id FROM {schema}.profiles WHERE status = 'active' AND (department = %s OR role = ANY(%s))",
+                (MGMT_DEPARTMENT, list(NOTIFY_ROLES)))
+    return [r[0] for r in cur.fetchall()]
 
 
 def _profiles(cur, schema: str, roles) -> List[str]:
@@ -79,18 +92,25 @@ def _profiles(cur, schema: str, roles) -> List[str]:
 
 
 def alarm(cur, schema: str, kind: str, door: str, name: str, when: datetime, card: str) -> None:
-    """Тревога с двери → ВК руководству (и сотрудникам, если включено). Повтор того же события не шлём."""
+    """Тревога с двери → ВК всему отделу «Руководство» (и сотрудникам, если включено). Повтор того же события не шлём."""
     title = ALERT_KINDS.get(kind)
     if not title:
+        return
+    st = settings(cur, schema)
+    if kind not in st['kinds']:
+        return
+    if datetime.now(timezone.utc) - when > timedelta(hours=2):
         return
     key = f'alarm:{kind}:{card or ""}:{when.astimezone(MSK).strftime("%Y-%m-%d %H:%M")}'
     if not _once(cur, schema, key):
         return
-    text = f'⚠ СКУД «{door}»: {title}\n{when.astimezone(MSK).strftime("%d.%m.%Y %H:%M")}'
+    text = f'⚠ СКУД «{door}»: {title}\n{when.astimezone(MSK).strftime("%d.%m.%Y %H:%M:%S")}'
     if name or card:
         text += f'\nКарта: {name or "не записана"}{f" ({card})" if card else ""}'
-    roles = NOTIFY_ROLES + (('employee',) if settings(cur, schema)['alarms_to_employees'] else ())
-    vk_send(cur, schema, _profiles(cur, schema, roles), text)
+    ids = _management(cur, schema)
+    if st['alarms_to_employees']:
+        ids = list(set(ids) | set(_profiles(cur, schema, ('employee',))))
+    vk_send(cur, schema, ids, text)
 
 
 def expiring(cur, schema: str) -> List[Dict[str, Any]]:

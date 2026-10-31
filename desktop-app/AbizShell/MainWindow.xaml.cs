@@ -44,6 +44,7 @@ namespace AbizShell
 
             if (Edition.Kiosk)
             {
+                KioskLock.Apply();
                 // Экран входа — точно на весь монитор; заодно сбрасываем область экрана
                 // (на случай, если прошлый сеанс оставил отступ).
                 ScreenArea.Reset();
@@ -553,6 +554,7 @@ namespace AbizShell
 
             try
             {
+                if (isAdmin) KioskLock.Release(); else KioskLock.Apply();
                 bool foreign = !isAdmin && !string.IsNullOrEmpty(sessionToken);
                 var shell = new ShellWindow
                 {
@@ -607,6 +609,7 @@ namespace AbizShell
             _spinnerTimer?.Stop();
             StopRemoteAgent();
             _openingNext = true;
+            KioskLock.Release();
             TaskbarManager.Restore();
             foreach (Window w in Application.Current.Windows)
                 if (w is ShellWindow sw) sw.ForceCloseForExit();
