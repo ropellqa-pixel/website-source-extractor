@@ -10,6 +10,15 @@ U="$(cd "$(dirname "$0")" && pwd)"
 SITE="$HOME/bizwor.ru/public_html"
 API="$HOME/api.bizwor.ru"
 echo "1/5 Сайт"
+B=$(ls -t "$HOME"/*.zip 2>/dev/null | grep -i -E "build|билд|dist" | head -1 || true)
+if [ ! -f "$U/site/index.html" ] && [ -n "$B" ]; then
+  echo "  беру сайт из $B"
+  rm -rf "$U/site" "$U/_b" && mkdir -p "$U/_b" && (cd "$U/_b" && unzip -q "$B")
+  IDX=$(find "$U/_b" -name index.html -not -path "*/node_modules/*" | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)
+  mv "$(dirname "$IDX")" "$U/site"
+  "$API/venv/bin/python" "$U/prepare_site.py" "$U/site"
+  rm -f "$B"
+fi
 if [ -f "$U/site/index.html" ]; then rm -rf "$SITE/assets"; cp -r "$U/site/." "$SITE/"; else echo "  сайт в этом пакете не меняется"; fi
 echo "2/5 Сервер"
 cp -r "$U/backend/." "$API/backend/"

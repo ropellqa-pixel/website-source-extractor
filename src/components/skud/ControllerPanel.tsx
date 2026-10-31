@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { skudCall, type PcDevice, type SkudController } from '@/lib/skudApi';
+import GateCheck from './GateCheck';
 
 interface Props {
   open: boolean;
@@ -136,6 +137,10 @@ export default function ControllerPanel({ open, onOpenChange, controller, camera
               </div>
             </div>
             <p className="text-xs text-muted-foreground">Если IP не указан, программа сама найдёт контроллер в сети склада. Номер контроллера с завода — 1.</p>
+            {/^192\.168\.\d+\.1$/.test(gateHost.trim()) && (
+              <p className="text-xs text-amber-600">Похоже, это адрес роутера, а не контроллера. Проверьте IP или оставьте поле пустым.</p>
+            )}
+            {controller && <GateCheck controller={controller} />}
             {controller && (
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" disabled={!!acting} onClick={() => act('sync_clock')}>

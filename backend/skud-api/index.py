@@ -377,6 +377,25 @@ def _cards(cur) -> List[Dict[str, Any]]:
     return out
 
 
+def _gate_check(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Пошаговая проверка связи: ПК склада → программа-мост → контроллер → модель и прошивка."""
+    cur.execute(f'SELECT id FROM {SCHEMA}.skud_controllers WHERE id=%s AND active', (body.get('id'),))
+    if not cur.fetchone():
+        return _resp(404, {'error': 'Контроллер не найден'})
+    cmd_id = body.get('command_id')
+    if action == 'gate_check':
+        cur.execute(f"UPDATE {SCHEMA}.skud_commands SET sent_at = COALESCE(sent_at, now()), done_at = now(), result = 'отменена: новая проверка' "
+                    f"WHERE controller_id = %s AND operation = 'gate_info' AND done_at IS NULL", (body['id'],))
+        cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, created_by) VALUES (%s,%s,%s) RETURNING id',
+                    (body['id'], 'gate_info', user['name']))
+        cmd_id = cur.fetchone()[0]
+    cur.execute(f'SELECT sent_at, done_at, result FROM {SCHEMA}.skud_commands WHERE id=%s AND controller_id=%s', (cmd_id, body['id']))
+    r = cur.fetchone()
+    cmd = {'id': cmd_id, 'sent': bool(r and r[0]), 'done': bool(r and r[1]), 'result': r[2] if r else None}
+    ctrl = next((c for c in _controllers(cur) if c['id'] == body['id']), None)
+    return _resp(200, {'ok': True, 'command': cmd, 'controller': ctrl})
+
+
 def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[str, Any]:
     if user['role'] not in MANAGER_ROLES and not (user['role'] in CARD_ROLES and action in CARD_ACTIONS):
         return _resp(403, {'error': 'Это доступно директору и заместителю директора'})
@@ -629,6 +648,8 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
             cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, created_by) VALUES (%s,%s,%s)',
                         (body['id'], action, user['name']))
         return _resp(200, {'ok': True, 'controllers': _controllers(cur)})
+    if action in ('gate_check', 'gate_check_poll'):
+        return _gate_check(cur, user, action, body)
     if action == 'sync_cards':
         cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
         return _resp(200, {'ok': True})
