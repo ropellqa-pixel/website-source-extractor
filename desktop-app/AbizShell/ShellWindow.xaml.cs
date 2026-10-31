@@ -653,9 +653,25 @@ namespace AbizShell
             }
         }
 
+        /// <summary>Курсор стоит в поле карты на сайте (подтверждение записи карты СКУД, мастер-карта) —
+        /// номер уходит в это поле, а не на вход/выход из программы.</summary>
+        private async Task<bool> IsCardFieldFocusedAsync()
+        {
+            try
+            {
+                var core = MainBrowser.CoreWebView2;
+                if (core == null) return false;
+                var r = await core.ExecuteScriptAsync(
+                    "(function(){var a=document.activeElement;return !!(a&&a.closest&&a.closest('[data-abiz-card]'));})()");
+                return r == "true";
+            }
+            catch { return false; }
+        }
+
         private async Task OnCardReadAsync(string raw)
         {
             if (_cardBusy || _allowClose) return;
+            if (await IsCardFieldFocusedAsync()) return;
             string deviceToken = AgentToken;
             if (string.IsNullOrEmpty(deviceToken))
             {

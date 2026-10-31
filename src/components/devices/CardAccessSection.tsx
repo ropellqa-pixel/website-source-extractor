@@ -102,6 +102,7 @@ export default function CardAccessSection({ profileId, autoFocus = true, notify 
       >
         <input
           ref={inputRef}
+          data-abiz-card="1"
           value={value}
           onChange={(e) => { setValue(e.target.value); setConflict(''); setError(''); }}
           autoFocus={autoFocus}

@@ -1,3 +1,5 @@
+ABIZ project version 25 (program 4.2, build 1.9.0)
+New: SKUD cards (Mifare Classic) are enrolled at the door reader; confirmation by the manager's 125 kHz login card on the PC USB reader (does not log out). Long Mifare numbers supported.
 ABIZ project version 24 (program 4.1, build 1.8.0)
 Fixed: door controller Gate-4000/8000-Ethernet bridge returned (was lost when moving to bizwor.ru) — events, cards, door opening, clock, auto-search of the controller in the local network.
 ABIZ project version 23 (program 4.0, build 1.7.0)

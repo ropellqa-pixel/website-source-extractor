@@ -32,11 +32,34 @@ KINDS = {
 CARD_STATUSES = {'active', 'blocked'}
 ROLE_RANK = {'employee': 1, 'senior_employee': 2, 'deputy_director': 3, 'director': 4}
 MASTER_ROLES = {'director', 'deputy_director'}
+CARD_RE = re.compile(r'\d{3},\d{5}|M[0-9A-F]{8,12}')
 
 
 def _expires(ctype: str, role: Optional[str]) -> bool:
     """Ежемесячно продлевать нужно только карты простых сотрудников (и карты без владельца)."""
     return ctype == 'employee' and ROLE_RANK.get(role or 'employee', 1) <= 1
+
+
+def _check_login_card(cur, user: Dict[str, Any], c: str, target_profile: Optional[str]) -> Optional[str]:
+    """Подтверждение картой 125 кГц (Em-Marine), по которой руководитель входит в программу АБИЗ."""
+    cur.execute(f'SELECT p.role, l.user_id FROM {SCHEMA}.login_cards l LEFT JOIN {SCHEMA}.profiles p '
+                f'ON p.id = l.profile_id OR (l.profile_id IS NULL AND p.user_id = l.user_id) WHERE l.card_number = %s LIMIT 1', (c,))
+    r = cur.fetchone()
+    if not r:
+        return 'Карта подтверждения не найдена — приложите свою карту входа в АБИЗ или мастер-карту'
+    if r[0] in MASTER_ROLES:
+        return None
+    if str(r[1]) != str(user.get('id')):
+        return 'Подтвердить может руководитель своей картой или вы — своей картой входа'
+    trole = None
+    if target_profile:
+        cur.execute(f'SELECT role FROM {SCHEMA}.profiles WHERE id = %s', (target_profile,))
+        t = cur.fetchone()
+        trole = t[0] if t else None
+    rank = ROLE_RANK.get(r[0] or 'employee', 1)
+    if rank < 2 or rank <= ROLE_RANK.get(trole or 'employee', 1):
+        return 'Нужна карта руководителя (старше по должности) или мастер-карта зам. директора'
+    return None
 
 
 def _check_confirm(cur, user: Dict[str, Any], confirm: str, new_card: str, target_profile: Optional[str]) -> Optional[str]:
@@ -49,7 +72,9 @@ def _check_confirm(cur, user: Dict[str, Any], confirm: str, new_card: str, targe
     cur.execute(f'SELECT c.card_type, c.status, c.profile_id, p.role, c.written_at FROM {SCHEMA}.skud_cards c '
                 f'LEFT JOIN {SCHEMA}.profiles p ON p.id = c.profile_id WHERE c.card_number = %s', (c,))
     r = cur.fetchone()
-    if not r or r[1] != 'active':
+    if not r:
+        return _check_login_card(cur, user, c, target_profile)
+    if r[1] != 'active':
         return 'Карта подтверждения не найдена в СКУД или заблокирована'
     if r[0] == 'master':
         return None
@@ -78,6 +103,8 @@ def norm_card(raw: str) -> str:
     по-разному: «012,34567», «0001234567» (10 цифр) или HEX. Приводим к «ггг,ннннн» — так
     напечатано на большинстве карт и так одинаково сравниваются карты с сайта и с двери."""
     s = (raw or '').strip().upper().replace(' ', '').replace('.', ',').replace('/', ',')
+    if re.fullmatch(r'M[0-9A-F]{8,12}', s):
+        return s
     m = re.fullmatch(r'(\d{1,3}),(\d{1,5})', s)
     if m:
         return f'{int(m.group(1)):03d},{int(m.group(2)):05d}'
@@ -155,9 +182,8 @@ def _save_event(cur, ctrl_id: str, e: Dict[str, Any], source: str = 'controller'
                 kind = 'denied_blocked'
             if owner[3] == 'guest' and kind in ('entry', 'exit'):
                 e = {**e, 'note': 'Гостевая карта' + (f" · {e['note']}" if e.get('note') and 'гост' not in str(e['note']).lower() else '')}
-        else:
-            cur.execute(f'UPDATE {SCHEMA}.skud_enroll SET card_number = %s, captured_at = now() '
-                        f'WHERE id = 1 AND until_at > now()', (card,))
+        cur.execute(f'UPDATE {SCHEMA}.skud_enroll SET card_number = %s, captured_at = now() '
+                    f'WHERE id = 1 AND until_at > now() AND card_number IS NULL', (card,))
     if e.get('person'):
         name = str(e['person'])[:200]
     granted = e.get('granted')
@@ -431,8 +457,8 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
 
     if action == 'card_save':
         card = norm_card(str(body.get('card') or ''))
-        if not re.fullmatch(r'\d{3},\d{5}', card):
-            return _resp(400, {'error': 'Не похоже на номер карты Em-Marin. Поднесите карту к считывателю ещё раз'})
+        if not CARD_RE.fullmatch(card):
+            return _resp(400, {'error': 'Не похоже на номер карты. Поднесите карту к считывателю ещё раз'})
         cur.execute(f'SELECT id, profile_id FROM {SCHEMA}.skud_cards WHERE card_number = %s', (card,))
         ex = cur.fetchone()
         if ex and ex[0] != body.get('id'):
@@ -524,7 +550,7 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
             return _resp(200, {'ok': True, 'master': None})
         card = norm_card(str(body.get('card') or ''))
         if not re.fullmatch(r'\d{3},\d{5}', card):
-            return _resp(400, {'error': 'Не похоже на номер карты Em-Marin. Поднесите карту к считывателю ещё раз'})
+            return _resp(400, {'error': 'Не похоже на номер карты. Поднесите карту к считывателю ещё раз'})
         cur.execute(f"SELECT id, card_type, profile_id FROM {SCHEMA}.skud_cards WHERE card_number = %s", (card,))
         ex = cur.fetchone()
         if ex and not (ex[1] == 'master' and ex[2] == user['profile_id']):
@@ -539,11 +565,11 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
     if action == 'card_check':
         card = norm_card(str(body.get('card') or ''))
         owner = _card_owner(cur, card)
-        return _resp(200, {'card': card, 'valid': bool(re.fullmatch(r'\d{3},\d{5}', card)),
+        return _resp(200, {'card': card, 'valid': bool(CARD_RE.fullmatch(card)),
                            'owner': owner[2] if owner else None, 'status': owner[1] if owner else None})
 
     if action == 'enroll_start':
-        cur.execute(f"UPDATE {SCHEMA}.skud_enroll SET until_at = now() + interval '2 minutes', card_number = NULL WHERE id = 1")
+        cur.execute(f"UPDATE {SCHEMA}.skud_enroll SET until_at = now() + interval '3 minutes', card_number = NULL WHERE id = 1")
         return _resp(200, {'ok': True})
     if action == 'enroll_poll':
         cur.execute(f'SELECT card_number, until_at > now() FROM {SCHEMA}.skud_enroll WHERE id = 1')

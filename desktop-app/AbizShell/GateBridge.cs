@@ -412,7 +412,7 @@ namespace AbizShell
             foreach (var x in cards.EnumerateArray())
             {
                 string card = x.TryGetProperty("card", out var cc) ? cc.GetString() ?? "" : "";
-                if (!System.Text.RegularExpressions.Regex.IsMatch(card, @"^\d{3},\d{5}$") || list.Contains(card)) continue;
+                if (!System.Text.RegularExpressions.Regex.IsMatch(card, @"^(\d{3},\d{5}|M[0-9A-F]{8,12})$") || list.Contains(card)) continue;
                 list.Add(card);
                 string pin = x.TryGetProperty("pin", out var pp) ? pp.GetString() ?? "" : "";
                 byte mask = x.TryGetProperty("mask", out var mm) && mm.ValueKind == JsonValueKind.Number ? (byte)mm.GetInt32() : (byte)0x80;
@@ -466,8 +466,14 @@ namespace AbizShell
         private static byte[] KeyBlock(string card, Dictionary<string, string> learned, (string pin, byte mask, bool guest) m, bool apb)
         {
             var b = new byte[8];
+            bool longNum = card.StartsWith("M");
             if (learned.TryGetValue(card, out var hex) && hex.Length == 12)
                 for (int i = 0; i < 6; i++) b[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+            else if (longNum)
+            {
+                var raw = Convert.FromHexString(card[1..].PadLeft(12, '0'));
+                Array.Copy(raw, 0, b, 0, 6);
+            }
             else
             {
                 int fac = int.Parse(card[..3], CultureInfo.InvariantCulture);
@@ -475,7 +481,7 @@ namespace AbizShell
                 b[3] = (byte)fac; b[4] = (byte)(num >> 8); b[5] = (byte)(num & 0xFF);
             }
             byte flags = 0;
-            if (m.pin.Length == 6)
+            if (m.pin.Length == 6 && !longNum)
             {
                 for (int i = 0; i < 3; i++) b[i] = (byte)(((m.pin[i * 2] - '0') << 4) | (m.pin[i * 2 + 1] - '0'));
                 flags |= 0x02;
@@ -487,8 +493,19 @@ namespace AbizShell
             return b;
         }
 
-        private static string CardFromKey(byte[] k, int offset = 0) =>
-            $"{k[offset + 3]:000},{(k[offset + 4] << 8) | k[offset + 5]:00000}";
+        /// <summary>
+        /// Номер карты из регистра «последний ключ». Wiegand-26 (Em-Marine и Mifare на 26 бит) — «ггг,ннннн»;
+        /// длинный номер (Mifare Classic по Wiegand-34/42/58) — «M» + HEX, чтобы карты не путались между собой.
+        /// </summary>
+        private static string CardFromKey(byte[] k, int offset = 0)
+        {
+            int first = -1;
+            for (int i = 0; i < 3; i++) if (k[offset + i] != 0) { first = i; break; }
+            if (first < 0) return $"{k[offset + 3]:000},{(k[offset + 4] << 8) | k[offset + 5]:00000}";
+            var sb = new StringBuilder("M");
+            for (int i = Math.Min(first, 2); i < 6; i++) sb.Append(k[offset + i].ToString("X2"));
+            return sb.ToString();
+        }
 
         // ---------------- события ----------------
 

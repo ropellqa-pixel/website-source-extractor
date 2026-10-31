@@ -36,8 +36,8 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
   const startAdd = (c?: SkudCard, rewrite = false) => {
     setForm(c ? { id: c.id, card: rewrite ? '' : c.card, profile_id: c.profile_id || '', label: c.label || '', valid_to: c.valid_to || '', card_type: (c.card_type === 'guest' ? 'guest' : 'employee') as 'employee' | 'guest', schedule_id: c.schedule_id ? String(c.schedule_id) : '', pin: '', pin_clear: false, has_pin: c.has_pin, rewrite, confirm_card: '' } : EMPTY);
     setOrigCard(c && !rewrite ? c.card : '');
-    setAdding(true); setError(null); setHint(rewrite ? 'Поднесите карту сотрудника (ту же или новую) — срок продлится на месяц' : null);
-    setTimeout(() => cardRef.current?.focus(), 50);
+    setAdding(true); setError(null); setHint(null);
+    setDoorWait(!c || rewrite);
   };
 
   const check = async (val: string) => {
@@ -58,7 +58,7 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
     const t = setInterval(async () => {
       const r = await skudCall<{ card: string | null; waiting: boolean }>({ action: 'enroll_poll' });
       if (stop) return;
-      if (r.card) { setForm((f) => ({ ...f, card: r.card! })); setHint(`Карта ${r.card} считана на двери`); setDoorWait(false); }
+      if (r.card) { setForm((f) => ({ ...f, card: r.card! })); setHint(`Карта ${r.card} считана на двери`); setDoorWait(false); setTimeout(() => confirmRef.current?.focus(), 50); }
       else if (!r.waiting) setDoorWait(false);
     }, 1500);
     return () => { stop = true; clearInterval(t); };
@@ -98,17 +98,17 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
             )}
             <div>
               <label className="mb-1.5 block text-sm font-medium">Номер карты</label>
-              <Input ref={cardRef} value={form.card} placeholder="Поднесите карту к USB-считывателю"
+              <Input ref={cardRef} value={form.card} placeholder="Номер появится сам после касания считывателя на двери"
                 onChange={(e) => setForm({ ...form, card: e.target.value })}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); check(form.card); } }}
                 onBlur={() => check(form.card)} className="font-mono" />
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span>Курсор в поле → поднесите карту к считывателю TS-RDR-USB-EM.</span>
-                <button onClick={() => setDoorWait(!doorWait)} className="text-primary hover:underline">
-                  {doorWait ? 'Отменить ожидание' : 'Или считать на двери склада'}
+                <span>Карты Mifare Classic считываются только на двери склада.</span>
+                <button onClick={() => { setHint(null); setDoorWait(!doorWait); }} className="text-primary hover:underline">
+                  {doorWait ? 'Отменить ожидание' : 'Считать на двери ещё раз'}
                 </button>
               </div>
-              {doorWait && <p className="mt-2 flex items-center gap-2 text-sm text-primary"><Icon name="Loader2" size={14} className="animate-spin" />Поднесите карту к считывателю на двери (2 мин)…</p>}
+              {doorWait && <p className="mt-2 flex items-center gap-2 text-sm text-primary"><Icon name="Loader2" size={14} className="animate-spin" />{form.rewrite ? 'Поднесите карту сотрудника (ту же или новую) к считывателю на двери склада' : 'Поднесите новую карту к считывателю на двери склада'} — жду 3 минуты…</p>}
               {hint && <p className="mt-2 text-sm text-emerald-600">{hint}</p>}
             </div>
             {!form.rewrite && (
@@ -164,11 +164,11 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
                 <label className="mb-1.5 flex items-center gap-2 text-sm font-medium">
                   <Icon name="ShieldCheck" size={16} className="text-amber-600" />Подтверждение: приложите свою карту
                 </label>
-                <Input ref={confirmRef} type="password" autoComplete="off" value={form.confirm_card} placeholder="Карта старшего сотрудника или мастер-карта"
+                <Input ref={confirmRef} data-abiz-card="1" type="password" autoComplete="off" value={form.confirm_card} placeholder="Ваша карта входа в АБИЗ (125 кГц) или мастер-карта"
                   onChange={(e) => setForm({ ...form, confirm_card: e.target.value })}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (form.card && form.confirm_card) save(); } }}
                   className="font-mono" />
-                <p className="mt-1 text-xs text-muted-foreground">Поставьте курсор в поле и поднесите к USB-считывателю свою карту — она должна быть старше по должности, чем у того, кому пишем карту. Или мастер-карту зам. директора.</p>
+                <p className="mt-1 text-xs text-muted-foreground">Поставьте курсор в поле и приложите к USB-считывателю у компьютера свою простую карту 125 кГц, по которой входите в программу АБИЗ. Подтверждает руководитель старше по должности, чем владелец новой карты, или мастер-картой.</p>
               </div>
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}
