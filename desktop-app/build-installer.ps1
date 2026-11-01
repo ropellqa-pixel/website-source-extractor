@@ -25,7 +25,16 @@ try {
         if (-not (Test-Path $path)) {
             Write-Host "Скачиваю $name ..." -ForegroundColor Cyan
             $ProgressPreference = "SilentlyContinue"
-            Invoke-WebRequest -Uri $downloads[$name] -OutFile $path -UseBasicParsing
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            for ($try = 1; $try -le 5; $try++) {
+                try { Invoke-WebRequest -Uri $downloads[$name] -OutFile $path -UseBasicParsing; break }
+                catch {
+                    Remove-Item $path -Force -ErrorAction SilentlyContinue
+                    if ($try -eq 5) { throw }
+                    Write-Host "  связь оборвалась, повтор $($try + 1) из 5..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds (5 * $try)
+                }
+            }
             $ProgressPreference = "Continue"
         }
     }
