@@ -28,6 +28,8 @@ if ls "$U"/sql/*.sql >/dev/null 2>&1; then cd "$API" && ./venv/bin/python apply_
 mkdir -p "$API/tmp" && touch "$API/tmp/restart.txt"
 echo "4/5 Адрес bizwor.ru/api"
 bash "$U/link_site.sh"
+echo "  сторож СКУД: проверка связи с дверью раз в минуту"
+( crontab -l 2>/dev/null | grep -v "skud-api.*watch" ; echo '* * * * * curl -s -m 25 -X POST -H "Content-Type: application/json" -d '"'"'{"action":"watch"}'"'"' https://bizwor.ru/api/skud-api >/dev/null 2>&1' ) | crontab - 2>/dev/null || echo "  (не удалось добавить cron — добавьте в панели Beget → CRON: curl -s -X POST -d '{\"action\":\"watch\"}' https://bizwor.ru/api/skud-api)"
 echo "5/5 Проверка"
 if [ ! -f "$U/site/index.html" ]; then curl -s https://bizwor.ru/api/health; echo; exit 0; fi
 NEED=$(grep -o 'assets/index-[^"]*\.js' "$U/site/index.html" | head -1)

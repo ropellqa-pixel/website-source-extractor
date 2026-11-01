@@ -52,6 +52,8 @@ namespace AbizShell
         private string? _foundHost;
         private string? _lastErr;
         private int? _ackLocal;
+        private int _sirenAddr, _sirenSec = 30;
+        private HashSet<string> _sirenKinds = new();
         private int _foundPort;
 
         private static string DataDir => Path.Combine(
@@ -145,7 +147,16 @@ namespace AbizShell
         {
             var events = ReadEvents(c, out ushort newLower);
             if (events.Count == 0) return false;
-            var res = await PostAsync(new { action = "rec_gate_push", connected = true, fast = true, events }, ct);
+            if (_sirenAddr > 0)
+                foreach (var ev in events)
+                {
+                    string k = (string)(ev.GetType().GetProperty("kind")?.GetValue(ev) ?? "");
+                    if (!_sirenKinds.Contains(k)) continue;
+                    // Сирена/зуммер на доп. выходе контроллера — сразу, без ожидания сайта (работает и без интернета).
+                    try { c.Request2(0x0E, (byte)(0x10 | 0x08 | (_sirenAddr & 0x07)), (byte)Math.Clamp(_sirenSec, 1, 255)); } catch (GateException) { }
+                    break;
+                }
+            var res = await PostAsync(new { action = "rec_gate_push", connected = true, fast = true, siren_local = true, events }, ct);
             if (res.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True)
                 AckEvents(c, newLower);
             return true;
@@ -205,6 +216,13 @@ namespace AbizShell
             _reconnectSec = Get("reconnect_sec", 10, 3, 120);
             _clockHours = Get("clock_sync_hours", 6, 1, 24);
             _emergencyMin = Get("emergency_repeat_min", 5, 1, 60);
+            if (gate.TryGetProperty("siren", out var sr) && sr.ValueKind == JsonValueKind.Object)
+            {
+                _sirenAddr = sr.TryGetProperty("addr", out var a) && a.ValueKind == JsonValueKind.Number ? a.GetInt32() : 0;
+                _sirenSec = sr.TryGetProperty("seconds", out var se) && se.ValueKind == JsonValueKind.Number ? se.GetInt32() : 30;
+                _sirenKinds = sr.TryGetProperty("kinds", out var ks) && ks.ValueKind == JsonValueKind.Array
+                    ? ks.EnumerateArray().Select(x => x.GetString() ?? "").ToHashSet() : new HashSet<string>();
+            }
         }
 
         /// <summary>Обмен с сайтом. Возвращает особую паузу (нет связи / ПК не выбран) или null — обычный темп.</summary>
@@ -223,6 +241,7 @@ namespace AbizShell
                 ["found_host"] = _foundHost,
                 ["found_port"] = _foundPort,
                 ["enroll_card"] = _enrollCard,
+                ["uptime"] = Environment.TickCount64 / 1000,
             };
             if (connected)
             {

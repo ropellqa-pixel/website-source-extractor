@@ -1,3 +1,5 @@
+ABIZ project version 31 (program 4.8, build 1.15.0)
+New: siren on a controller output turns on instantly on forced door / door held open (configurable on the site, works without internet); PC uptime sent to tell power loss from internet loss. Build script installs .NET 8 SDK itself.
 ABIZ project version 30 (program 4.7, build 1.14.0)
 Fix: controller events no longer re-sent in a loop when the read pointer cannot be written; connection status explains why the controller does not answer (ping, other subnet).
 ABIZ project version 29 (program 4.6, build 1.13.0)

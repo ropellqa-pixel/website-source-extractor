@@ -13,6 +13,10 @@ const STYLE: Record<string, { icon: string; cls: string }> = {
   held_open: { icon: 'DoorOpen', cls: 'text-amber-600 bg-amber-500/10' },
   reader_fault: { icon: 'WifiOff', cls: 'text-red-600 bg-red-500/10' },
   button_stuck: { icon: 'CircleAlert', cls: 'text-amber-600 bg-amber-500/10' },
+  offline: { icon: 'Unplug', cls: 'text-red-600 bg-red-500/10' },
+  pc_offline: { icon: 'PowerOff', cls: 'text-red-600 bg-red-500/10' },
+  power: { icon: 'Zap', cls: 'text-amber-600 bg-amber-500/10' },
+  restored: { icon: 'PlugZap', cls: 'text-emerald-600 bg-emerald-500/10' },
 };
 
 /** Сколько человек пробыл на складе: от входа до ближайшего следующего выхода (в пределах 12 ч). */

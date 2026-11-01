@@ -21,6 +21,20 @@ CORS = {
 MANAGER_ROLES = {'director', 'deputy_director'}
 CARD_ROLES = {'director', 'deputy_director', 'senior_employee'}
 CARD_ACTIONS = {'master_get', 'master_save', 'master_delete', 'overview', 'cards', 'card_save', 'card_rewrite', 'card_check', 'enroll_start', 'enroll_poll', 'events', 'visits', 'card_chip'}
+SIREN_DEFAULT = {'addr': 0, 'seconds': 30, 'kinds': ['forced', 'held_open']}
+SIREN_KINDS = ('forced', 'held_open', 'denied_blocked', 'denied', 'reader_fault', 'button_stuck')
+
+
+def _siren(raw: Optional[str]) -> Dict[str, Any]:
+    try:
+        v = json.loads(raw) if raw else {}
+    except ValueError:
+        v = {}
+    addr = int(v.get('addr') or 0) if str(v.get('addr') or 0).isdigit() else 0
+    return {'addr': addr if 1 <= addr <= 7 else 0, 'seconds': max(1, min(int(v.get('seconds') or 30), 255)),
+            'kinds': [k for k in (v.get('kinds') if isinstance(v.get('kinds'), list) else SIREN_DEFAULT['kinds']) if k in SIREN_KINDS]}
+
+
 OUTPUTS_DEFAULT = [{'addr': 1, 'name': 'Реле 2'}, {'addr': 2, 'name': 'Выход SW2'}, {'addr': 3, 'name': 'Выход SW3'},
                    {'addr': 4, 'name': 'Выход SW0'}, {'addr': 5, 'name': 'Выход SW1'}]
 KINDS = {
@@ -28,7 +42,8 @@ KINDS = {
     'denied': 'Отказ в доступе', 'denied_blocked': 'Заблокированная карта', 'remote_open': 'Открыта с сайта',
     'forced': 'Дверь взломана', 'held_open': 'Дверь не закрыта', 'door_closed': 'Дверь закрыта',
     'power': 'Питание / перезапуск', 'reader_fault': 'Неисправность считывателя', 'button_stuck': 'Залипла кнопка выхода',
-    'offline': 'Нет связи с дверью', 'other': 'Событие контроллера',
+    'offline': 'Нет связи с контроллером', 'pc_offline': 'ПК склада выключен / нет интернета',
+    'restored': 'Связь восстановлена', 'other': 'Событие контроллера',
 }
 CARD_STATUSES = {'active', 'blocked'}
 ROLE_RANK = {'employee': 1, 'senior_employee': 2, 'deputy_director': 3, 'director': 4}
@@ -259,7 +274,15 @@ def _save_event(cur, ctrl_id: str, e: Dict[str, Any], source: str = 'controller'
         cur.execute(f'SELECT name FROM {SCHEMA}.skud_controllers WHERE id = %s', (ctrl_id,))
         d = cur.fetchone()
         alerts.alarm(cur, SCHEMA, kind, d[0] if d else 'Склад', name or '', _parse_time(e.get('time')), card or '',
-                     str(e.get('note') or '')[:200] if kind in ('offline', 'reader_fault', 'power', 'button_stuck') else '')
+                     str(e.get('note') or '')[:200] if kind in ('offline', 'pc_offline', 'restored', 'reader_fault', 'power', 'button_stuck') else '')
+    if saved and kind in SIREN_KINDS and not e.get('_siren_done') and datetime.now(timezone.utc) - _parse_time(e.get('time')) < timedelta(minutes=2):
+        cur.execute(f'SELECT siren FROM {SCHEMA}.skud_controllers WHERE id = %s', (ctrl_id,))
+        sr = cur.fetchone()
+        sv = _siren(sr[0] if sr else None)
+        if sv['addr'] and kind in sv['kinds']:
+            cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, payload, created_by) VALUES (%s,%s,%s,%s)',
+                        (ctrl_id, 'output', json.dumps({'addr': sv['addr'], 'mode': 'pulse', 'seconds': sv['seconds']}),
+                         'Сирена: ' + KINDS.get(kind, kind)))
     if saved and kind == 'entry' and profile_id and card:
         cur.execute(f'SELECT name FROM {SCHEMA}.skud_controllers WHERE id = %s', (ctrl_id,))
         d = cur.fetchone()
@@ -297,7 +320,9 @@ def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event:
                 f'door_open = COALESCE(%s, door_open) WHERE id = %s',
                 (ip, body.get('serial'), body.get('model'), body.get('fw'), body.get('door_open'), ctrl['id']))
     if action == 'bridge_push':
-        saved = sum(1 for e in (body.get('events') or [])[:500] if isinstance(e, dict) and _save_event(cur, ctrl['id'], e))
+        local = bool(body.get('siren_local'))
+        saved = sum(1 for e in (body.get('events') or [])[:500]
+                    if isinstance(e, dict) and _save_event(cur, ctrl['id'], {**e, '_siren_done': local}))
         process_visits(cur, SCHEMA, ctrl['id'])
         return _resp(200, {'ok': True, 'saved': saved})
     if action == 'bridge_poll':
@@ -328,7 +353,7 @@ def _bridge(cur, ctrl: Dict[str, Any], action: str, body: Dict[str, Any], event:
     return _resp(400, {'error': 'Неизвестное действие'})
 
 
-GATE_FIELDS = 'id, name, gate_host, gate_port, gate_address, open_seconds, emergency_open, antipassback, timing'
+GATE_FIELDS = 'id, name, gate_host, gate_port, gate_address, open_seconds, emergency_open, antipassback, timing, siren'
 
 
 def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
@@ -350,6 +375,10 @@ def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Di
                     (json.dumps({k: params[k] for k in ('relay_tenths', 'pass_tenths', 'hold_sec', 'confirm_sec', 'at')
                                  if k in params}), r[0]))
     cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET gate_status = %s, gate_seen_at = now() WHERE id = %s', (status, r[0]))
+    up = body.get('uptime')
+    _restored(cur, r[0], 'pc', int(up) if isinstance(up, (int, float)) else None)
+    if body.get('connected'):
+        _restored(cur, r[0], 'ctrl', None)
     if not body.get('connected'):
         _offline_check(cur, r[0], r[1], 'ПК склада на связи, но контроллер двери не отвечает' + (f': {status}' if status else ''))
     seen = norm_card(str(body.get('enroll_card') or '')) if body.get('enroll_card') else ''
@@ -362,27 +391,52 @@ def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Di
         out = json.loads(_bridge(cur, ctrl, 'bridge_' + action[len('rec_gate_'):], body, event)['body'])
     out['gate'] = {'controller_id': r[0], 'name': r[1], 'host': found if (found and not r[2]) else (r[2] or ''),
                    'port': r[3] or 5000, 'address': r[4] or 1, 'open_tenths': (r[5] or 3) * 10, 'emergency': bool(r[6]),
-                   'antipassback': bool(r[7]), 'timing': _timing(r[8], r[5]), 'enroll': _enroll_waiting(cur)}
+                   'antipassback': bool(r[7]), 'timing': _timing(r[8], r[5]), 'enroll': _enroll_waiting(cur),
+                   'siren': _siren(r[9])}
     if not body.get('fast'):
         alerts.daily_once(cur, SCHEMA)
     return _resp(200, out)
 
 
-def _offline_check(cur, ctrl_id: str, door: str, reason: str) -> None:
-    """Связь с дверью пропала больше 3 минут назад → одна тревога на каждый обрыв (в журнал и в ВК)."""
-    cur.execute(f"SELECT last_seen_at FROM {SCHEMA}.skud_controllers WHERE id = %s AND last_seen_at IS NOT NULL "
-                f"AND last_seen_at < now() - interval '3 minutes'", (ctrl_id,))
+def _offline_check(cur, ctrl_id: str, door: str, reason: str, kind: str = 'offline') -> None:
+    """Связь пропала больше 3 минут назад → одна тревога на каждый обрыв (в журнал и в ВК).
+    kind: 'offline' — контроллер не отвечает ПК склада; 'pc_offline' — сам ПК склада не выходит на связь
+    (выключен, пропало электричество или интернет)."""
+    col = 'gate_seen_at' if kind == 'pc_offline' else 'last_seen_at'
+    cur.execute(f"SELECT {col}, outage_at FROM {SCHEMA}.skud_controllers WHERE id = %s AND {col} IS NOT NULL "
+                f"AND {col} < now() - interval '3 minutes'", (ctrl_id,))
     row = cur.fetchone()
-    if not row:
+    if not row or row[1]:
         return
     cur.execute(f'INSERT INTO {SCHEMA}.skud_vk_sent (key) VALUES (%s) ON CONFLICT DO NOTHING',
-                (f'offline:{ctrl_id}:{row[0].isoformat()}',))
+                (f'{kind}:{ctrl_id}:{row[0].isoformat()}',))
     if cur.rowcount == 0:
         return
+    cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET outage_at = %s, outage_kind = %s WHERE id = %s',
+                (row[0], 'pc' if kind == 'pc_offline' else 'ctrl', ctrl_id))
     now = datetime.now(timezone.utc)
     last = row[0].astimezone(timezone(timedelta(hours=3))).strftime('%d.%m %H:%M')
-    _save_event(cur, ctrl_id, {'kind': 'offline', 'time': now.isoformat(),
+    _save_event(cur, ctrl_id, {'kind': kind, 'time': now.isoformat(),
                                'note': f'{reason}. Последняя связь: {last}'}, 'system')
+
+
+def _restored(cur, ctrl_id: str, what: str, uptime: Optional[int]) -> None:
+    """Связь вернулась после тревоги — пишем, сколько её не было и что, вероятно, случилось."""
+    cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET outage_at = NULL, outage_kind = NULL '
+                f'WHERE id = %s AND outage_kind = %s RETURNING outage_at', (ctrl_id, what))
+    r = cur.fetchone()
+    if not r or not r[0]:
+        return
+    now = datetime.now(timezone.utc)
+    mins = max(1, int((now - r[0]).total_seconds() // 60))
+    if what == 'pc':
+        if uptime is not None and uptime < (now - r[0]).total_seconds() + 120:
+            why = 'ПК склада был выключен или перезагружался — вероятно, пропадало электричество'
+        else:
+            why = 'ПК склада работал, но не было интернета'
+    else:
+        why = 'Контроллер снова отвечает (если перед этим он перезапускался — пропадало его питание)'
+    _save_event(cur, ctrl_id, {'kind': 'restored', 'time': now.isoformat(), 'note': f'{why}. Не было связи ~{mins} мин'}, 'system')
 
 
 def _offline_scan(cur) -> None:
@@ -390,7 +444,7 @@ def _offline_scan(cur) -> None:
     cur.execute(f"SELECT id, name FROM {SCHEMA}.skud_controllers WHERE active AND recorder_device IS NOT NULL "
                 f"AND gate_seen_at IS NOT NULL AND gate_seen_at < now() - interval '3 minutes'")
     for cid, name in cur.fetchall():
-        _offline_check(cur, cid, name, 'ПК склада не выходит на связь (выключен или нет интернета)')
+        _offline_check(cur, cid, name, 'ПК склада не выходит на связь: выключен, пропало электричество или интернет', 'pc_offline')
 
 
 def _controllers(cur) -> List[Dict[str, Any]]:
@@ -398,7 +452,7 @@ def _controllers(cur) -> List[Dict[str, Any]]:
                 f'c.last_ip, c.fw_version, c.door_open, c.secret, c.inside_camera_id, c.pre_seconds, c.post_seconds, '
                 f'c.recorder_device, c.recorder_quality, c.recorder_seen_at, c.recorder_status, d.hostname, '
                 f'c.gate_host, c.gate_port, c.gate_address, c.gate_status, c.gate_seen_at, c.emergency_open, '
-                f'c.antipassback, c.outputs, c.timing, c.gate_params '
+                f'c.antipassback, c.outputs, c.timing, c.gate_params, c.siren, c.outage_at, c.outage_kind '
                 f'FROM {SCHEMA}.skud_controllers c LEFT JOIN {SCHEMA}.devices d ON d.device_code = c.recorder_device '
                 f'LEFT JOIN {SCHEMA}.cameras cam ON cam.id = c.camera_id WHERE c.active ORDER BY c.created_at')
     now = datetime.now(timezone.utc)
@@ -413,7 +467,8 @@ def _controllers(cur) -> List[Dict[str, Any]]:
                     'gate_status': r[23], 'gate_online': bool(r[24] and now - r[24] < timedelta(seconds=60)),
                     'emergency_open': r[25], 'antipassback': r[26],
                     'outputs': json.loads(r[27]) if r[27] else OUTPUTS_DEFAULT,
-                    'timing': _timing(r[28], r[6]), 'gate_params': json.loads(r[29]) if r[29] else None})
+                    'timing': _timing(r[28], r[6]), 'gate_params': json.loads(r[29]) if r[29] else None,
+                    'siren': _siren(r[30]), 'outage_at': r[31], 'outage_kind': r[32]})
     return out
 
 
@@ -800,11 +855,26 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
     if action == 'notify_save':
         cur_v = alerts.settings(cur, SCHEMA)
         v = {'alarms_to_employees': bool(body.get('alarms_to_employees', cur_v['alarms_to_employees'])),
-             'kinds': [k for k in body['kinds'] if k in alerts.ALERT_KINDS] if isinstance(body.get('kinds'), list) else cur_v['kinds']}
+             'kinds': [k for k in body['kinds'] if k in alerts.ALERT_KINDS] if isinstance(body.get('kinds'), list) else cur_v['kinds'],
+             'v': 2}
         cur.execute(f"INSERT INTO {SCHEMA}.app_settings (key, value, updated_by) VALUES ('skud_notify', %s, %s) "
                     f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()",
                     (json.dumps(v), user['name']))
         return _resp(200, {'ok': True, 'notify': v})
+    if action == 'siren_save':
+        v = _siren(json.dumps(body.get('siren') or {}))
+        cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET siren=%s WHERE id=%s', (json.dumps(v), body.get('id')))
+        return _resp(200, {'ok': True, 'controllers': _controllers(cur)})
+    if action in ('siren_test', 'siren_stop'):
+        cur.execute(f'SELECT siren FROM {SCHEMA}.skud_controllers WHERE id=%s', (body.get('id'),))
+        row = cur.fetchone()
+        sv = _siren(row[0] if row else None)
+        if not sv['addr']:
+            return _resp(400, {'error': 'Сначала выберите выход, к которому подключена сирена'})
+        cur.execute(f'INSERT INTO {SCHEMA}.skud_commands (controller_id, operation, payload, created_by) VALUES (%s,%s,%s,%s)',
+                    (body['id'], 'output', json.dumps({'addr': sv['addr'], 'mode': 'off' if action == 'siren_stop' else 'pulse',
+                                                       'seconds': 3}), user['name']))
+        return _resp(200, {'ok': True, 'controllers': _controllers(cur)})
     if action in ('antipassback', 'outputs_save', 'output'):
         cur.execute(f'SELECT outputs FROM {SCHEMA}.skud_controllers WHERE id=%s', (body.get('id'),))
         row = cur.fetchone()
@@ -889,6 +959,9 @@ def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if action.startswith('rec_gate_'):
                 return _gate(cur, dev, action, body, event)
             return _resp(400, {'error': 'Неизвестное действие'})
+        if action == 'watch':
+            _offline_scan(cur)
+            return _resp(200, {'ok': True})
         user = _site_user(cur, event)
         if not user:
             return _resp(401, {'error': 'Нужно войти в систему'})
@@ -923,9 +996,38 @@ def _finders(body, event, qs):
 _wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())
 
 
+def _watch_all(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """Раз в минуту (cron): проверка связи с дверью во всех организациях — тревога придёт даже ночью."""
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    conn.autocommit = True
+    n = 0
+    try:
+        with conn.cursor() as cur:
+            schemas = _tenant.all_schemas(cur)
+    finally:
+        conn.close()
+    for sch in schemas:
+        globals()['SCHEMA'] = sch
+        try:
+            _handler_impl({**event, 'body': json.dumps({'action': 'watch'})}, context)
+            n += 1
+        except Exception:
+            pass
+        finally:
+            globals()['SCHEMA'] = _tenant.MAIN
+    return _resp(200, {'ok': True, 'checked': n})
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''СКУД (дверь склада): журнал проходов, ключ-карты сотрудников (запись, привязка, блокировка,
     удаление), открытие двери с сайта. Контроллер Gate-4000-Ethernet связывается через «мост»
     (программа в локальной сети), который присылает события и забирает карты/команды по ключу X-Skud-Key.
     Данные каждой организации хранятся отдельно: схема выбирается по токену.'''
+    if event.get('httpMethod') == 'POST' and len(str(event.get('body') or '')) < 100:
+        try:
+            if json.loads(event.get('body') or '{}').get('action') == 'watch':
+                return _watch_all(event, context)
+        except (ValueError, AttributeError):
+            pass
     return _wrapped(event, context)
+

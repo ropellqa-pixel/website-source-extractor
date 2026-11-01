@@ -10,12 +10,14 @@ OPEN_ROLES = ('director', 'deputy_director', 'senior_employee')
 SETTINGS_ROLES = ('director', 'deputy_director')
 ALERTS = [('forced', 'Взлом двери'), ('held_open', 'Дверь не закрыта'), ('denied_blocked', 'Заблок. карта'),
           ('denied', 'Чужая карта'), ('reader_fault', 'Считыватель'), ('button_stuck', 'Залипла кнопка'),
-          ('power', 'Питание'), ('offline', 'Нет связи')]
-ALERT_DEFAULT = ['forced', 'held_open', 'denied_blocked', 'reader_fault', 'button_stuck', 'power', 'offline']
+          ('power', 'Питание контроллера'), ('offline', 'Контроллер молчит'), ('pc_offline', 'ПК/свет выключен'),
+          ('restored', 'Связь вернулась')]
+ALERT_DEFAULT = ['forced', 'held_open', 'denied_blocked', 'reader_fault', 'button_stuck', 'power', 'offline', 'pc_offline', 'restored']
 KIND_RU = {'entry': 'вход по карте', 'exit': 'выход по карте', 'exit_button': 'выход по кнопке', 'denied': 'отказ',
            'denied_blocked': 'заблокированная карта', 'remote_open': 'открыта удалённо', 'forced': 'ВЗЛОМ',
            'held_open': 'дверь не закрыта', 'door_closed': 'дверь закрыта', 'power': 'перезапуск контроллера',
-           'reader_fault': 'неисправен считыватель', 'button_stuck': 'залипла кнопка', 'offline': 'нет связи', 'other': 'событие'}
+           'reader_fault': 'неисправен считыватель', 'button_stuck': 'залипла кнопка', 'offline': 'контроллер не отвечает',
+           'pc_offline': 'ПК склада выключен', 'restored': 'связь восстановлена', 'other': 'событие'}
 
 
 def _btn(label: str, cmd: str, color: str = 'secondary', **extra) -> Dict[str, Any]:
@@ -88,7 +90,9 @@ def _settings(cur, schema: str) -> Dict[str, Any]:
     r = cur.fetchone()
     v = (r[0] if r and isinstance(r[0], dict) else json.loads(r[0]) if r and r[0] else {}) or {}
     kinds = v.get('kinds') if isinstance(v.get('kinds'), list) else list(ALERT_DEFAULT)
-    return {'alarms_to_employees': bool(v.get('alarms_to_employees', False)), 'kinds': kinds}
+    if 'offline' in kinds and int(v.get('v') or 1) < 2:
+        kinds = kinds + [k for k in ('pc_offline', 'restored') if k not in kinds]
+    return {'alarms_to_employees': bool(v.get('alarms_to_employees', False)), 'kinds': kinds, 'v': 2}
 
 
 def _save_settings(cur, schema: str, v: Dict[str, Any], by: str) -> None:
@@ -115,7 +119,7 @@ def _events_text(rows) -> str:
         line = f"{_t(t)} — {KIND_RU.get(kind, kind)}"
         if name or card:
             line += f": {name or 'карта ' + card}"
-        if kind in ('remote_open', 'other', 'power') and note:
+        if kind in ('remote_open', 'other', 'power', 'offline', 'pc_offline', 'restored') and note:
             line += f" ({note[:60]})"
         out.append(line)
     return '\n'.join(out) or 'Событий нет'
@@ -226,12 +230,17 @@ def handle(cur, schema: str, vk_id: Any, text: str, payload: Dict[str, Any]) -> 
         _save_settings(cur, schema, st, u['name'] + ' (ВК)')
         cmd = 'alarm_settings'
     if cmd == 'alarm_settings':
-        btns = [_btn(('✅ ' if k in st['kinds'] else '▫ ') + label, 'alarm_toggle', 'positive' if k in st['kinds'] else 'secondary', k=k)
-                for k, label in ALERTS]
+        page = 1 if int(payload.get('p') or 0) else 0
+        part = ALERTS[:6] if page == 0 else ALERTS[6:]
+        btns = [_btn(('✅ ' if k in st['kinds'] else '▫ ') + label, 'alarm_toggle', 'positive' if k in st['kinds'] else 'secondary',
+                     k=k, p=page) for k, label in part]
         rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
-        rows.append([_btn(('✅ ' if st['alarms_to_employees'] else '▫ ') + 'Тревоги и сотрудникам', 'emp_toggle')])
-        return ('⚙ Какие тревоги присылать руководству в ВК (нажмите, чтобы включить/выключить):', _inline(rows[:5]),
-                [])
+        if page == 0:
+            rows.append([_btn('Ещё тревоги →', 'alarm_settings', p=1)])
+        else:
+            rows.append([_btn(('✅ ' if st['alarms_to_employees'] else '▫ ') + 'Тревоги и сотрудникам', 'emp_toggle', p=1)])
+            rows.append([_btn('← Назад', 'alarm_settings', p=0)])
+        return (f"⚙ Какие тревоги присылать в ВК ({page + 1}/2). Нажмите, чтобы включить или выключить:", _inline(rows), [])
 
     if cmd == 'emergency' and payload.get('on') and not payload.get('sure'):
         return ('🚨 Аварийное открытие: дверь будет открыта ПОСТОЯННО, пока его не выключат. Включить?',

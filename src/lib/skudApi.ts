@@ -10,8 +10,21 @@ export const ALARM_KINDS: Record<string, string> = {
   reader_fault: 'Неисправность считывателя',
   button_stuck: 'Залипла кнопка выхода',
   power: 'Перезапуск / питание контроллера',
-  offline: 'Пропала связь с дверью',
+  offline: 'Контроллер не отвечает',
+  pc_offline: 'ПК склада выключен / нет электричества',
+  restored: 'Связь восстановлена',
 };
+
+export const SIREN_KINDS: Record<string, string> = {
+  forced: 'Дверь взломана',
+  held_open: 'Дверь не закрыта вовремя',
+  denied_blocked: 'Заблокированная карта',
+  denied: 'Чужая / неизвестная карта',
+  reader_fault: 'Неисправность считывателя',
+  button_stuck: 'Залипла кнопка выхода',
+};
+
+export interface SkudSiren { addr: number; seconds: number; kinds: string[] }
 
 export interface SkudEvent {
   id: number;
@@ -95,6 +108,9 @@ export interface SkudController {
   antipassback: boolean;
   outputs: SkudOutput[];
   timing: SkudTiming;
+  siren: SkudSiren;
+  outage_at: string | null;
+  outage_kind: 'pc' | 'ctrl' | null;
   gate_params: { relay_tenths?: number; pass_tenths?: number; hold_sec?: number; confirm_sec?: number; at?: string } | null;
 }
 

@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import AlarmTest from './AlarmTest';
+import SirenPanel from './SirenPanel';
 import Icon from '@/components/ui/icon';
 import { daysLabel, skudCall, WEEKDAYS, type SkudCard, type SkudController, type SkudOutput, type SkudSchedule } from '@/lib/skudApi';
 import { ALARM_KINDS } from '@/lib/skudApi';
@@ -130,6 +131,8 @@ export default function AccessPanel({ open, onOpenChange, controller, schedules,
               {outs && <Button size="sm" className="w-full" onClick={async () => { if (await call('outputs_save', { id: controller.id, outputs: outs })) setOuts(null); }}>Сохранить названия</Button>}
             </section>
           )}
+
+          {controller && <SirenPanel controller={controller} onChanged={onControllers} />}
 
           <section className="space-y-2 rounded-xl border p-3">
             <h3 className="text-sm font-semibold">Уведомления в ВК о тревогах</h3>
