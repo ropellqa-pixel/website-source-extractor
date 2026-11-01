@@ -27,7 +27,7 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.html [L]
 </IfModule>
 <IfModule mod_headers.c>
-<FilesMatch "(index\\.html|sw\\.js|manifest\\.webmanifest)$">
+<FilesMatch "(index\\.html|sw\\.js|manifest[^/]*\\.webmanifest)$">
 Header set Cache-Control "no-cache"
 </FilesMatch>
 </IfModule>

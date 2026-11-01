@@ -1,0 +1,1 @@
+ALTER TABLE skud_controllers ADD COLUMN IF NOT EXISTS guard text;

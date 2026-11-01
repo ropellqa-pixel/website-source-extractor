@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+
 type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
 
 let deferred: InstallEvent | null = null;
@@ -39,4 +41,16 @@ export function startPwa(): void {
   if ('serviceWorker' in navigator && window.isSecureContext && !devHost) {
     window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
   }
+}
+
+/** Подменяет манифест страницы (для ПИН-ссылок), при уходе со страницы возвращает обычный. */
+export function useManifest(href: string | null): void {
+  useEffect(() => {
+    if (!href) return;
+    const link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+    if (!link) return;
+    const prev = link.getAttribute('href') || '/manifest.webmanifest';
+    link.setAttribute('href', href);
+    return () => { link.setAttribute('href', prev); };
+  }, [href]);
 }

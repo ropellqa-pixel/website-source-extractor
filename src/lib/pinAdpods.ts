@@ -32,3 +32,9 @@ export function getAdpodBySlug(slug: string | null | undefined): PinAdpod | unde
   if (!slug) return undefined;
   return PIN_ADPODS.find(a => a.slug === slug);
 }
+
+/** Свой манифест у каждой ПИН-ссылки: установленное приложение открывается сразу на этой ссылке. */
+export function adpodManifest(slug: string | null | undefined): string | null {
+  const i = PIN_ADPODS.findIndex(a => a.slug === slug);
+  return i >= 0 ? `/manifest-pin${i + 1}.webmanifest` : null;
+}

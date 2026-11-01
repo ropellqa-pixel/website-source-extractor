@@ -13,7 +13,10 @@ export const ALARM_KINDS: Record<string, string> = {
   offline: 'Контроллер не отвечает',
   pc_offline: 'ПК склада выключен / нет электричества',
   restored: 'Связь восстановлена',
+  guard: 'Открытие двери, когда склад на охране',
 };
+
+export interface SkudGuard { on: boolean; manual: boolean | null; schedule: boolean; from: string; to: string; days: number; siren: boolean; by?: string | null }
 
 export const SIREN_KINDS: Record<string, string> = {
   forced: 'Дверь взломана',
@@ -111,6 +114,7 @@ export interface SkudController {
   siren: SkudSiren;
   outage_at: string | null;
   outage_kind: 'pc' | 'ctrl' | null;
+  guard: SkudGuard;
   gate_params: { relay_tenths?: number; pass_tenths?: number; hold_sec?: number; confirm_sec?: number; at?: string } | null;
 }
 

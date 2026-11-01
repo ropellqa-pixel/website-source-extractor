@@ -17,6 +17,7 @@ const STYLE: Record<string, { icon: string; cls: string }> = {
   pc_offline: { icon: 'PowerOff', cls: 'text-red-600 bg-red-500/10' },
   power: { icon: 'Zap', cls: 'text-amber-600 bg-amber-500/10' },
   restored: { icon: 'PlugZap', cls: 'text-emerald-600 bg-emerald-500/10' },
+  guard: { icon: 'ShieldAlert', cls: 'text-red-600 bg-red-500/10' },
 };
 
 /** Сколько человек пробыл на складе: от входа до ближайшего следующего выхода (в пределах 12 ч). */

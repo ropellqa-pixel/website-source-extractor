@@ -1,0 +1,43 @@
+{
+  "name": "АнодБИЗ — вход по ПИН (АдПод 2)",
+  "short_name": "АнодБИЗ ПИН 2",
+  "description": "АнодБИЗ: смены, табель, склад, СКУД и чат сотрудников",
+  "lang": "ru",
+  "id": "/pin-cod-tutokenswe-ruidfal-manu-direst",
+  "start_url": "/pin-cod-tutokenswe-ruidfal-manu-direst",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
+  "background_color": "#171e30",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

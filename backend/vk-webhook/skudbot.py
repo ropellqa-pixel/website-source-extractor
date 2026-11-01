@@ -11,13 +11,13 @@ SETTINGS_ROLES = ('director', 'deputy_director')
 ALERTS = [('forced', 'Взлом двери'), ('held_open', 'Дверь не закрыта'), ('denied_blocked', 'Заблок. карта'),
           ('denied', 'Чужая карта'), ('reader_fault', 'Считыватель'), ('button_stuck', 'Залипла кнопка'),
           ('power', 'Питание контроллера'), ('offline', 'Контроллер молчит'), ('pc_offline', 'ПК/свет выключен'),
-          ('restored', 'Связь вернулась')]
-ALERT_DEFAULT = ['forced', 'held_open', 'denied_blocked', 'reader_fault', 'button_stuck', 'power', 'offline', 'pc_offline', 'restored']
+          ('restored', 'Связь вернулась'), ('guard', 'Открытие на охране')]
+ALERT_DEFAULT = ['forced', 'held_open', 'denied_blocked', 'reader_fault', 'button_stuck', 'power', 'offline', 'pc_offline', 'restored', 'guard']
 KIND_RU = {'entry': 'вход по карте', 'exit': 'выход по карте', 'exit_button': 'выход по кнопке', 'denied': 'отказ',
            'denied_blocked': 'заблокированная карта', 'remote_open': 'открыта удалённо', 'forced': 'ВЗЛОМ',
            'held_open': 'дверь не закрыта', 'door_closed': 'дверь закрыта', 'power': 'перезапуск контроллера',
            'reader_fault': 'неисправен считыватель', 'button_stuck': 'залипла кнопка', 'offline': 'контроллер не отвечает',
-           'pc_offline': 'ПК склада выключен', 'restored': 'связь восстановлена', 'other': 'событие'}
+           'pc_offline': 'ПК склада выключен', 'restored': 'связь восстановлена', 'guard': 'ОТКРЫТИЕ НА ОХРАНЕ', 'other': 'событие'}
 
 
 def _btn(label: str, cmd: str, color: str = 'secondary', **extra) -> Dict[str, Any]:
@@ -45,7 +45,8 @@ def keyboard(u: Optional[Dict[str, Any]]) -> str:
         rows = [[_btn('🔓 Открыть дверь склада', 'open', 'positive')],
                 [_btn('📊 Сводка', 'summary', 'primary'), _btn('👥 Кто на складе', 'inside', 'primary')],
                 [_btn('🚨 Тревоги', 'alarms'), _btn('📋 Журнал', 'journal')],
-                [_btn('🔌 Связь с дверью', 'link'), _btn('💳 Карты', 'cards')]]
+                [_btn('🔌 Связь с дверью', 'link'), _btn('💳 Карты', 'cards')],
+                [_btn('🛡 Охрана склада', 'guard', 'negative')]]
         if u['can_set']:
             rows.append([_btn('⚙ Настройки тревог', 'alarm_settings'), _btn('🛠 Управление дверью', 'door_settings')])
         rows.append([_btn('🚶 Мои проходы', 'mine'), _btn('❓ Помощь', 'help')])
@@ -85,6 +86,31 @@ def _link_text(c: Dict[str, Any]) -> str:
     return f"🔴 ПК склада не на связи (последний раз {_t(c['pc_seen'])})"
 
 
+def _guard_state(g: Dict[str, Any]) -> bool:
+    """То же правило, что на сервере СКУД: ручное включение действует до смены состояния по расписанию."""
+    def by_sched(t: datetime) -> bool:
+        if not g.get('schedule'):
+            return False
+        t = t.astimezone(MSK)
+        f, to, days, hm = g.get('from', '21:00'), g.get('to', '08:00'), int(g.get('days') or 127), t.strftime('%H:%M')
+        if f <= to:
+            return bool(days & (1 << t.weekday())) and f <= hm < to
+        if hm >= f:
+            return bool(days & (1 << t.weekday()))
+        return hm < to and bool(days & (1 << ((t.weekday() - 1) % 7)))
+    now = datetime.now(timezone.utc)
+    sched = by_sched(now)
+    if g.get('manual') not in (True, False):
+        return sched
+    try:
+        at = datetime.fromisoformat(str(g.get('manual_at')))
+    except ValueError:
+        return sched
+    if g.get('schedule') and by_sched(at) != sched:
+        return sched
+    return bool(g['manual'])
+
+
 def _settings(cur, schema: str) -> Dict[str, Any]:
     cur.execute(f"SELECT value FROM {schema}.app_settings WHERE key = 'skud_notify'")
     r = cur.fetchone()
@@ -92,7 +118,9 @@ def _settings(cur, schema: str) -> Dict[str, Any]:
     kinds = v.get('kinds') if isinstance(v.get('kinds'), list) else list(ALERT_DEFAULT)
     if 'offline' in kinds and int(v.get('v') or 1) < 2:
         kinds = kinds + [k for k in ('pc_offline', 'restored') if k not in kinds]
-    return {'alarms_to_employees': bool(v.get('alarms_to_employees', False)), 'kinds': kinds, 'v': 2}
+    if int(v.get('v') or 1) < 3 and 'guard' not in kinds:
+        kinds = kinds + ['guard']
+    return {'alarms_to_employees': bool(v.get('alarms_to_employees', False)), 'kinds': kinds, 'v': 3}
 
 
 def _save_settings(cur, schema: str, v: Dict[str, Any], by: str) -> None:
@@ -119,7 +147,7 @@ def _events_text(rows) -> str:
         line = f"{_t(t)} — {KIND_RU.get(kind, kind)}"
         if name or card:
             line += f": {name or 'карта ' + card}"
-        if kind in ('remote_open', 'other', 'power', 'offline', 'pc_offline', 'restored') and note:
+        if kind in ('remote_open', 'other', 'power', 'offline', 'pc_offline', 'restored', 'guard') and note:
             line += f" ({note[:60]})"
         out.append(line)
     return '\n'.join(out) or 'Событий нет'
@@ -145,6 +173,7 @@ def handle(cur, schema: str, vk_id: Any, text: str, payload: Dict[str, Any]) -> 
         if u['can_open']:
             lines.append('🔓 «Открыть дверь склада» — откроет замок через ПК склада (с подтверждением), запись попадёт в журнал.')
             lines.append('📊 Сводка, 👥 кто на складе, 🚨 тревоги, 📋 журнал, 🔌 связь с дверью, 💳 карты.')
+            lines.append('🛡 «Охрана склада» — поставить или снять склад с охраны: любое открытие двери на охране — тревога и сирена.')
         if u['can_set']:
             lines.append('⚙ Настройки тревог и 🛠 управление дверью — аварийное открытие, время замка, часы, карты.')
         lines.append('🚶 «Мои проходы» — ваши входы и выходы.')
@@ -172,6 +201,26 @@ def handle(cur, schema: str, vk_id: Any, text: str, payload: Dict[str, Any]) -> 
                 else f"⚠ Сейчас нет связи с дверью: {_link_text(c)}. Если связь появится в течение минуты — дверь откроется.")
         return (f"🔓 {note}\nЗаписано в журнал.",
                 None, [(_management_vk(cur, schema, vk_id), f"🔓 Дверь «{c['name']}» открыта из ВК: {u['name']}, {_t(datetime.now(timezone.utc), '%H:%M:%S')}")])
+    if cmd in ('guard', 'guard_on', 'guard_off'):
+        cur.execute(f'SELECT guard FROM {schema}.skud_controllers WHERE id = %s', (c['id'],))
+        raw = (cur.fetchone() or [None])[0]
+        g = json.loads(raw) if raw else {}
+        on_now = _guard_state(g)
+        if cmd in ('guard_on', 'guard_off'):
+            on = cmd == 'guard_on'
+            g.update({'manual': on, 'manual_at': datetime.now(timezone.utc).isoformat(), 'by': u['name'] + ' (ВК)'})
+            cur.execute(f'UPDATE {schema}.skud_controllers SET guard = %s WHERE id = %s', (json.dumps(g, ensure_ascii=False), c['id']))
+            if on != on_now:
+                cur.execute(f'INSERT INTO {schema}.skud_events (controller_id, event_time, event_kind, granted, person_name, note, source) '
+                            f"VALUES (%s, now(), 'other', false, %s, %s, 'guard')",
+                            (c['id'], u['name'], 'Склад поставлен на охрану (ВК)' if on else 'Склад снят с охраны (ВК)'))
+            msg = f"{'🛡 Склад «' + c['name'] + '» поставлен на охрану' if on else '🔓 Склад «' + c['name'] + '» снят с охраны'} — {u['name']}"
+            return msg + ('\nЛюбое открытие двери — тревога в ВК' + (' и сирена.' if g.get('siren', True) else '.') if on else ''), None, \
+                [(_management_vk(cur, schema, vk_id), msg)]
+        sched = (f"по расписанию {g.get('from', '21:00')}–{g.get('to', '08:00')}" if g.get('schedule') else 'расписание не задано')
+        return (f"🛡 Охрана склада: {'ВКЛЮЧЕНА' if on_now else 'снята'}\nАвтоматически: {sched}"
+                + (f"\nПоследний раз вручную: {g.get('by')}" if g.get('by') else ''),
+                _inline([[_btn('🛡 Поставить на охрану', 'guard_on', 'negative') if not on_now else _btn('🔓 Снять с охраны', 'guard_off', 'positive')]]), [])
     if cmd == 'link':
         return (f"🔌 {_link_text(c)}\nКонтроллер отвечал: {_t(c['last_seen'], '%d.%m %H:%M:%S')}\n"
                 f"ПК склада: {_t(c['pc_seen'], '%d.%m %H:%M:%S')}\nСостояние: {c['status'] or '—'}"

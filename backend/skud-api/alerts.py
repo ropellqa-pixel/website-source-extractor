@@ -20,8 +20,9 @@ ALERT_KINDS = {'forced': 'Дверь склада взломана!', 'held_open
                'denied_blocked': 'Попытка пройти по заблокированной карте', 'denied': 'Отказ в доступе (чужая или неизвестная карта)',
                'reader_fault': 'Неисправность считывателя', 'button_stuck': 'Залипла кнопка выхода',
                'power': 'Перезапуск / пропадание питания контроллера', 'offline': 'Контроллер двери не отвечает',
-               'pc_offline': 'ПК склада выключен — нет электричества или интернета', 'restored': 'Связь с дверью восстановлена'}
-ALERT_DEFAULT = ['forced', 'held_open', 'denied_blocked', 'reader_fault', 'button_stuck', 'power', 'offline', 'pc_offline', 'restored']
+               'pc_offline': 'ПК склада выключен — нет электричества или интернета', 'restored': 'Связь с дверью восстановлена',
+               'guard': '🛡 ОТКРЫТИЕ ДВЕРИ, КОГДА СКЛАД НА ОХРАНЕ'}
+ALERT_DEFAULT = ['forced', 'held_open', 'denied_blocked', 'reader_fault', 'button_stuck', 'power', 'offline', 'pc_offline', 'restored', 'guard']
 MGMT_DEPARTMENT = 'Руководство'
 NOTIFY_ROLES = ('director', 'deputy_director', 'senior_employee')
 EXPIRY_ROLES = ('deputy_director', 'senior_employee')
@@ -108,7 +109,9 @@ def settings(cur, schema: str) -> Dict[str, Any]:
     kinds = [k for k in kinds if k in ALERT_KINDS] if isinstance(kinds, list) else list(ALERT_DEFAULT)
     if 'offline' in kinds and int(v.get('v') or 1) < 2:
         kinds += [k for k in ('pc_offline', 'restored') if k not in kinds]
-    return {'alarms_to_employees': bool(v.get('alarms_to_employees', False)), 'kinds': kinds, 'v': 2}
+    if int(v.get('v') or 1) < 3 and 'guard' not in kinds:
+        kinds.append('guard')
+    return {'alarms_to_employees': bool(v.get('alarms_to_employees', False)), 'kinds': kinds, 'v': 3}
 
 
 def management(cur, schema: str) -> List[str]:

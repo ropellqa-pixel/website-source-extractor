@@ -121,6 +121,11 @@ export default function Skud() {
           <span className={`h-2 w-2 rounded-full ${ctrl?.online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
           {ctrl ? `${ctrl.name}: ${ctrl.online ? 'на связи' : 'не на связи'}` : 'Добавить контроллер'}
         </button>
+        {ctrl?.guard?.on && (
+          <button onClick={() => isManager && setAccessOpen(true)} className="flex items-center gap-2 rounded-xl bg-red-600 px-3 py-2 text-sm font-medium text-white">
+            <Icon name="ShieldAlert" size={16} />Склад на охране
+          </button>
+        )}
         {ctrl?.outage_at && (
           <button onClick={() => isManager && setCtrlOpen(true)} className="flex items-center gap-2 rounded-xl bg-red-600 px-3 py-2 text-sm font-medium text-white">
             <Icon name={ctrl.outage_kind === 'pc' ? 'PowerOff' : 'Unplug'} fallback="TriangleAlert" size={16} />

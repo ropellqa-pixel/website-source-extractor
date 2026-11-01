@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import AlarmTest from './AlarmTest';
 import SirenPanel from './SirenPanel';
+import GuardPanel from './GuardPanel';
 import Icon from '@/components/ui/icon';
 import { daysLabel, skudCall, WEEKDAYS, type SkudCard, type SkudController, type SkudOutput, type SkudSchedule } from '@/lib/skudApi';
 import { ALARM_KINDS } from '@/lib/skudApi';
@@ -132,6 +133,7 @@ export default function AccessPanel({ open, onOpenChange, controller, schedules,
             </section>
           )}
 
+          {controller && <GuardPanel controller={controller} onChanged={onControllers} />}
           {controller && <SirenPanel controller={controller} onChanged={onControllers} />}
 
           <section className="space-y-2 rounded-xl border p-3">

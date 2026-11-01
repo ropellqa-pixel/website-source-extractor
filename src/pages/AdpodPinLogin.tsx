@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { Zap, Loader2 } from 'lucide-react';
-import { getAdpodBySlug } from '../lib/pinAdpods';
+import { adpodManifest, getAdpodBySlug } from '../lib/pinAdpods';
+import { useManifest } from '../lib/pwa';
+import InstallAppButton from '@/components/shell/InstallAppButton';
 
 interface AdpodPinLoginProps {
   /** Слаг адресного поддомена (АдПод) — пин-код должен быть привязан именно к нему. */
@@ -23,6 +25,7 @@ export default function AdpodPinLogin({ adpodSlug }: AdpodPinLoginProps) {
   const navigate = useNavigate();
 
   const adpod = getAdpodBySlug(adpodSlug);
+  useManifest(adpodManifest(adpodSlug));
 
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,6 +134,7 @@ export default function AdpodPinLogin({ adpodSlug }: AdpodPinLoginProps) {
             </button>
           </form>
         </div>
+        <div className="mt-4"><InstallAppButton compact /></div>
       </div>
     </div>
   );
