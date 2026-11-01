@@ -50,6 +50,8 @@ namespace AbizShell
         private DateTime _fullCardsAt = DateTime.MinValue;
         private DateTime _flashAt = DateTime.MinValue;
         private string? _foundHost;
+        private string? _lastErr;
+        private int? _ackLocal;
         private int _foundPort;
 
         private static string DataDir => Path.Combine(
@@ -145,7 +147,7 @@ namespace AbizShell
             if (events.Count == 0) return false;
             var res = await PostAsync(new { action = "rec_gate_push", connected = true, fast = true, events }, ct);
             if (res.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True)
-                c.Write(0x00, 0xD0, 0x000A, new[] { (byte)(newLower >> 8), (byte)(newLower & 0xFF) });
+                AckEvents(c, newLower);
             return true;
         }
 
@@ -173,6 +175,24 @@ namespace AbizShell
             SaveJson("learned.json", learned);
             _status = "поймана карта " + _enrollCard;
             return true;
+        }
+
+        /// <summary>
+        /// Сдвиг указателя прочитанных событий. Часть прошивок принимает запись только в сетевом режиме —
+        /// пробуем оба способа; если не вышло, запоминаем позицию у себя, чтобы не слать те же события по кругу.
+        /// </summary>
+        private void AckEvents(GateClient c, ushort newLower)
+        {
+            var data = new[] { (byte)(newLower >> 8), (byte)(newLower & 0xFF) };
+            try { c.Write(0x00, 0xD0, 0x000A, data); _ackLocal = null; return; }
+            catch (GateException) { }
+            try
+            {
+                c.SetNetworkMode(true);
+                try { c.Write(0x00, 0xD0, 0x000A, data); _ackLocal = null; return; }
+                finally { try { c.SetNetworkMode(false); } catch (GateException) { } }
+            }
+            catch (GateException) { _ackLocal = newLower; }
         }
 
         private void ApplyTiming(JsonElement gate)
@@ -340,11 +360,31 @@ namespace AbizShell
                     SetClock(c);
                     return;
                 }
-                catch { c.Dispose(); }
+                catch (Exception ex) { c.Dispose(); _lastErr = ex.Message; }
             }
             _status = string.IsNullOrEmpty(_host)
                 ? "контроллер не найден в сети — укажите его IP на сайте (СКУД → Контроллер)"
-                : $"нет связи с {_host}:{_port}";
+                : $"нет связи с {_host}:{_port} — {_lastErr ?? "нет ответа"}. " + PingHint(_host);
+        }
+
+        /// <summary>Подсказка для сайта: отвечает ли адрес на ping и в той ли он сети, что ПК склада.</summary>
+        private static string PingHint(string host)
+        {
+            try
+            {
+                using var p = new Ping();
+                bool alive = p.Send(host, 800).Status == IPStatus.Success;
+                var nets = NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(n => n.OperationalStatus == OperationalStatus.Up)
+                    .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+                    .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a.Address))
+                    .Select(a => a.Address.ToString()).ToList();
+                string pre = string.Join(".", host.Split('.').Take(3)) + ".";
+                string where = nets.Any(n => n.StartsWith(pre)) ? "" : $" ПК склада в другой сети ({string.Join(", ", nets)}).";
+                return (alive ? "Адрес отвечает на ping, но порт закрыт — контроллер занят другой программой или порт другой." 
+                              : "Адрес не отвечает на ping — проверьте питание и кабель контроллера, его IP.") + where;
+            }
+            catch { return ""; }
         }
 
         /// <summary>Поиск контроллера: все адреса локальных сетей ПК (/24), открытый порт 5000.</summary>
@@ -652,6 +692,11 @@ namespace AbizShell
             var ptr = c.Read(0x00, 0xD0, 0x0008, 4);
             int upper = (ptr[0] << 8) | ptr[1];
             int lower = (ptr[2] << 8) | ptr[3];
+            if (_ackLocal is int al)
+            {
+                bool inRange = upper >= lower ? al >= lower && al <= upper : al >= lower || al <= upper;
+                if (inRange) lower = al; else _ackLocal = null;
+            }
             newLower = (ushort)lower;
             var events = new List<object>();
             if (upper == lower) return events;

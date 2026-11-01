@@ -5,6 +5,7 @@ import re
 import urllib.request
 import urllib.parse
 import psycopg2
+import skudbot
 from datetime import timedelta, timezone
 from typing import Any, Dict
 
@@ -31,15 +32,46 @@ def vk_call(method: str, params: Dict[str, Any]) -> Dict[str, Any]:
     return result.get('response')
 
 
-def reply(user_id: int, text: str) -> None:
+def reply(user_id: int, text: str, keyboard: str = '') -> None:
+    """Каждое сообщение бота несёт постоянную клавиатуру — кнопки у человека не пропадают."""
+    if not keyboard:
+        try:
+            conn = _db_conn()
+            try:
+                with conn.cursor() as cur:
+                    keyboard = skudbot.keyboard(skudbot.who(cur, SCHEMA, user_id))
+            finally:
+                conn.close()
+        except Exception:
+            keyboard = ''
     try:
         vk_call('messages.send', {
             'user_id': user_id,
-            'message': text,
+            'message': text[:4000],
             'random_id': random.randint(1, 2_147_483_647),
+            **({'keyboard': keyboard} if keyboard else {}),
         })
     except Exception:
         pass
+
+
+def _bot(from_id: int, text: str, payload: Dict[str, Any]) -> None:
+    conn = _db_conn()
+    try:
+        with conn.cursor() as cur:
+            answer, inline, broadcasts = skudbot.handle(cur, SCHEMA, from_id, text, payload)
+            menu = skudbot.keyboard(skudbot.who(cur, SCHEMA, from_id))
+            conn.commit()
+    finally:
+        conn.close()
+    if inline:
+        reply(from_id, answer, inline)
+        reply(from_id, 'Меню всегда внизу 👇', menu)
+    else:
+        reply(from_id, answer, menu)
+    for ids, msg in broadcasts:
+        for vid in ids:
+            reply(vid, msg)
 
 
 def _block_card(tok: str, vk_user_id: Any) -> str:
@@ -75,8 +107,8 @@ def _block_card(tok: str, vk_user_id: Any) -> str:
 
 
 def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    '''Принимает Callback API сообщества VK: подтверждает адрес сервера и обрабатывает
-    входящие сообщения с 6-значным кодом привязки сотрудника к личному кабинету АнодБИЗ.'''
+    '''Callback API сообщества VK: привязка сотрудника по 6-значному коду и бот СКУД с постоянными кнопками
+    (открыть дверь склада, сводка, тревоги, журнал, настройки для руководства).'''
     plain_headers = {'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*'}
 
     if event.get('httpMethod') == 'OPTIONS':
@@ -126,6 +158,14 @@ def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         message = (body.get('object') or {}).get('message') or {}
         text = (message.get('text') or '').strip()
         from_id = message.get('from_id')
+        payload = message.get('payload') or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
 
         if from_id and CODE_RE.match(text):
             conn = _db_conn()
@@ -149,13 +189,13 @@ def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                             (profile_id, from_id),
                         )
                         conn.commit()
-                        reply(from_id, '✅ Готово! Ваш профиль в АнодБИЗ привязан к VK. Сюда будут приходить табель и расчёт зарплаты.')
+                        reply(from_id, '✅ Готово! Ваш профиль в АнодБИЗ привязан к VK. Сюда будут приходить табель, расчёт зарплаты и уведомления СКУД. Кнопки — внизу.')
                     else:
                         reply(from_id, '⚠️ Код не найден или уже использован. Получите новый код в личном кабинете и отправьте его сюда ещё раз.')
             finally:
                 conn.close()
-        elif from_id:
-            reply(from_id, 'Здравствуйте! Чтобы привязать аккаунт, отправьте сюда 6-значный код из личного кабинета АнодБИЗ (раздел «Сотрудники» → «Привязка VK»).')
+        elif from_id and int(from_id) > 0:
+            _bot(int(from_id), text, payload)
 
     return {'statusCode': 200, 'headers': plain_headers, 'body': 'ok'}
 
@@ -175,7 +215,10 @@ def _finders(body, event, qs):
         return [('skud_block_tokens', 'token = %s', [tok])] if tok else []
     msg = ((body.get('object') or {}).get('message') or {})
     text = str(msg.get('text') or '').strip()
-    return [('vk_bind_codes', "code = %s AND status = 'pending'", [text])] if text else []
+    out = [('vk_bind_codes', "code = %s AND status = 'pending'", [text])] if CODE_RE.match(text) else []
+    if msg.get('from_id'):
+        out.append(('vk_bindings', "vk_user_id = %s AND status = 'confirmed'", [int(msg['from_id'])]))
+    return out
 
 
 _wrapped = _tenant.wrap(globals(), _handler_impl, _finders, ())

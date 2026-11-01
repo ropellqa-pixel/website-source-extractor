@@ -143,9 +143,13 @@ def alarm(cur, schema: str, kind: str, door: str, name: str, when: datetime, car
     if name or card:
         text += f'\nКарта: {name or "не записана"}{f" ({card})" if card else ""}'
     ids = _management(cur, schema)
+    kb = json.dumps({'inline': True, 'buttons': [[
+        {'action': {'type': 'text', 'label': '🔌 Связь с дверью', 'payload': json.dumps({'cmd': 'link'})}, 'color': 'secondary'},
+        {'action': {'type': 'text', 'label': '📋 Журнал', 'payload': json.dumps({'cmd': 'journal'})}, 'color': 'secondary'}]]},
+        ensure_ascii=False)
+    vk_send(cur, schema, ids, text, kb)
     if st['alarms_to_employees']:
-        ids = list(set(ids) | set(_profiles(cur, schema, ('employee',))))
-    vk_send(cur, schema, ids, text)
+        vk_send(cur, schema, [p for p in _profiles(cur, schema, ('employee',)) if p not in set(ids)], text)
 
 
 def expiring(cur, schema: str) -> List[Dict[str, Any]]:

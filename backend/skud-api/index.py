@@ -242,6 +242,11 @@ def _save_event(cur, ctrl_id: str, e: Dict[str, Any], source: str = 'controller'
     if granted is None:
         granted = kind in ('entry', 'exit', 'exit_button', 'remote_open')
     direction = e.get('direction') or ('in' if kind == 'entry' else 'out' if kind in ('exit', 'exit_button') else None)
+    if not card and e.get('raw') is not None:
+        cur.execute(f'SELECT 1 FROM {SCHEMA}.skud_events WHERE controller_id = %s AND event_time = %s AND raw = %s LIMIT 1',
+                    (ctrl_id, _parse_time(e.get('time')), json.dumps(e.get('raw'), ensure_ascii=False)[:2000]))
+        if cur.fetchone():
+            return False
     cur.execute(
         f'INSERT INTO {SCHEMA}.skud_events (controller_id, event_time, event_code, event_kind, direction, granted, '
         f'card_number, profile_id, person_name, note, source, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) '

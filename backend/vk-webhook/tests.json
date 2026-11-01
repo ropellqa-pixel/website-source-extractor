@@ -10,7 +10,26 @@
       "name": "Unknown event type returns ok",
       "method": "POST",
       "path": "/",
-      "body": {"type": "unknown_event"},
+      "body": {
+        "type": "unknown_event"
+      },
+      "expectedStatus": 200,
+      "expectedBody": "ok",
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Message from unknown VK user",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "type": "message_new",
+        "object": {
+          "message": {
+            "from_id": -5,
+            "text": "меню"
+          }
+        }
+      },
       "expectedStatus": 200,
       "expectedBody": "ok",
       "bodyMatcher": "partial"

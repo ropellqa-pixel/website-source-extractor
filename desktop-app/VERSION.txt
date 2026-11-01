@@ -1,3 +1,5 @@
+ABIZ project version 30 (program 4.7, build 1.14.0)
+Fix: controller events no longer re-sent in a loop when the read pointer cannot be written; connection status explains why the controller does not answer (ping, other subnet).
 ABIZ project version 29 (program 4.6, build 1.13.0)
 Fix: card enrollment at the door reader - bridge watches the 'last key' register while the site waits for a card (Mifare cards that produce no 'unknown card' event are caught too); site shows why a card is not coming (PC offline / controller offline).
 ABIZ project version 28 (program 4.5, build 1.12.0)
