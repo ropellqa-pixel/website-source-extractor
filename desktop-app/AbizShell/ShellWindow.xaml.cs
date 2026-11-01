@@ -665,7 +665,7 @@ namespace AbizShell
                 var core = MainBrowser.CoreWebView2;
                 if (core == null) return false;
                 var r = await core.ExecuteScriptAsync(
-                    "(function(){var a=document.activeElement;return !!(a&&a.closest&&a.closest('[data-abiz-card]'));})()");
+                    "(function(){var a=document.activeElement;return !!((a&&a.closest&&a.closest('[data-abiz-card]'))||document.querySelector('[data-abiz-card-zone]'));})()");
                 return r == "true";
             }
             catch { return false; }
@@ -674,7 +674,16 @@ namespace AbizShell
         private async Task OnCardReadAsync(string raw)
         {
             if (_cardBusy || _allowClose) return;
-            if (await IsCardFieldFocusedAsync()) return;
+            if (await IsCardFieldFocusedAsync())
+            {
+                try
+                {
+                    MainBrowser.CoreWebView2?.ExecuteScriptAsync(
+                        "window.dispatchEvent(new CustomEvent('abiz-card',{detail:" + JsonSerializer.Serialize(raw) + "}))");
+                }
+                catch { }
+                return;
+            }
             string deviceToken = AgentToken;
             if (string.IsNullOrEmpty(deviceToken))
             {

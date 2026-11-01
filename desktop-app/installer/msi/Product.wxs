@@ -2,12 +2,12 @@
 <!-- MSI-пакет АБИЗ. Сборка: dotnet build installer\msi\AbizInstaller.wixproj -c Release -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="1.4.0.0"
+  <Package Name="АБИЗ" Manufacturer="ООО «Рассвет»" Version="$(var.AbizVersion)"
            UpgradeCode="8a2e1c6a-5b3e-4d2a-9c7a-1f6e3b2d4a10"
            InstallerVersion="500" Compressed="yes" Scope="perMachine"
            Language="1049" Codepage="1251">
 
-    <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия АБИЗ." />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="Установлена более новая версия АБИЗ." />
     <MediaTemplate EmbedCab="yes" />
 
     <Property Id="ARPPRODUCTICON" Value="AbizIcon" />

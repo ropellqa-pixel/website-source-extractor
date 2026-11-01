@@ -3,12 +3,12 @@
      Сборка: dotnet build installer\admin\AbizAdminInstaller.wixproj -c Release -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="АБИЗ-Админ" Manufacturer="ООО «Рассвет»" Version="1.3.0.0"
+  <Package Name="АБИЗ-Админ" Manufacturer="ООО «Рассвет»" Version="$(var.AbizVersion)"
            UpgradeCode="4d7b9e21-3c6a-4f58-9b1e-8a2c5d7f3e64"
            InstallerVersion="500" Compressed="yes" Scope="perMachine"
            Language="1049" Codepage="1251">
 
-    <MajorUpgrade DowngradeErrorMessage="Установлена более новая версия АБИЗ-Админ." />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="Установлена более новая версия АБИЗ-Админ." />
     <MediaTemplate EmbedCab="yes" />
 
     <Property Id="ARPPRODUCTICON" Value="AbizAdminIcon" />

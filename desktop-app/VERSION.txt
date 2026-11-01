@@ -1,3 +1,5 @@
+ABIZ project version 32 (program 4.9, build 1.16.0)
+Fix: one version number for program, door service and installers (old door service was never replaced on update, version label stuck at 4.0); 125 kHz card on the card-number / confirm fields no longer logs out.
 ABIZ project version 31 (program 4.8, build 1.15.0)
 New: siren on a controller output turns on instantly on forced door / door held open (configurable on the site, works without internet); PC uptime sent to tell power loss from internet loss. Build script installs .NET 8 SDK itself.
 ABIZ project version 30 (program 4.7, build 1.14.0)

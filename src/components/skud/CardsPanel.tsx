@@ -94,6 +94,23 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
     alert(`Карта записана и проверена. UID ${w.uid}`);
   };
 
+  useEffect(() => {
+    if (!adding) return;
+    const onCard = (e: Event) => {
+      const raw = String((e as CustomEvent<string>).detail || '');
+      if (!raw) return;
+      if (document.activeElement === confirmRef.current || (form.card && !doorWait)) {
+        setForm((f) => ({ ...f, confirm_card: raw }));
+        setTimeout(() => confirmRef.current?.focus(), 30);
+      } else {
+        setDoorWait(false);
+        check(raw);
+      }
+    };
+    window.addEventListener('abiz-card', onCard);
+    return () => window.removeEventListener('abiz-card', onCard);
+  });
+
   const guest = form.card_type === 'guest';
   const needConfirm = !form.id || form.rewrite || form.card !== origCard;
 
@@ -103,7 +120,7 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
         <DialogHeader><DialogTitle>{adding ? (form.rewrite ? 'Перезапись карты' : form.id ? 'Карта' : 'Новая карта') : 'Ключ-карты'}</DialogTitle></DialogHeader>
 
         {adding ? (
-          <div className="space-y-4">
+          <div className="space-y-4" data-abiz-card-zone="1">
             {!form.rewrite && (
               <div className="flex rounded-lg bg-secondary p-0.5">
                 {([['employee', 'Сотрудника'], ['guest', 'Гостевая (временная)']] as const).map(([k, l]) => (
@@ -114,12 +131,12 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
             )}
             <div>
               <label className="mb-1.5 block text-sm font-medium">Номер карты</label>
-              <Input ref={cardRef} value={form.card} placeholder="Номер появится сам после касания считывателя на двери"
+              <Input ref={cardRef} data-abiz-card="1" value={form.card} placeholder="Номер появится сам после касания считывателя на двери"
                 onChange={(e) => setForm({ ...form, card: e.target.value })}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); check(form.card); } }}
                 onBlur={() => check(form.card)} className="font-mono" />
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span>Карты Mifare Classic считываются только на двери склада.</span>
+                <span>Карты Mifare Classic считываются только на двери склада. Карту 125 кГц можно приложить к USB-считывателю у компьютера.</span>
                 <button onClick={() => { setHint(null); setDoorWait(!doorWait); }} className="text-primary hover:underline">
                   {doorWait ? 'Отменить ожидание' : 'Считать на двери ещё раз'}
                 </button>

@@ -18,7 +18,7 @@ namespace AbizShell
         private const string ControlApiUrl = "https://bizwor.ru/api/device-control";
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(12) };
 
-        public const string AppVersion = "4.0";
+        public const string AppVersion = "4.9";
 
         public class Command
         {

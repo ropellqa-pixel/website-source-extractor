@@ -7,7 +7,7 @@
     <PublishDir>$(MSBuildThisFileDirectory)..\..\AbizShell\bin\publish</PublishDir>
     <MsiPath>$(MSBuildThisFileDirectory)..\out\AbizSetup.msi</MsiPath>
     <RedistDir>$(MSBuildThisFileDirectory)..\redist</RedistDir>
-    <DefineConstants>PublishDir=$(PublishDir);MsiPath=$(MsiPath);RedistDir=$(RedistDir)</DefineConstants>
+    <DefineConstants>PublishDir=$(PublishDir);MsiPath=$(MsiPath);RedistDir=$(RedistDir);AbizVersion=$(AbizVersion)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="WixToolset.BootstrapperApplications.wixext" Version="5.0.2" />

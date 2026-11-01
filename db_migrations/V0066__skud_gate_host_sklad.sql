@@ -1,0 +1,1 @@
+UPDATE t_p59581145_website_source_extra.skud_controllers SET gate_host = '192.168.1.91', gate_port = COALESCE(gate_port, 5000) WHERE id = 'a89c6f75c678371420e6214c6fc2e0bd' AND gate_host IS NULL;
