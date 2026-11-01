@@ -158,7 +158,7 @@
 
         <TextBlock VerticalAlignment="Bottom" HorizontalAlignment="Left" Margin="24,0,0,20"
                    Foreground="{DynamicResource FaintBrush}" FontSize="12"
-                   x:Name="VersionLabel" Text="АБИЗ v4.0"/>
+                   x:Name="VersionLabel" Text=""/>
 
         <!-- Кнопка выхода в Windows: спрашивает пароль администратора. Нужна, чтобы из
              программы всегда был выход, даже если рабочий стол АБИЗ не открывается. -->

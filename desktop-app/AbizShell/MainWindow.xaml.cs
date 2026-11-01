@@ -33,6 +33,7 @@ namespace AbizShell
         public MainWindow()
         {
             InitializeComponent();
+            VersionLabel.Text = Edition.Name + " v" + RemoteControlClient.AppVersion + " (" + (typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "") + ")";
             Loaded += MainWindow_Loaded;
 
             UpdateClockUi();
@@ -66,7 +67,6 @@ namespace AbizShell
                 Title = Edition.Name;
                 AppTitleLabel.Text = Edition.Name;
                 AppTitleLabel.FontSize = 26;
-                VersionLabel.Text = Edition.Name + " v" + RemoteControlClient.AppVersion;
                 Closing += (s, e) =>
                 {
                     if (_openingNext) return;
