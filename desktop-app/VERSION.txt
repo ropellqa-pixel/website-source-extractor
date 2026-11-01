@@ -1,3 +1,5 @@
+ABIZ project version 29 (program 4.6, build 1.13.0)
+Fix: card enrollment at the door reader - bridge watches the 'last key' register while the site waits for a card (Mifare cards that produce no 'unknown card' event are caught too); site shows why a card is not coming (PC offline / controller offline).
 ABIZ project version 28 (program 4.5, build 1.12.0)
 New: write to Mifare Classic 1K cards via USB PC/SC reader (ACR122U etc.) with read-back check; kiosk exit only by admin (Edge, Explorer, Windows settings, logoff, cmd/powershell blocked for staff; auto-restart if killed); alarm 'door connection lost'.
 ABIZ project version 27 (program 4.4, build 1.11.0)

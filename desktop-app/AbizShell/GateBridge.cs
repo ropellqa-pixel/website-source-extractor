@@ -91,6 +91,9 @@ namespace AbizShell
         private Dictionary<string, object>? _params;
         private DateTime _slowAt = DateTime.MinValue;
         private bool _wantCards = true;
+        private bool _enrollWait;
+        private string? _enrollBase;
+        private string? _enrollCard;
 
         /// <summary>
         /// Два темпа: контроллер опрашивается часто (по умолчанию каждые 0,5 с) — новые события сразу уходят на сайт;
@@ -114,6 +117,7 @@ namespace AbizShell
                     if (_client is { Connected: true } c && wait.TotalMilliseconds <= _ctrlPollMs)
                     {
                         if (await PushEventsAsync(c, ct)) nextServer = DateTime.MinValue;
+                        if (_enrollWait && WatchEnroll(c)) nextServer = DateTime.MinValue;
                     }
                 }
                 catch (OperationCanceledException) { return; }
@@ -145,6 +149,32 @@ namespace AbizShell
             return true;
         }
 
+        /// <summary>
+        /// Режим «поднесите новую карту»: регистр «последний ключ» (D0:000C) читается на каждом опросе.
+        /// Карта ловится, даже если контроллер не пишет для неё событие «карта не найдена» (так бывает с Mifare).
+        /// </summary>
+        private bool WatchEnroll(GateClient c)
+        {
+            byte[] k;
+            try { k = c.Read(0x00, 0xD0, 0x000C, 6); }
+            catch (GateException) { return false; }
+            string hex = Convert.ToHexString(k);
+            if (_enrollBase == null)
+            {
+                try { c.Write(0x00, 0xD0, 0x000C, new byte[6]); hex = "000000000000"; } catch (GateException) { }
+                _enrollBase = hex;
+                return false;
+            }
+            if (hex == _enrollBase || hex.Trim('0').Length == 0 || hex.Trim('F').Length == 0) return false;
+            _enrollBase = hex;
+            _enrollCard = CardFromKey(k);
+            var learned = LoadLearned();
+            learned[_enrollCard] = hex;
+            SaveJson("learned.json", learned);
+            _status = "поймана карта " + _enrollCard;
+            return true;
+        }
+
         private void ApplyTiming(JsonElement gate)
         {
             if (!gate.TryGetProperty("timing", out var t) || t.ValueKind != JsonValueKind.Object) return;
@@ -172,6 +202,7 @@ namespace AbizShell
                 ["want_cards"] = connected && (_wantCards || DateTime.Now - _fullCardsAt > TimeSpan.FromHours(6)),
                 ["found_host"] = _foundHost,
                 ["found_port"] = _foundPort,
+                ["enroll_card"] = _enrollCard,
             };
             if (connected)
             {
@@ -189,6 +220,10 @@ namespace AbizShell
             }
             ApplyConfig(gate);
             ApplyTiming(gate);
+            _enrollCard = null;
+            bool wantEnroll = gate.TryGetProperty("enroll", out var en) && en.ValueKind == JsonValueKind.True;
+            if (wantEnroll && !_enrollWait) _enrollBase = null;
+            _enrollWait = wantEnroll;
             if (_client is not { Connected: true })
             {
                 await ConnectAsync(ct);

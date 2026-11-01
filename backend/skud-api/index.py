@@ -65,6 +65,12 @@ def _expires(ctype: str, role: Optional[str]) -> bool:
     return ctype == 'employee' and ROLE_RANK.get(role or 'employee', 1) <= 1
 
 
+def _enroll_waiting(cur) -> bool:
+    cur.execute(f'SELECT until_at > now() AND card_number IS NULL FROM {SCHEMA}.skud_enroll WHERE id = 1')
+    r = cur.fetchone()
+    return bool(r and r[0])
+
+
 def _enroll_secs(cur) -> int:
     cur.execute(f'SELECT timing FROM {SCHEMA}.skud_controllers WHERE active ORDER BY created_at LIMIT 1')
     r = cur.fetchone()
@@ -341,13 +347,17 @@ def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Di
     cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET gate_status = %s, gate_seen_at = now() WHERE id = %s', (status, r[0]))
     if not body.get('connected'):
         _offline_check(cur, r[0], r[1], 'ПК склада на связи, но контроллер двери не отвечает' + (f': {status}' if status else ''))
+    seen = norm_card(str(body.get('enroll_card') or '')) if body.get('enroll_card') else ''
+    if seen and CARD_RE.fullmatch(seen):
+        cur.execute(f'UPDATE {SCHEMA}.skud_enroll SET card_number = %s, captured_at = now() '
+                    f'WHERE id = 1 AND until_at > now() AND card_number IS NULL', (seen,))
     if not body.get('connected'):
         out: Dict[str, Any] = {'ok': True}
     else:
         out = json.loads(_bridge(cur, ctrl, 'bridge_' + action[len('rec_gate_'):], body, event)['body'])
     out['gate'] = {'controller_id': r[0], 'name': r[1], 'host': found if (found and not r[2]) else (r[2] or ''),
                    'port': r[3] or 5000, 'address': r[4] or 1, 'open_tenths': (r[5] or 3) * 10, 'emergency': bool(r[6]),
-                   'antipassback': bool(r[7]), 'timing': _timing(r[8], r[5])}
+                   'antipassback': bool(r[7]), 'timing': _timing(r[8], r[5]), 'enroll': _enroll_waiting(cur)}
     if not body.get('fast'):
         alerts.daily_once(cur, SCHEMA)
     return _resp(200, out)
@@ -677,7 +687,20 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
     if action == 'enroll_poll':
         cur.execute(f'SELECT card_number, until_at > now() FROM {SCHEMA}.skud_enroll WHERE id = 1')
         r = cur.fetchone()
-        return _resp(200, {'card': r[0] if r else None, 'waiting': bool(r and r[1])})
+        cur.execute(f'SELECT gate_seen_at > now() - interval \'30 seconds\', last_seen_at > now() - interval \'90 seconds\', '
+                    f'gate_status, recorder_device IS NOT NULL FROM {SCHEMA}.skud_controllers WHERE active ORDER BY created_at LIMIT 1')
+        g = cur.fetchone()
+        if not g:
+            link = 'Контроллер ещё не добавлен — откройте «Контроллер» и сохраните настройки.'
+        elif not g[3]:
+            link = 'Не выбран компьютер склада в настройках контроллера — карта с двери не придёт.'
+        elif not g[0]:
+            link = 'Программа АБИЗ на компьютере склада не на связи — включите ПК склада и обновите программу до 4.6.'
+        elif not g[1]:
+            link = 'Компьютер склада на связи, но не видит контроллер: ' + (g[2] or 'проверьте кабель и IP-адрес контроллера')
+        else:
+            link = None
+        return _resp(200, {'card': r[0] if r else None, 'waiting': bool(r and r[1]), 'link_problem': link})
 
     if action == 'controller_save':
         name = (body.get('name') or 'Склад').strip()[:80]

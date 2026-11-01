@@ -30,6 +30,7 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
   const [error, setError] = useState<string | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [doorWait, setDoorWait] = useState(false);
+  const [linkProblem, setLinkProblem] = useState<string | null>(null);
   const cardRef = useRef<HTMLInputElement>(null);
   const confirmRef = useRef<HTMLInputElement>(null);
   const [origCard, setOrigCard] = useState('');
@@ -57,8 +58,9 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
     let stop = false;
     skudCall({ action: 'enroll_start' });
     const t = setInterval(async () => {
-      const r = await skudCall<{ card: string | null; waiting: boolean }>({ action: 'enroll_poll' });
+      const r = await skudCall<{ card: string | null; waiting: boolean; link_problem?: string | null }>({ action: 'enroll_poll' });
       if (stop) return;
+      setLinkProblem(r.link_problem || null);
       if (r.card) { setForm((f) => ({ ...f, card: r.card! })); setHint(`Карта ${r.card} считана на двери`); setDoorWait(false); setTimeout(() => confirmRef.current?.focus(), 50); }
       else if (!r.waiting) setDoorWait(false);
     }, 1000);
@@ -123,6 +125,11 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
                 </button>
               </div>
               {doorWait && <p className="mt-2 flex items-center gap-2 text-sm text-primary"><Icon name="Loader2" size={14} className="animate-spin" />{form.rewrite ? 'Поднесите карту сотрудника (ту же или новую) к считывателю на двери склада' : 'Поднесите новую карту к считывателю на двери склада'}…</p>}
+              {doorWait && linkProblem && (
+                <p className="mt-2 flex items-start gap-2 rounded-md bg-amber-50 p-2 text-xs text-amber-800">
+                  <Icon name="TriangleAlert" size={14} className="mt-0.5 shrink-0" />{linkProblem} Номер можно ввести вручную или считать USB-считывателем.
+                </p>
+              )}
               {hint && <p className="mt-2 text-sm text-emerald-600">{hint}</p>}
             </div>
             {!form.rewrite && (
