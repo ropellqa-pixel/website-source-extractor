@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
+import InstallAppButton from './InstallAppButton';
 import AnodBizLogo from '@/components/AnodBizLogo';
 import { useAuth } from '@/lib/auth';
 import { useAccess } from '@/lib/access';
@@ -82,7 +83,9 @@ export default function SideNav({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
-      <div className="mt-auto flex items-center gap-2.5 rounded-2xl border border-border/70 bg-card p-2.5 shadow-soft">
+      <div className="mt-auto" />
+      <InstallAppButton />
+      <div className="flex items-center gap-2.5 rounded-2xl border border-border/70 bg-card p-2.5 shadow-soft">
         <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[hsl(var(--logo-1))] to-[hsl(var(--logo-2))] text-[12px] font-semibold text-white">
           {initials(name)}
         </div>

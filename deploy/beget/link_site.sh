@@ -20,6 +20,7 @@ rm -f "$PUB/api/.htaccess"
 
 cat > "$PUB/.htaccess" <<'EOF'
 Options -Indexes
+AddType application/manifest+json .webmanifest
 DirectoryIndex index.html index.php
 <IfModule mod_rewrite.c>
 RewriteEngine On
@@ -32,7 +33,7 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.html [L]
 </IfModule>
 <IfModule mod_headers.c>
-<FilesMatch "index\.html$">
+<FilesMatch "(index\.html|sw\.js|manifest\.webmanifest)$">
 Header set Cache-Control "no-cache"
 </FilesMatch>
 </IfModule>

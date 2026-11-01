@@ -5,6 +5,7 @@ import { Lock, User, LogIn, Zap, AlertCircle, Loader2, IdCard } from 'lucide-rea
 import AnodBizLogo from '../components/AnodBizLogo';
 import { SITE_VERSION } from '@/lib/apiUrls';
 import { looksLikeCard } from '@/lib/cardsApi';
+import InstallAppButton from '@/components/shell/InstallAppButton';
 
 const READER_GAP_MS = 50;
 
@@ -186,6 +187,7 @@ export default function Login() {
             <Zap className="h-5 w-5 text-[hsl(var(--day))]" />
             Быстрый вход по пин-коду
           </button>
+          <div className="mt-3"><InstallAppButton compact /></div>
 
         </div>
 

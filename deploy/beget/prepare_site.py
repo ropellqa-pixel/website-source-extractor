@@ -16,6 +16,7 @@ OG = 'https://cdn.poehali.dev/projects/451dcdd9-845e-4f12-82d1-0501056cd61b/file
 SITE = 'https://bizwor.ru'
 API = 'https://bizwor.ru/api'
 HTACCESS = '''Options -Indexes
+AddType application/manifest+json .webmanifest
 DirectoryIndex index.html
 <IfModule mod_rewrite.c>
 RewriteEngine On
@@ -26,7 +27,7 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.html [L]
 </IfModule>
 <IfModule mod_headers.c>
-<FilesMatch "index\\.html$">
+<FilesMatch "(index\\.html|sw\\.js|manifest\\.webmanifest)$">
 Header set Cache-Control "no-cache"
 </FilesMatch>
 </IfModule>
