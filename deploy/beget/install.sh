@@ -20,6 +20,7 @@ if [ ! -f "$U/site/index.html" ] && [ -n "$B" ]; then
   rm -f "$B"
 fi
 if [ -f "$U/site/index.html" ]; then rm -rf "$SITE/assets"; cp -r "$U/site/." "$SITE/"; else echo "  сайт в этом пакете не меняется"; fi
+"$API/venv/bin/python" "$U/pwa_patch.py" "$SITE" || echo "  (не удалось добавить файлы приложения)"
 echo "2/5 Сервер"
 cp -r "$U/backend/." "$API/backend/"
 cp "$U/apply_sql.py" "$API/"; cp "$U/app.py" "$API/"
