@@ -30,6 +30,32 @@ try {
         }
     }
 
+    # Нет .NET SDK — ставим его сами (официальный установщик Microsoft, в папку пользователя, без прав админа).
+    $sdkOk = $false
+    if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+        $sdkOk = [bool]((& dotnet --list-sdks 2>$null) -match '^(8|9|10)\.')
+    }
+    if (-not $sdkOk) {
+        $dotnetDir = Join-Path $env:LOCALAPPDATA "Microsoft\dotnet"
+        if (-not (Test-Path (Join-Path $dotnetDir "dotnet.exe")) -or -not ((& (Join-Path $dotnetDir "dotnet.exe") --list-sdks 2>$null) -match '^8\.')) {
+            Write-Host "Устанавливаю .NET 8 SDK (один раз, ~200 МБ, несколько минут)..." -ForegroundColor Cyan
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            $installer = Join-Path $env:TEMP "dotnet-install.ps1"
+            $ProgressPreference = "SilentlyContinue"
+            Invoke-WebRequest -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile $installer -UseBasicParsing
+            $ProgressPreference = "Continue"
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Channel 8.0 -InstallDir $dotnetDir
+            if ($LASTEXITCODE -ne 0) { throw "Не удалось установить .NET 8 SDK. Установите вручную: https://dotnet.microsoft.com/download/dotnet/8.0 (SDK x64)" }
+        }
+        $env:DOTNET_ROOT = $dotnetDir
+        $env:PATH = "$dotnetDir;$env:PATH"
+        $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+        if ($userPath -notlike "*$dotnetDir*") { [Environment]::SetEnvironmentVariable("PATH", "$dotnetDir;$userPath", "User") }
+    }
+    $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+    $env:DOTNET_NOLOGO = "1"
+    Write-Host "Используется .NET SDK $(& dotnet --version)" -ForegroundColor DarkGray
+
     Write-Step 1 "публикация программы"
     $publishDir = Join-Path $root "AbizShell\bin\publish"
     if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
