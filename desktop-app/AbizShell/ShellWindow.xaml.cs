@@ -665,7 +665,8 @@ namespace AbizShell
                 var core = MainBrowser.CoreWebView2;
                 if (core == null) return false;
                 var r = await core.ExecuteScriptAsync(
-                    "(function(){var a=document.activeElement;return !!((a&&a.closest&&a.closest('[data-abiz-card]'))||document.querySelector('[data-abiz-card-zone]'));})()");
+                    "(function(){var a=document.activeElement;return !!((a&&a.closest&&a.closest('[data-abiz-card]'))||document.querySelector('[data-abiz-card-zone]')" +
+                    "||(/^\\/skud/.test(location.pathname)&&document.querySelector('[role=dialog]')));})()");
                 return r == "true";
             }
             catch { return false; }
@@ -678,8 +679,12 @@ namespace AbizShell
             {
                 try
                 {
+                    string js = JsonSerializer.Serialize(raw);
                     MainBrowser.CoreWebView2?.ExecuteScriptAsync(
-                        "window.dispatchEvent(new CustomEvent('abiz-card',{detail:" + JsonSerializer.Serialize(raw) + "}))");
+                        "(function(v){if(document.querySelector('[data-abiz-card-zone]')){window.dispatchEvent(new CustomEvent('abiz-card',{detail:v}));return;}" +
+                        "var a=document.activeElement;if(!a||a.tagName!=='INPUT')return;" +
+                        "var set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(a,v);" +
+                        "a.dispatchEvent(new Event('input',{bubbles:true}));})(" + js + ")");
                 }
                 catch { }
                 return;

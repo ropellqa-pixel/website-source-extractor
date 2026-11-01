@@ -1,3 +1,5 @@
+ABIZ project version 34 (program 4.9, build 1.16.2)
+Fix: card on USB reader never locks the screen while a card dialog is open on the SKUD page (works with older site too); number goes into the focused field.
 ABIZ project version 33 (program 4.9, build 1.16.1)
 Fix: login screen of the kiosk edition shows the real version (label was fixed text 'v4.0').
 ABIZ project version 32 (program 4.9, build 1.16.0)
