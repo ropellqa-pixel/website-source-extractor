@@ -10,6 +10,7 @@ export const ALARM_KINDS: Record<string, string> = {
   reader_fault: 'Неисправность считывателя',
   button_stuck: 'Залипла кнопка выхода',
   power: 'Перезапуск / питание контроллера',
+  offline: 'Пропала связь с дверью',
 };
 
 export interface SkudEvent {
@@ -45,6 +46,8 @@ export interface SkudCard {
   schedule_id: number | null;
   written_at: string;
   written_by: string | null;
+  chip_uid?: string | null;
+  chip_written_at?: string | null;
   expires_at?: string;
   removed_at?: string;
   expiry_state?: 'ok' | 'warn' | 'grace';

@@ -26,6 +26,19 @@ namespace AbizShell
             Set(ExpKey, "NoRun", 1);
             Set(ExpKey, "NoWinKeys", 1);
             Set(CmdKey, "DisableCMD", 2);
+            Set(SysKey, "DisableLockWorkstation", 1);
+            Set(SysKey, "DisableChangePassword", 1);
+            Set(ExpKey, "NoLogoff", 1);
+            Set(ExpKey, "NoClose", 1);
+            Set(ExpKey, "NoControlPanel", 1);
+            Set(ExpKey, "DisallowRun", 1);
+            try
+            {
+                using var k = Registry.CurrentUser.CreateSubKey(ExpKey + @"\DisallowRun", true);
+                string[] deny = { "cmd.exe", "powershell.exe", "pwsh.exe", "powershell_ise.exe", "regedit.exe", "taskmgr.exe", "mmc.exe", "wscript.exe", "cscript.exe", "mshta.exe", "control.exe" };
+                for (int i = 0; i < deny.Length; i++) k?.SetValue((i + 1).ToString(), deny[i], RegistryValueKind.String);
+            }
+            catch { }
             KeyboardHook.KioskAdmin = false;
             Applied = true;
         }
@@ -37,6 +50,13 @@ namespace AbizShell
             Del(ExpKey, "NoRun");
             Del(ExpKey, "NoWinKeys");
             Del(CmdKey, "DisableCMD");
+            Del(SysKey, "DisableLockWorkstation");
+            Del(SysKey, "DisableChangePassword");
+            Del(ExpKey, "NoLogoff");
+            Del(ExpKey, "NoClose");
+            Del(ExpKey, "NoControlPanel");
+            Del(ExpKey, "DisallowRun");
+            try { Registry.CurrentUser.DeleteSubKeyTree(ExpKey + @"\DisallowRun", false); } catch { }
             KeyboardHook.KioskAdmin = true;
             Applied = false;
         }

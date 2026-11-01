@@ -19,8 +19,8 @@ MSK = timezone(timedelta(hours=3))
 ALERT_KINDS = {'forced': 'Дверь склада взломана!', 'held_open': 'Дверь склада оставлена открытой',
                'denied_blocked': 'Попытка пройти по заблокированной карте', 'denied': 'Отказ в доступе (чужая или неизвестная карта)',
                'reader_fault': 'Неисправность считывателя', 'button_stuck': 'Залипла кнопка выхода',
-               'power': 'Перезапуск / пропадание питания контроллера'}
-ALERT_DEFAULT = ['forced', 'held_open', 'denied_blocked', 'reader_fault', 'button_stuck', 'power']
+               'power': 'Перезапуск / пропадание питания контроллера', 'offline': 'Пропала связь с дверью склада'}
+ALERT_DEFAULT = ['forced', 'held_open', 'denied_blocked', 'reader_fault', 'button_stuck', 'power', 'offline']
 MGMT_DEPARTMENT = 'Руководство'
 NOTIFY_ROLES = ('director', 'deputy_director', 'senior_employee')
 EXPIRY_ROLES = ('deputy_director', 'senior_employee')
@@ -65,6 +65,35 @@ def vk_send(cur, schema: str, profile_ids: List[str], text: str, keyboard: str =
     return sent
 
 
+def vk_report(cur, schema: str, profile_ids: List[str], text: str) -> Dict[str, Any]:
+    """Проверочная рассылка: кому ушло, у кого не привязан ВК, какая ошибка ВК."""
+    token = os.environ.get('VK_GROUP_TOKEN')
+    cur.execute(f"SELECT p.id, p.full_name, b.vk_user_id FROM {schema}.profiles p LEFT JOIN {schema}.vk_bindings b "
+                f"ON b.profile_id = p.id AND b.status = 'confirmed' AND b.vk_user_id IS NOT NULL WHERE p.id = ANY(%s) "
+                f"ORDER BY p.full_name", (list(profile_ids),))
+    people: Dict[str, Dict[str, Any]] = {}
+    for pid, name, vk in cur.fetchall():
+        x = people.setdefault(pid, {'name': name, 'vk': False, 'sent': False, 'error': None})
+        if not vk:
+            continue
+        x['vk'] = True
+        if not token:
+            x['error'] = 'на сервере не указан ключ ВК'
+            continue
+        data = urllib.parse.urlencode({'access_token': token, 'v': '5.199', 'user_id': vk,
+                                       'random_id': secrets.randbelow(2 ** 31), 'message': text}).encode()
+        try:
+            with urllib.request.urlopen('https://api.vk.com/method/messages.send', data=data, timeout=5) as r:
+                res = json.loads(r.read().decode())
+            if 'error' in res:
+                x['error'] = str(res['error'].get('error_msg') or 'ошибка ВК')[:150]
+            else:
+                x['sent'] = True
+        except Exception as ex:
+            x['error'] = str(ex)[:150]
+    return {'token': bool(token), 'people': list(people.values())}
+
+
 def _once(cur, schema: str, key: str) -> bool:
     cur.execute(f'INSERT INTO {schema}.skud_vk_sent (key) VALUES (%s) ON CONFLICT DO NOTHING', (key,))
     return cur.rowcount > 0
@@ -79,6 +108,10 @@ def settings(cur, schema: str) -> Dict[str, Any]:
     return {'alarms_to_employees': bool(v.get('alarms_to_employees', False)), 'kinds': kinds}
 
 
+def management(cur, schema: str) -> List[str]:
+    return _management(cur, schema)
+
+
 def _management(cur, schema: str) -> List[str]:
     """Весь отдел «Руководство» + директор, заместитель и старшие сотрудники из любых отделов."""
     cur.execute(f"SELECT id FROM {schema}.profiles WHERE status = 'active' AND (department = %s OR role = ANY(%s))",
@@ -91,7 +124,7 @@ def _profiles(cur, schema: str, roles) -> List[str]:
     return [r[0] for r in cur.fetchall()]
 
 
-def alarm(cur, schema: str, kind: str, door: str, name: str, when: datetime, card: str) -> None:
+def alarm(cur, schema: str, kind: str, door: str, name: str, when: datetime, card: str, extra: str = '') -> None:
     """Тревога с двери → ВК всему отделу «Руководство» (и сотрудникам, если включено). Повтор того же события не шлём."""
     title = ALERT_KINDS.get(kind)
     if not title:
@@ -101,10 +134,12 @@ def alarm(cur, schema: str, kind: str, door: str, name: str, when: datetime, car
         return
     if datetime.now(timezone.utc) - when > timedelta(hours=2):
         return
-    key = f'alarm:{kind}:{card or ""}:{when.astimezone(MSK).strftime("%Y-%m-%d %H:%M")}'
+    key = f'alarm:{kind}:{card or extra}:{when.astimezone(MSK).strftime("%Y-%m-%d %H:%M")}'
     if not _once(cur, schema, key):
         return
     text = f'⚠ СКУД «{door}»: {title}\n{when.astimezone(MSK).strftime("%d.%m.%Y %H:%M:%S")}'
+    if extra:
+        text += f'\n{extra}'
     if name or card:
         text += f'\nКарта: {name or "не записана"}{f" ({card})" if card else ""}'
     ids = _management(cur, schema)

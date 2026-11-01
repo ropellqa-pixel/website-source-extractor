@@ -222,6 +222,7 @@ if (-not $p -or $p.HasExited) {{
                 WindowStyle = ProcessWindowStyle.Hidden,
             };
             if (!writable) psi.Verb = "runas";
+            KioskLock.Release();
             try { Process.Start(psi); }
             catch (Exception ex)
             {

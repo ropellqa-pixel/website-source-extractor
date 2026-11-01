@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
+import { chipCall } from '@/lib/abizChip';
 import { fmtDate, skudCall, type Employee, type SkudCard, type SkudSchedule } from '@/lib/skudApi';
 
 interface Props {
@@ -76,6 +77,19 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
     if (confirmText && !confirm(confirmText)) return;
     const r = await skudCall<{ cards: SkudCard[] }>({ action, ...extra });
     if (r.error) alert(r.error); else onChanged(r.cards);
+  };
+
+  const [chipBusy, setChipBusy] = useState<string | null>(null);
+  const writeChip = async (c: SkudCard) => {
+    if (!confirm(`Запись на карту ${c.name || c.label || c.card}.\n\nПриложите карту к USB-считывателю Mifare на этом ПК и нажмите «ОК». Не убирайте карту до сообщения.`)) return;
+    setChipBusy(c.id);
+    const w = await chipCall('write', { id: c.card, name: c.name || c.label || '' });
+    if (!w.ok) { setChipBusy(null); alert(w.error || 'Не удалось записать карту'); return; }
+    const r = await skudCall<{ cards: SkudCard[] }>({ action: 'card_chip', id: c.id, uid: w.uid });
+    setChipBusy(null);
+    if (r.error) { alert(r.error); return; }
+    onChanged(r.cards);
+    alert(`Карта записана и проверена. UID ${w.uid}`);
   };
 
   const guest = form.card_type === 'guest';
@@ -208,11 +222,17 @@ export default function CardsPanel({ open, onOpenChange, cards, employees, sched
                         )}
                         {sch && <span>{sch.name}</span>}
                         {c.has_pin && <span>с кодом</span>}
+                        {c.chip_written_at && <span className="text-emerald-600">записана на карту {fmtDate(c.chip_written_at)}</span>}
                         {c.last_used && <span>проход {fmtDate(c.last_used)}</span>}
                         {!c.synced && <span className="text-amber-600">ждёт отправки на дверь</span>}
                       </div>
                     </div>
                     <div className="ml-auto flex items-center">
+                      {c.card_type !== 'master' && (
+                        <Button size="sm" variant="outline" className="mr-1 h-8" disabled={!!chipBusy} onClick={() => writeChip(c)}>
+                          <Icon name="Nfc" fallback="CreditCard" size={14} />{chipBusy === c.id ? 'Пишу…' : 'Запись на карту'}
+                        </Button>
+                      )}
                       {c.card_type === 'employee' && (
                         <Button size="sm" variant={exp === 'ok' ? 'ghost' : 'default'} className="h-8" onClick={() => startAdd(c, true)}>
                           <Icon name="RefreshCw" size={14} />Перезаписать

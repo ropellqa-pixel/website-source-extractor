@@ -20,7 +20,7 @@ CORS = {
 }
 MANAGER_ROLES = {'director', 'deputy_director'}
 CARD_ROLES = {'director', 'deputy_director', 'senior_employee'}
-CARD_ACTIONS = {'master_get', 'master_save', 'master_delete', 'overview', 'cards', 'card_save', 'card_rewrite', 'card_check', 'enroll_start', 'enroll_poll', 'events', 'visits'}
+CARD_ACTIONS = {'master_get', 'master_save', 'master_delete', 'overview', 'cards', 'card_save', 'card_rewrite', 'card_check', 'enroll_start', 'enroll_poll', 'events', 'visits', 'card_chip'}
 OUTPUTS_DEFAULT = [{'addr': 1, 'name': 'Реле 2'}, {'addr': 2, 'name': 'Выход SW2'}, {'addr': 3, 'name': 'Выход SW3'},
                    {'addr': 4, 'name': 'Выход SW0'}, {'addr': 5, 'name': 'Выход SW1'}]
 KINDS = {
@@ -28,7 +28,7 @@ KINDS = {
     'denied': 'Отказ в доступе', 'denied_blocked': 'Заблокированная карта', 'remote_open': 'Открыта с сайта',
     'forced': 'Дверь взломана', 'held_open': 'Дверь не закрыта', 'door_closed': 'Дверь закрыта',
     'power': 'Питание / перезапуск', 'reader_fault': 'Неисправность считывателя', 'button_stuck': 'Залипла кнопка выхода',
-    'other': 'Событие контроллера',
+    'offline': 'Нет связи с дверью', 'other': 'Событие контроллера',
 }
 CARD_STATUSES = {'active', 'blocked'}
 ROLE_RANK = {'employee': 1, 'senior_employee': 2, 'deputy_director': 3, 'director': 4}
@@ -201,6 +201,21 @@ def _card_owner(cur, card: str):
     return cur.fetchone()
 
 
+def _event_code(v: Any) -> Optional[int]:
+    """Мост присылает код события Gate в HEX («0C» — взлом), старые источники — числом."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, int):
+        return v
+    t = str(v).strip()
+    for base in (16, 10):
+        try:
+            return int(t, base) if re.fullmatch(r'[0-9A-Fa-f]{1,4}', t) else None
+        except ValueError:
+            continue
+    return None
+
+
 def _save_event(cur, ctrl_id: str, e: Dict[str, Any], source: str = 'controller') -> bool:
     kind = e.get('kind') if e.get('kind') in KINDS else 'other'
     card = norm_card(str(e.get('card') or '')) if e.get('card') else None
@@ -225,14 +240,15 @@ def _save_event(cur, ctrl_id: str, e: Dict[str, Any], source: str = 'controller'
         f'INSERT INTO {SCHEMA}.skud_events (controller_id, event_time, event_code, event_kind, direction, granted, '
         f'card_number, profile_id, person_name, note, source, raw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) '
         f'ON CONFLICT (controller_id, event_time, event_code, card_number) DO NOTHING',
-        (ctrl_id, _parse_time(e.get('time')), e.get('code'), kind, direction, bool(granted), card, profile_id, name,
+        (ctrl_id, _parse_time(e.get('time')), _event_code(e.get('code')), kind, direction, bool(granted), card, profile_id, name,
          (str(e.get('note'))[:300] if e.get('note') else None), source,
          json.dumps(e.get('raw'), ensure_ascii=False)[:2000] if e.get('raw') is not None else None))
     saved = cur.rowcount > 0
     if saved and kind in alerts.ALERT_KINDS:
         cur.execute(f'SELECT name FROM {SCHEMA}.skud_controllers WHERE id = %s', (ctrl_id,))
         d = cur.fetchone()
-        alerts.alarm(cur, SCHEMA, kind, d[0] if d else 'Склад', name or '', _parse_time(e.get('time')), card or '')
+        alerts.alarm(cur, SCHEMA, kind, d[0] if d else 'Склад', name or '', _parse_time(e.get('time')), card or '',
+                     str(e.get('note') or '')[:200] if kind in ('offline', 'reader_fault', 'power', 'button_stuck') else '')
     if saved and kind == 'entry' and profile_id and card:
         cur.execute(f'SELECT name FROM {SCHEMA}.skud_controllers WHERE id = %s', (ctrl_id,))
         d = cur.fetchone()
@@ -324,6 +340,8 @@ def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Di
                                  if k in params}), r[0]))
     cur.execute(f'UPDATE {SCHEMA}.skud_controllers SET gate_status = %s, gate_seen_at = now() WHERE id = %s', (status, r[0]))
     if not body.get('connected'):
+        _offline_check(cur, r[0], r[1], 'ПК склада на связи, но контроллер двери не отвечает' + (f': {status}' if status else ''))
+    if not body.get('connected'):
         out: Dict[str, Any] = {'ok': True}
     else:
         out = json.loads(_bridge(cur, ctrl, 'bridge_' + action[len('rec_gate_'):], body, event)['body'])
@@ -333,6 +351,31 @@ def _gate(cur, dev: Dict[str, Any], action: str, body: Dict[str, Any], event: Di
     if not body.get('fast'):
         alerts.daily_once(cur, SCHEMA)
     return _resp(200, out)
+
+
+def _offline_check(cur, ctrl_id: str, door: str, reason: str) -> None:
+    """Связь с дверью пропала больше 3 минут назад → одна тревога на каждый обрыв (в журнал и в ВК)."""
+    cur.execute(f"SELECT last_seen_at FROM {SCHEMA}.skud_controllers WHERE id = %s AND last_seen_at IS NOT NULL "
+                f"AND last_seen_at < now() - interval '3 minutes'", (ctrl_id,))
+    row = cur.fetchone()
+    if not row:
+        return
+    cur.execute(f'INSERT INTO {SCHEMA}.skud_vk_sent (key) VALUES (%s) ON CONFLICT DO NOTHING',
+                (f'offline:{ctrl_id}:{row[0].isoformat()}',))
+    if cur.rowcount == 0:
+        return
+    now = datetime.now(timezone.utc)
+    last = row[0].astimezone(timezone(timedelta(hours=3))).strftime('%d.%m %H:%M')
+    _save_event(cur, ctrl_id, {'kind': 'offline', 'time': now.isoformat(),
+                               'note': f'{reason}. Последняя связь: {last}'}, 'system')
+
+
+def _offline_scan(cur) -> None:
+    """ПК склада вообще пропал (выключен, нет интернета) — проверяем при обращениях сайта."""
+    cur.execute(f"SELECT id, name FROM {SCHEMA}.skud_controllers WHERE active AND recorder_device IS NOT NULL "
+                f"AND gate_seen_at IS NOT NULL AND gate_seen_at < now() - interval '3 minutes'")
+    for cid, name in cur.fetchall():
+        _offline_check(cur, cid, name, 'ПК склада не выходит на связь (выключен или нет интернета)')
 
 
 def _controllers(cur) -> List[Dict[str, Any]]:
@@ -428,7 +471,8 @@ def _visits(cur, body: Dict[str, Any]) -> Dict[str, Any]:
 def _cards(cur) -> List[Dict[str, Any]]:
     cur.execute(f'SELECT c.id, c.card_number, c.profile_id, p.full_name, c.label, c.status, c.valid_from, c.valid_to, '
                 f'c.synced, c.created_at, (SELECT max(event_time) FROM {SCHEMA}.skud_events e WHERE e.card_number = c.card_number), '
-                f'c.card_type, (c.pin_code IS NOT NULL), c.schedule_id, c.written_at, c.written_by, p.role '
+                f'c.card_type, (c.pin_code IS NOT NULL), c.schedule_id, c.written_at, c.written_by, p.role, '
+                f'c.chip_uid, c.chip_written_at '
                 f'FROM {SCHEMA}.skud_cards c LEFT JOIN {SCHEMA}.profiles p ON p.id = c.profile_id '
                 f'ORDER BY c.status, p.full_name NULLS LAST')
     now = datetime.now(timezone.utc)
@@ -436,7 +480,8 @@ def _cards(cur) -> List[Dict[str, Any]]:
     for r in cur.fetchall():
         x = {'id': r[0], 'card': r[1], 'profile_id': r[2], 'name': r[3], 'label': r[4], 'status': r[5],
              'valid_from': r[6], 'valid_to': r[7], 'synced': r[8], 'created_at': r[9], 'last_used': r[10],
-             'card_type': r[11], 'has_pin': r[12], 'schedule_id': r[13], 'written_at': r[14], 'written_by': r[15]}
+             'card_type': r[11], 'has_pin': r[12], 'schedule_id': r[13], 'written_at': r[14], 'written_by': r[15],
+             'chip_uid': r[17], 'chip_written_at': r[18]}
         if _expires(r[11], r[16]):
             d = alerts.card_dates(r[14])
             x.update({'expires_at': d['expires'], 'removed_at': d['removed'],
@@ -469,6 +514,7 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         return _resp(403, {'error': 'Это доступно директору и заместителю директора'})
 
     if action == 'overview':
+        _offline_scan(cur)
         cur.execute(f"SELECT id, full_name, department FROM {SCHEMA}.profiles WHERE status = 'active' ORDER BY full_name")
         emps = [{'id': r[0], 'name': r[1], 'department': r[2]} for r in cur.fetchall()]
         cur.execute(f"SELECT id, name FROM {SCHEMA}.cameras ORDER BY order_index")
@@ -604,6 +650,20 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         r = cur.fetchone()
         return _resp(200, {'ok': True, 'master': {'id': r[0], 'card': card, 'written_at': r[1]}})
 
+    if action == 'card_chip':
+        uid = re.sub(r'[^0-9A-F]', '', str(body.get('uid') or '').upper())[:20]
+        if not uid:
+            return _resp(400, {'error': 'Не удалось прочитать UID карты'})
+        cur.execute(f'SELECT id, card_number FROM {SCHEMA}.skud_cards WHERE chip_uid = %s AND id <> %s', (uid, body.get('id')))
+        other = cur.fetchone()
+        if other:
+            return _resp(400, {'error': f'Эта карта уже записана как {other[1]}. Приложите карту этого сотрудника'})
+        cur.execute(f'UPDATE {SCHEMA}.skud_cards SET chip_uid=%s, chip_written_at=now(), chip_written_by=%s WHERE id=%s RETURNING card_number',
+                    (uid, user['name'], body.get('id')))
+        r = cur.fetchone()
+        if not r:
+            return _resp(404, {'error': 'Карта не найдена'})
+        return _resp(200, {'ok': True, 'cards': _cards(cur)})
     if action == 'card_check':
         card = norm_card(str(body.get('card') or ''))
         owner = _card_owner(cur, card)
@@ -699,6 +759,16 @@ def _site(cur, user: Dict[str, Any], action: str, body: Dict[str, Any]) -> Dict[
         cur.execute(f'DELETE FROM {SCHEMA}.skud_schedules WHERE id = %s', (body.get('id'),))
         cur.execute(f'UPDATE {SCHEMA}.skud_cards SET synced=false')
         return _resp(200, {'ok': True, 'schedules': _schedules(cur), 'cards': _cards(cur)})
+    if action == 'alarm_test':
+        cur.execute(f'SELECT name FROM {SCHEMA}.skud_controllers WHERE active ORDER BY created_at LIMIT 1')
+        d = cur.fetchone()
+        ids = alerts.management(cur, SCHEMA)
+        st = alerts.settings(cur, SCHEMA)
+        if st['alarms_to_employees']:
+            ids = list(set(ids) | set(alerts._profiles(cur, SCHEMA, ('employee',))))
+        rep = alerts.vk_report(cur, SCHEMA, ids, f'⚠ СКУД «{d[0] if d else "Склад"}»: ПРОВЕРКА тревог\n'
+                               f'Это тестовое сообщение, отправил {user["name"]}. Реальные тревоги придут так же.')
+        return _resp(200, {'ok': True, **rep})
     if action == 'notify_save':
         cur_v = alerts.settings(cur, SCHEMA)
         v = {'alarms_to_employees': bool(body.get('alarms_to_employees', cur_v['alarms_to_employees'])),
@@ -796,6 +866,7 @@ def _handler_impl(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             return _resp(401, {'error': 'Нужно войти в систему'})
         if action == 'notices':
             alerts.daily_once(cur, SCHEMA)
+            _offline_scan(cur)
             return _resp(200, {'notices': alerts.notices_for(cur, SCHEMA, user)})
         if action == 'notice_dismiss':
             alerts.dismiss(cur, SCHEMA, user, str(body.get('card_id') or ''), str(body.get('cycle') or ''))

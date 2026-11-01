@@ -1,3 +1,5 @@
+ABIZ project version 28 (program 4.5, build 1.12.0)
+New: write to Mifare Classic 1K cards via USB PC/SC reader (ACR122U etc.) with read-back check; kiosk exit only by admin (Edge, Explorer, Windows settings, logoff, cmd/powershell blocked for staff; auto-restart if killed); alarm 'door connection lost'.
 ABIZ project version 27 (program 4.4, build 1.11.0)
 New: kiosk lock (Task Manager, Run, Win keys, cmd, regedit disabled for staff; released only by admin); alarm kinds: reader fault, stuck button.
 ABIZ project version 26 (program 4.3, build 1.10.0)

@@ -309,12 +309,18 @@ namespace AbizShell
         private void NetAdapters_Click(object sender, RoutedEventArgs e)
         {
             NetworkPopup.IsOpen = false;
+            if (Edition.Kiosk && !_isAdmin) { OpenSettings(); return; }
             try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ncpa.cpl") { UseShellExecute = true }); }
             catch { OpenSettings("ms-settings:network"); }
         }
 
-        private static void OpenSettings(params string[] uris)
+        private void OpenSettings(params string[] uris)
         {
+            if (Edition.Kiosk && !_isAdmin)
+            {
+                MessageBox.Show("Настройки Windows открывает только администратор.", Edition.Name, MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
             foreach (var uri in uris)
             {
                 try

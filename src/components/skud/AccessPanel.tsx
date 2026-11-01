@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import AlarmTest from './AlarmTest';
 import Icon from '@/components/ui/icon';
 import { daysLabel, skudCall, WEEKDAYS, type SkudCard, type SkudController, type SkudOutput, type SkudSchedule } from '@/lib/skudApi';
 import { ALARM_KINDS } from '@/lib/skudApi';
@@ -151,6 +152,7 @@ export default function AccessPanel({ open, onOpenChange, controller, schedules,
               Присылать тревоги и простым сотрудникам
             </label>
             <p className="text-xs text-muted-foreground">Сообщения получают те, кто привязал ВК в настройках профиля.</p>
+            <AlarmTest />
           </section>
         </div>
       </DialogContent>

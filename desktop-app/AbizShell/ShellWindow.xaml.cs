@@ -348,6 +348,7 @@ namespace AbizShell
             };
 
             await PasswordVault.AttachAsync(core);
+            ChipWriter.Attach(core);
 
             try { await ExtensionsService.InstallAllAsync(core.Profile); } catch { }
 
@@ -410,6 +411,7 @@ namespace AbizShell
 
         public void OpenCurrentPageInEdge()
         {
+            if (Edition.Kiosk && !IsAdmin) { ShowNotification("\U0001F512", "Только администратор", "Открыть внешний браузер может только администратор."); return; }
             try { Process.Start(new ProcessStartInfo("msedge.exe", CurrentUrl) { UseShellExecute = true }); }
             catch { MessageBox.Show("Microsoft Edge не найден на этом компьютере.", "АБИЗ", MessageBoxButton.OK, MessageBoxImage.Warning); }
         }
@@ -552,6 +554,7 @@ namespace AbizShell
 
         public void OpenWindowsExplorer()
         {
+            if (Edition.Kiosk && !IsAdmin) return;
             try { Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true }); } catch { }
         }
 
