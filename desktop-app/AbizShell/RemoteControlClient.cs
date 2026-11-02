@@ -15,10 +15,10 @@ namespace AbizShell
     /// </summary>
     public static class RemoteControlClient
     {
-        private const string ControlApiUrl = "https://bizwor.ru/api/device-control";
+        private const string ControlApiUrl = ServerConfig.DeviceControlApi;
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(12) };
 
-        public const string AppVersion = "4.9";
+        public const string AppVersion = "5.0";
 
         public class Command
         {

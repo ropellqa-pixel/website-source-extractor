@@ -24,7 +24,7 @@ namespace AbizShell
     /// </summary>
     public static class Updater
     {
-        private const string ControlApiUrl = "https://bizwor.ru/api/device-control";
+        private const string ControlApiUrl = ServerConfig.DeviceControlApi;
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(2) };
         private static int _running;
 

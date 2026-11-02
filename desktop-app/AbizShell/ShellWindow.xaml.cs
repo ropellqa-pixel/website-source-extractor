@@ -40,7 +40,7 @@ namespace AbizShell
 
         private RemoteAgent? _remoteAgent;
 
-        public const string HomePage = "https://bizwor.ru/";
+        public const string HomePage = ServerConfig.HomePage;
         private const string RuDesktopAcceptId = "2364029";
 
         private DispatcherTimer? _networkTimer, _remoteDesktopTimer, _notificationTimer;
@@ -334,7 +334,7 @@ namespace AbizShell
                 if (!_firstPageShown)
                 {
                     string src = Browser?.Source ?? "";
-                    if (src.StartsWith("https://bizwor.ru/", StringComparison.OrdinalIgnoreCase)
+                    if (src.StartsWith(ServerConfig.HomePage, StringComparison.OrdinalIgnoreCase)
                         && !src.Contains("/device-login", StringComparison.OrdinalIgnoreCase))
                         HideLoadingSplash();
                 }
@@ -425,7 +425,7 @@ namespace AbizShell
             }
             string? code = await AnodBizClient.RequestLoginLinkAsync(ApiToken);
             NavigateBrowser(!string.IsNullOrEmpty(code)
-                ? $"https://bizwor.ru/device-login?code={code}"
+                ? $"{ServerConfig.Site}/device-login?code={code}"
                 : HomePage);
         }
 
@@ -562,8 +562,8 @@ namespace AbizShell
         public void OpenCamerasSection()
         {
             string cur = Browser?.Source ?? "";
-            if (cur.StartsWith("https://bizwor.ru/", StringComparison.OrdinalIgnoreCase) && !cur.Contains("/login"))
-                NavigateBrowser("https://bizwor.ru/cameras");
+            if (cur.StartsWith(ServerConfig.HomePage, StringComparison.OrdinalIgnoreCase) && !cur.Contains("/login"))
+                NavigateBrowser(ServerConfig.Site + "/cameras");
             else
                 _ = OpenSitePageLoggedInAsync("/cameras");
         }
@@ -572,8 +572,8 @@ namespace AbizShell
         {
             string? code = string.IsNullOrEmpty(ApiToken) ? null : await AnodBizClient.RequestLoginLinkAsync(ApiToken);
             NavigateBrowser(!string.IsNullOrEmpty(code)
-                ? $"https://bizwor.ru/device-login?code={code}&next={Uri.EscapeDataString(path)}"
-                : "https://bizwor.ru" + path);
+                ? $"{ServerConfig.Site}/device-login?code={code}&next={Uri.EscapeDataString(path)}"
+                : ServerConfig.Site + path);
         }
 
         /// <summary>Загрузить пароли из файла, выгруженного из Яндекс Браузера (или Chrome/Edge).</summary>
@@ -821,11 +821,11 @@ namespace AbizShell
             if (sender is not Button btn) return;
             string url = (btn.Tag?.ToString() ?? "") switch
             {
-                "schedule" => "https://bizwor.ru/schedule",
-                "salary" => "https://bizwor.ru/salary",
-                "collection" => "https://bizwor.ru/collection",
-                "documents" => "https://bizwor.ru/documents",
-                "chat" => "https://bizwor.ru/chat",
+                "schedule" => ServerConfig.Site + "/schedule",
+                "salary" => ServerConfig.Site + "/salary",
+                "collection" => ServerConfig.Site + "/collection",
+                "documents" => ServerConfig.Site + "/documents",
+                "chat" => ServerConfig.Site + "/chat",
                 _ => HomePage,
             };
             NavigateBrowser(url);

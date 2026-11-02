@@ -1,6 +1,6 @@
 <Project>
   <!-- Единый номер версии для программы, службы и всех установщиков. Меняется только здесь. -->
   <PropertyGroup>
-    <AbizVersion>1.16.2</AbizVersion>
+    <AbizVersion>1.17.0</AbizVersion>
   </PropertyGroup>
 </Project>

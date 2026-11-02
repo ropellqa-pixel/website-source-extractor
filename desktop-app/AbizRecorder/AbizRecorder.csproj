@@ -19,6 +19,7 @@
 	<ItemGroup>
 		<Compile Include="..\AbizShell\SkudRecorder.cs" Link="SkudRecorder.cs" />
 		<Compile Include="..\AbizShell\GateBridge.cs" Link="GateBridge.cs" />
+		<Compile Include="..\AbizShell\ServerConfig.cs" Link="ServerConfig.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<None Include="install-service.cmd;uninstall-service.cmd" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

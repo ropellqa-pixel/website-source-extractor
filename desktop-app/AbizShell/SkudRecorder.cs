@@ -29,8 +29,8 @@ namespace AbizShell
     /// </summary>
     public sealed class SkudRecorder
     {
-        private const string SkudApiUrl = "https://bizwor.ru/api/skud-api";
-        private const string CamerasApiUrl = "https://bizwor.ru/api/cameras-api";
+        private const string SkudApiUrl = ServerConfig.SkudApi;
+        private const string CamerasApiUrl = ServerConfig.CamerasApi;
 
         /// <summary>Подпись в статусе на сайте: «служба» — работает фоновая служба AbizRecorder.</summary>
         public static string StatusPrefix { get; set; } = "";

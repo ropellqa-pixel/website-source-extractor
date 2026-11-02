@@ -1,3 +1,5 @@
+ABIZ project version 35 (program 5.0, build 1.17.0)
+New: works with saou.ru (site https://saou.ru, server functions on poehali.dev) while bizwor.ru / Beget is under maintenance; all server addresses in one file ServerConfig.cs.
 ABIZ project version 34 (program 4.9, build 1.16.2)
 Fix: card on USB reader never locks the screen while a card dialog is open on the SKUD page (works with older site too); number goes into the focused field.
 ABIZ project version 33 (program 4.9, build 1.16.1)

@@ -14,7 +14,7 @@ namespace AbizShell
     /// </summary>
     public static class CamerasClient
     {
-        private const string CamerasApiUrl = "https://bizwor.ru/api/cameras-api";
+        private const string CamerasApiUrl = ServerConfig.CamerasApi;
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
 
         public record Result(string? Url, string? Error, string Name = "");

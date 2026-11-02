@@ -29,7 +29,7 @@ namespace AbizShell
     /// </summary>
     public sealed class GateBridge
     {
-        private const string SkudApiUrl = "https://bizwor.ru/api/skud-api";
+        private const string SkudApiUrl = ServerConfig.SkudApi;
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
         private static GateBridge? _instance;
         private static readonly object Sync = new();
